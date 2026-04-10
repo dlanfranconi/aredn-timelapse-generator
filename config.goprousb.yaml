@@ -52,7 +52,7 @@ cameras:
       type: gather_metrics
     sky_area: 0.000,0.000,0.986,0.500
     ssim_area: 0.049,0.667,0.755,0.994
-    ssim_setpoint: 0.9
+    ssim_setpoint: 0.85
     sunrise_sunset:
       enabled: true
 global:
