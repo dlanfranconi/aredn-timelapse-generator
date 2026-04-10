@@ -11,6 +11,22 @@ from .postprocess import get_exif_dict
 logger = logging.getLogger(__name__)
 
 
+def format_shutter_speed(exposure_time: Optional[float]) -> Optional[str]:
+    """
+    Formats exposure time into a human-readable shutter speed string.
+    e.g., 0.01 -> "1/100", 2.0 -> "2s"
+    """
+    if exposure_time is None:
+        return None
+    if exposure_time >= 1:
+        # For 1.0s, return "1s". For 1.5s, return "1.5s"
+        return f"{exposure_time:.1f}".rstrip("0").rstrip(".") + "s"
+    if exposure_time > 0:
+        denom = round(1.0 / exposure_time)
+        return f"1/{denom}"
+    return str(exposure_time)
+
+
 def get_day_night_from_exif(
     exif_dict: Dict,
     camera_config: Dict,
@@ -108,14 +124,14 @@ def get_day_night_from_exif(
 
     if current_mode != "night":
         if exposure_composite_value > night_value:
-            logger.info(
+            logger.debug(
                 f"Switching to night mode because {iso}ISO * {exposure_time_s}s = {exposure_composite_value} > {night_value}. You can customize this settings in the config: camera.night_settings.trigger_exposure_composite_value"
             )
             return "night"
 
     if current_mode != "day":
         if exposure_composite_value < day_value:
-            logger.info(
+            logger.debug(
                 f"Switching to day mode because {iso}ISO * {exposure_time_s}s = {exposure_composite_value} < {day_value}. You can customize this settings in the config: camera.day_settings.trigger_exposure_composite_value"
             )
             return "day"

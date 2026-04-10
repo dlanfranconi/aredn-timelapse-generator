@@ -277,6 +277,7 @@ function createCameraListItem(camera) {
             <div class="camera-info">
                 <div class="camera-name">${camera.title}</div>
                 <div class="last-picture-time">Loading...</div>
+                <div class="camera-metadata"></div>
             </div>
             <div class="status"></div>
         </div>
@@ -482,6 +483,7 @@ function updateCamera(camera, cameraData) {
 
     const thumbImg = listItem.querySelector('.camera-header img');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
+    const cameraMetadata = listItem.querySelector('.camera-metadata');
     const status = listItem.querySelector('.status');
     const detailsImg = listItem.querySelector('.camera-details img');
     const fullscreenImageLink = listItem.querySelector('.fullscreen-image-link');
@@ -511,6 +513,12 @@ function updateCamera(camera, cameraData) {
             detailsImg.src = fullImageUrl;
             filenameLink.textContent = "Download: " + filename;
             filenameLink.href = fullImageUrl;
+
+            if (metadata.iso || metadata.shutter_speed) {
+                cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
+            } else {
+                cameraMetadata.textContent = '';
+            }
 
             const imageDate = parseTimestampFromFilename(filename);
             if (imageDate) {

@@ -55,6 +55,7 @@ from fenetre.archive import (
 )
 from fenetre.camera_utils import (
     get_day_night_from_exif,
+    format_shutter_speed,
 )
 from fenetre.config import config_load
 from fenetre.daylight import run_end_of_day
@@ -530,6 +531,8 @@ def snap(camera_name, camera_config: Dict):
                 previous_pic_fullpath,
                 os.path.join(previous_pic_fullpath, os.path.pardir, os.path.pardir),
             ),
+            "iso": previous_exif.get("iso"),
+            "shutter_speed": format_shutter_speed(previous_exif.get("exposure_time")),
         }
         metadata_path = os.path.join(previous_pic_dir, os.path.pardir, "metadata.json")
         with open(metadata_path, "w") as f:
