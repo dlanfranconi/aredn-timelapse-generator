@@ -144,6 +144,46 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertTrue(admin_server_conf["enabled"])
         self.assertEqual(admin_server_conf["listen"], "0.0.0.0:8889 [::]:8889")
 
+    def test_config_load_missing_timelapse_section(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertEqual(timelapse_conf, {})
+
+    def test_config_load_daily_timelapse_only(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+            "timelapse": {"daily_timelapse": {}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertIn("daily_timelapse", timelapse_conf)
+        self.assertNotIn("frequent_timelapse", timelapse_conf)
+        self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
+
+    def test_config_load_daily_and_frequent_timelapse(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+            "timelapse": {"daily_timelapse": {}, "frequent_timelapse": {}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertIn("daily_timelapse", timelapse_conf)
+        self.assertIn("frequent_timelapse", timelapse_conf)
+        self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
+        self.assertTrue(timelapse_conf["frequent_timelapse"]["enabled"])
+
     @patch("fenetre.config.logger")
     def test_config_load_file_not_found(self, mock_config_logging):
         with self.assertRaises(FileNotFoundError):

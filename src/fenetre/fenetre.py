@@ -979,16 +979,8 @@ def main(argv):
     archive_thread_global.start()
     logger.info(f"Starting thread {archive_thread_global.name}")
 
-    logger.info("Frequent timelapse thread will start in 10s...")
-    interruptible_sleep(10, exit_event)
-    frequent_timelapse_loop_thread_global = Thread(
-        target=frequent_timelapse_loop, daemon=True, name="frequent_timelapse_loop"
-    )
-    frequent_timelapse_loop_thread_global.start()
-    logger.info(f"Starting thread {frequent_timelapse_loop_thread_global.name}")
-
-    daily_cfg = timelapse_config.get("daily_timelapse", {}) or {}
-    if daily_cfg.get("enabled", True):
+    daily_cfg = timelapse_config.get("daily_timelapse")
+    if daily_cfg and daily_cfg.get("enabled", True):
         logger.info("Timelapse thread will start in 10s...")
         interruptible_sleep(10, exit_event)
         timelapse_thread_global = Thread(
@@ -997,7 +989,7 @@ def main(argv):
         timelapse_thread_global.start()
         logger.info(f"Starting thread {timelapse_thread_global.name}")
     else:
-        logger.info("Daily timelapse is disabled.")
+        logger.warning("Daily timelapse is disabled.")
 
     logger.info("Daylight thread will start in 10s...")
     interruptible_sleep(10, exit_event)
@@ -1007,7 +999,15 @@ def main(argv):
     daylight_thread_global.start()
     logger.info(f"Starting thread {daylight_thread_global.name}")
 
-    if timelapse_config.get("frequent_timelapse"):
+    frequent_cfg = timelapse_config.get("frequent_timelapse")
+    if frequent_cfg and frequent_cfg.get("enabled", True):
+        logger.info("Frequent timelapse thread will start in 10s...")
+        interruptible_sleep(10, exit_event)
+        frequent_timelapse_loop_thread_global = Thread(
+            target=frequent_timelapse_loop, daemon=True, name="frequent_timelapse_loop"
+        )
+        frequent_timelapse_loop_thread_global.start()
+        logger.info(f"Starting thread {frequent_timelapse_loop_thread_global.name}")
         frequent_timelapse_scheduler_thread_global = Thread(
             target=frequent_timelapse_scheduler_loop,
             daemon=True,
@@ -1018,7 +1018,7 @@ def main(argv):
             f"Starting thread {frequent_timelapse_scheduler_thread_global.name}"
         )
     else:
-        logger.info("Frequent timelapse scheduler is disabled.")
+        logger.warning("Frequent timelapse scheduler is disabled.")
 
     try:
         while not exit_event.is_set():
@@ -1387,15 +1387,19 @@ def frequent_timelapse_scheduler_loop():
     """
     This is a loop that schedules timelapse creation for the current day periodically.
     """
-    interval = timelapse_config.get("frequent_timelapse").get("interval_s", 1200)
     while not exit_event.is_set():
+        frequent_cfg = timelapse_config.get("frequent_timelapse")
+        if not frequent_cfg or not frequent_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
+        interval = frequent_cfg.get("interval_s", 1200)
         for camera_name in cameras_config:
             try:
                 logger.info(f"Time to update the frequent timelapse for {camera_name}.")
                 pic_dir, _ = get_pic_dir_and_filename(camera_name)
                 timelapse_settings_tuple = (
                     pic_dir,
-                    timelapse_config.get("frequent_timelapse"),
+                    frequent_cfg,
                 )
                 frequent_timelapse_q.append(timelapse_settings_tuple)
             except Exception as e:
@@ -1411,6 +1415,10 @@ def frequent_timelapse_scheduler_loop():
 
 def frequent_timelapse_loop():
     while not exit_event.is_set():
+        frequent_cfg = timelapse_config.get("frequent_timelapse")
+        if not frequent_cfg or not frequent_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
         if len(frequent_timelapse_q) == 0:
             time.sleep(5)
             continue
@@ -1461,13 +1469,16 @@ def timelapse_loop():
     This prevent overloading the system by creating new daily timelapses for all the cameras at the same time, this is a blocking thread to create them one at a time. Each timelapse can take several hours.
     """
     while not exit_event.is_set():
+        daily_cfg = timelapse_config.get("daily_timelapse")
+        if not daily_cfg or not daily_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
         dir_to_process = get_next_from_timelapse_queue(
             timelapse_queue_file, timelapse_queue_lock
         )
 
         if dir_to_process:
             try:
-                daily_cfg = timelapse_config.get("daily_timelapse", {}) or {}
                 result = create_timelapse(
                     dir=dir_to_process,
                     overwrite=True,
@@ -1544,8 +1555,8 @@ def daylight_loop():
                     f"Running daylight in {daily_pic_dir} with sky_area {sky_area}"
                 )
                 run_end_of_day(camera_name, daily_pic_dir, sky_area)
-                daily_cfg = timelapse_config.get("daily_timelapse", {}) or {}
-                if daily_cfg.get("enabled", True):
+                daily_cfg = timelapse_config.get("daily_timelapse")
+                if daily_cfg and daily_cfg.get("enabled", True):
                     add_to_timelapse_queue(
                         daily_pic_dir, timelapse_queue_file, timelapse_queue_lock
                     )

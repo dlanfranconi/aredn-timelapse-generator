@@ -411,8 +411,10 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
     _warn_unknown_keys("timelapse", cfg, allowed)
     out: Dict = {}
 
-    ft = _dict(cfg.get("frequent_timelapse"), "timelapse.frequent_timelapse", errors)
-    if ft is not None:
+    if "frequent_timelapse" in cfg:
+        ft = _dict(
+            cfg.get("frequent_timelapse"), "timelapse.frequent_timelapse", errors
+        )
         ft_out = {}
         ft_out["enabled"] = _bool(
             ft.get("enabled"),
@@ -439,8 +441,8 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
         )
         out["frequent_timelapse"] = ft_out
 
-    dt = _dict(cfg.get("daily_timelapse"), "timelapse.daily_timelapse", errors)
-    if dt is not None:
+    if "daily_timelapse" in cfg:
+        dt = _dict(cfg.get("daily_timelapse"), "timelapse.daily_timelapse", errors)
         dt_out = {}
         dt_out["enabled"] = _bool(
             dt.get("enabled"), "timelapse.daily_timelapse.enabled", errors, default=True
@@ -721,7 +723,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "bluetooth_retry_delay_s",
             "gopro_usb",
             "name",
-            "iface"
+            "iface",
         ):
             if k in cam:
                 cam_out[k] = cam[k]

@@ -1,0 +1,98 @@
+admin_server:
+  enabled: true
+  listen: 0.0.0.0:8889
+cameras:
+  alertcal-axis-mttamalpaiseast:
+    url: https://cameras.alertcalifornia.org/public-camera-data/Axis-TamEast/latest-frame.jpg?
+    snap_interval_s: 60
+    lat: 37.929059
+    lon: -122.577743
+    sky_area: 650,0,1650,200
+    cache_bust: true
+  alertcal-axis-mttamalpaiswest:
+    url: https://cameras.alertcalifornia.org/public-camera-data/Axis-TamWest/latest-frame.jpg?
+    snap_interval_s: 60
+    lat: 37.924064
+    lon: -122.596417
+    sky_area: 650,0,1650,200
+    cache_bust: true
+  sheltons-tiburon:
+    url: http://www.sheltons.net/wx/webcam.jpg
+    snap_interval_s: 480 # 8 minutes
+    lat: 37.8848134 #approximate
+    lon: -122.4683401
+    sky_area: 0,0,1280,200 
+    postprocessing:
+    - background_color: (100, 100, 100)
+      color: white
+      enabled: true
+      position: bottom_right
+      size: 24
+      type: timestamp
+    - enabled: true
+      major_bar_color: grey
+      major_bar_width: 4
+      minor_bar_color: '#333333'
+      minor_bar_width: 2
+      overlay_bar_color: rgba(255, 0, 0, 0.5)
+      overlay_bar_width: 4
+      overlay_border_color: white
+      overlay_border_width: 3
+      overlay_rect_height_ratio: 1
+      overlay_rect_width: 12
+      overlay_width: 700
+      padding: 5
+      position: bottom_left
+      type: sun_path
+global:
+  log_dir: /srv/fenetre/logs
+  logging_level: INFO
+  logging_levels:
+#    fenetre.mqtt: DEBUG
+  storage_management:
+    check_interval_s: 300
+    dry_run: false
+    enabled: true
+    work_dir_max_size_GB: 30
+  timezone: America/Los_Angeles
+  deployment_name: dev.fenetre.cam
+  user_agent: "Your friendly neighbor at sfbay.fenetre.cam"
+  ui:
+    #    fullscreen_camera: gopro-hero-6
+    landing_page: list
+    show_main_website_icon: true
+    show_map_by_default: true
+    show_github_icon: true
+    linked_deployments: 
+      - base_url: https://isitfoggy.com
+      - base_url: https://sfwemcams.fenetre.cam
+      - base_url: https://sfbay.fenetre.cam
+      - base_url: https://360view.club
+    map_privacy_radius_m: 1000 # 1km circle shown instead of a pin; set to 0 to disable
+    map_privacy_jitter_m: 500 # optional center jitter in meters (clamped to the radius)
+  work_dir: /srv/fenetre/data
+  mqtt:
+    enabled: true
+    host: localhost
+    port: 1883
+    username: fenetre_fenetre.cam
+    password: null
+    base_topic: fenetre/fenetre.cam
+    discovery_prefix: homeassistant
+http_server:
+  enabled: true
+  listen: 0.0.0.0:8888
+timelapse:
+ daily_timelapse:
+   enabled: true
+   ffmpeg_2pass: true
+   ffmpeg_options: -c:v libvpx-vp9 -b:v 7M
+   file_extension: webm
+   framerate: 60
+ frequent_timelapse:
+   enabled: true
+   ffmpeg_2pass: false
+   ffmpeg_options: -extbrc 1 -look_ahead 1 -look_ahead_depth 60 -g 120 -bf 3 -preset
+     veryslow -c:v hevc_qsv -b:v 4M -maxrate 5M -bufsize 8M -profile:v main -movflags
+     +faststart
+   file_extension: mp4
