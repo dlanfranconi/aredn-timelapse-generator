@@ -306,7 +306,7 @@ class GoProUtilityThread(threading.Thread):
         self.gopro_usb = camera_config.get("gopro_usb", False)
 
 
-    def _enable_usb_mode(ip_address: str):
+    def _enable_usb_mode(self, ip_address: str):
         url = f"http://{ip_address}/gopro/camera/control/wired_usb?p=1"
         logger.info("Enabling USB mode")
         requests.get(url)
