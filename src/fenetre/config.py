@@ -496,6 +496,15 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
                 min_value=0.0,
             )
 
+        if "max_brightness" in settings_block:
+            block_out["max_brightness"] = _int(
+                settings_block.get("max_brightness"),
+                f"{path_prefix}.max_brightness",
+                errors,
+                min_value=0,
+                max_value=255,
+            )
+
         if "urlpaths_commands" in settings_block:
             if isinstance(settings_block["urlpaths_commands"], list):
                 block_out["urlpaths_commands"] = settings_block["urlpaths_commands"]

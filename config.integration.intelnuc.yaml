@@ -104,7 +104,6 @@ global:
       - base_url: https://360view.club
     map_privacy_radius_m: 1000 # 1km circle shown instead of a pin; set to 0 to disable
     map_privacy_jitter_m: 500 # optional center jitter in meters (clamped to the radius)
-
   work_dir: /srv/fenetre/data
   mqtt:
     enabled: true

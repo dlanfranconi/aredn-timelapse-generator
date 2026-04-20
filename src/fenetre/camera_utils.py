@@ -85,14 +85,14 @@ def get_day_night_from_exif(
 
     # Optional astro logic section
     if astro_settings:
-        if current_mode == "astro" and image_path:
+        max_brightness = astro_settings.get("max_brightness")
+        if current_mode == "astro" and image_path and max_brightness is not None:
             try:
                 with Image.open(image_path) as img:
                     stat = ImageStat.Stat(img.convert("L"))
                     mean_brightness = stat.mean[0]
-                    max_brightness = astro_settings.get("max_brightness", 200)
                     if mean_brightness > max_brightness:
-                        logger.info(
+                        logger.warning(
                             f"Switching back to night mode because picture is exceedingly bright (mean brightness {mean_brightness:.2f} > {max_brightness})"
                         )
                         return "night"
