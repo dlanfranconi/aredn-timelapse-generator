@@ -17,7 +17,6 @@ dependencies = [
     "paho-mqtt",
     "waitress",
     "prometheus-client",
-    "pyexiv2",
     "scikit-image",
     "Pillow",
     "cairosvg",
@@ -29,6 +28,9 @@ gopro = [
     "bleak",
     "beautifulsoup4",
     "netifaces",
+]
+pyexiv2 = [
+    "pyexiv2",
 ]
 
 [project.scripts]
