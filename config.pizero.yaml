@@ -1,0 +1,36 @@
+cameras:
+  picam-hq-6mm:
+    capture_method: picamera2
+    exposure_value: 1.5
+    denoise_mode: HighQuality
+    lat: 37.6
+    lon: -122.4
+    sunrise_sunset:
+      enabled: True
+    postprocessing:
+      - type: resize
+        height: 1440
+      - type: timestamp
+        enabled: true
+        size: 24
+        color: white
+        background_color: "(100, 100, 100)"
+    sky_area: 0,0,2560,500
+    ssim_area: 0,0,2560,500
+    ssim_setpoint: 0.9
+    redirect_stderr: true
+global:
+  timezone: America/Los_Angeles
+  work_dir: /srv/fenetre/data
+  deployement_name: zerohq.fenetre.cam
+  storage_management:
+    enabled: true
+    check_interval_s: 600
+    work_dir_max_size_GB: 16
+http_server:
+  enabled: false #We have nignx
+admin_server:
+  enabled: true #Useful for metrics
+
+timelapse:
+  daily_timelapse:

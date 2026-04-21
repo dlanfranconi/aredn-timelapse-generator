@@ -5,7 +5,7 @@ from io import BytesIO
 import sys
 from types import SimpleNamespace
 
-from fenetre.fenetre import Picamera2Capture, get_pic_from_url
+from fenetre.fenetre import Picamera2Capture, get_pic_from_url, get_ssim_for_area
 
 
 class TestFenetre(unittest.TestCase):
@@ -153,6 +153,14 @@ class TestFenetre(unittest.TestCase):
                 "AnalogueGain": 2.0,
             },
         )
+
+    def test_get_ssim_for_area_clamps_crop_to_image_size(self):
+        image1 = Image.new("RGB", (1921, 1440), color="black")
+        image2 = Image.new("RGB", (1921, 1440), color="black")
+
+        ssim = get_ssim_for_area(image1, image2, "0,0,2560,500")
+
+        self.assertEqual(ssim, 1.0)
 
 if __name__ == '__main__':
     unittest.main()

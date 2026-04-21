@@ -137,14 +137,14 @@ create_runtime_dirs() {
   log "Ensuring runtime directories exist"
   sudo mkdir -p "${DATA_DIR}" "${DATA_DIR}/logs"
   sudo chown -R "${APP_USER}:${APP_GROUP}" "${DATA_DIR}"
-  sudo chmod -R u+rwX,g+rwX,o-rwx "${DATA_DIR}"
+  sudo chmod -R u+rwX,g+rwX,o+rX,o-w "${DATA_DIR}"
   sudo find "${DATA_DIR}" -type d -exec chmod g+s {} +
 
   # Keep new files group-writable for the fenetre group even when writers use
   # the usual 022 umask. The setgid bit above keeps group ownership stable.
   sudo find "${DATA_DIR}" -type d -exec setfacl \
-    -m g::rwx,m::rwx \
-    -m d:u::rwx,d:g::rwx,d:o::---,d:m::rwx \
+    -m g::rwx,o::rx,m::rwx \
+    -m d:u::rwx,d:g::rwx,d:o::rx,d:m::rwx \
     {} +
 }
 

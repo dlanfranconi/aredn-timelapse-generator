@@ -307,51 +307,71 @@ class Picamera2Capture:
     """Reusable native Raspberry Pi camera capture wrapper."""
 
     def __init__(self, camera_config: Dict):
+        self.picam2 = None
+        self.closed = True
+        self.started = False
+
         from libcamera import controls
         from picamera2 import Picamera2
 
-        self.camera_config = camera_config
-        self.controls = controls
-        tuning = None
-        if camera_config.get("tuning_file"):
-            tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
+        try:
+            self.camera_config = camera_config
+            self.controls = controls
+            tuning = None
+            if camera_config.get("tuning_file"):
+                tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
 
-        if tuning is not None:
-            try:
-                self.picam2 = Picamera2(tuning=tuning)
-            except TypeError:
+            if tuning is not None:
+                try:
+                    self.picam2 = Picamera2(tuning=tuning)
+                except TypeError:
+                    self.picam2 = Picamera2()
+            else:
                 self.picam2 = Picamera2()
-        else:
-            self.picam2 = Picamera2()
+            self.closed = False
 
-        still_config_kwargs = {}
-        if camera_config.get("main_size"):
-            still_config_kwargs["main"] = {"size": tuple(camera_config["main_size"])}
-        if camera_config.get("buffer_count"):
-            still_config_kwargs["buffer_count"] = camera_config["buffer_count"]
-        config = self.picam2.create_still_configuration(**still_config_kwargs)
+            still_config_kwargs = {}
+            if camera_config.get("main_size"):
+                still_config_kwargs["main"] = {"size": tuple(camera_config["main_size"])}
+            if camera_config.get("buffer_count"):
+                still_config_kwargs["buffer_count"] = camera_config["buffer_count"]
+            config = self.picam2.create_still_configuration(**still_config_kwargs)
 
-        if tuning is not None:
-            try:
-                self.picam2.configure(config, tuning=tuning)
-            except TypeError:
+            if tuning is not None:
+                try:
+                    self.picam2.configure(config, tuning=tuning)
+                except TypeError:
+                    self.picam2.configure(config)
+            else:
                 self.picam2.configure(config)
-        else:
-            self.picam2.configure(config)
 
-        self.picam2.start()
-        time.sleep(float(camera_config.get("startup_warmup_s", 1.0)))
-        self.last_mode = None
-        self.closed = False
+            self.picam2.start()
+            self.started = True
+            time.sleep(float(camera_config.get("startup_warmup_s", 1.0)))
+            self.last_mode = None
+        except Exception:
+            self.close()
+            raise
 
     def close(self) -> None:
         if self.closed:
             return
         self.closed = True
+        if self.picam2 is None:
+            return
+        if self.started:
+            try:
+                self.picam2.stop()
+            except Exception:
+                logger.debug("Failed to stop picamera2 cleanly.", exc_info=True)
+            finally:
+                self.started = False
         try:
-            self.picam2.stop()
+            self.picam2.close()
+        except AttributeError:
+            pass
         except Exception:
-            logger.debug("Failed to stop picamera2 cleanly.", exc_info=True)
+            logger.debug("Failed to close picamera2 cleanly.", exc_info=True)
 
     def __del__(self):
         self.close()
@@ -746,6 +766,22 @@ def get_ssim_for_area(
                 int(crop_points_list[2]),
                 int(crop_points_list[3]),
             )
+
+        img_width, img_height = image1.size
+        x1, y1, x2, y2 = crop_points
+        crop_points = (
+            max(0, min(img_width, x1)),
+            max(0, min(img_height, y1)),
+            max(0, min(img_width, x2)),
+            max(0, min(img_height, y2)),
+        )
+        if crop_points[2] <= crop_points[0] or crop_points[3] <= crop_points[1]:
+            logger.warning(
+                "Invalid SSIM crop area %s for image size %s; skipping SSIM crop.",
+                area,
+                image1.size,
+            )
+            return 1.0
 
         logger.debug(f"SSIM crop points: {crop_points}")
         target_image1 = image1.resize((50, 50), box=crop_points)
