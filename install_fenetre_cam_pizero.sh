@@ -13,6 +13,10 @@ REPO_URL="${REPO_URL:-https://github.com/matfra/fenetre.cam.git}"
 BRANCH="${BRANCH:-feature/pizero-compat}"
 DATA_DIR="${DATA_DIR:-/srv/fenetre/data}"
 VENV_DIR="${VENV_DIR:-${APP_DIR}/venv}"
+SERVICE_NAME="${SERVICE_NAME:-fenetre.service}"
+NGINX_SITE_NAME="${NGINX_SITE_NAME:-fenetre-cam}"
+DISABLE_NGINX_DEFAULT="${DISABLE_NGINX_DEFAULT:-1}"
+LOCAL_CONFIG="${LOCAL_CONFIG:-config.smaller.local.yaml}"
 
 PYTHON_PACKAGES=(
   python3-pytz
@@ -86,6 +90,7 @@ install_apt_packages() {
 checkout_branch() {
   if git -C "${APP_DIR}" show-ref --verify --quiet "refs/heads/${BRANCH}"; then
     if git -C "${APP_DIR}" checkout "${BRANCH}"; then
+      git -C "${APP_DIR}" merge --ff-only "origin/${BRANCH}"
       return
     fi
   else
@@ -142,6 +147,29 @@ create_runtime_dirs() {
     {} +
 }
 
+install_systemd_unit() {
+  log "Installing disabled systemd unit"
+
+  sudo install -m 0644 "${APP_DIR}/fenetre.service" "/etc/systemd/system/${SERVICE_NAME}"
+  sudo systemctl daemon-reload
+}
+
+install_nginx_site() {
+  log "Installing nginx site configuration"
+
+  sudo install -m 0644 \
+    "${APP_DIR}/nginx-fenetre-cam-site.conf" \
+    "/etc/nginx/sites-available/${NGINX_SITE_NAME}"
+  sudo ln -sfn \
+    "/etc/nginx/sites-available/${NGINX_SITE_NAME}" \
+    "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
+  if [[ "${DISABLE_NGINX_DEFAULT}" == "1" ]]; then
+    sudo rm -f /etc/nginx/sites-enabled/default
+  fi
+  sudo nginx -t
+  sudo systemctl reload-or-restart nginx
+}
+
 install_package() {
   log "Installing fenetre.cam into ${VENV_DIR}"
 
@@ -160,11 +188,21 @@ main() {
   sync_source
   create_runtime_dirs
   install_package
+  install_systemd_unit
+  install_nginx_site
 
   log "Bootstrap complete"
   echo "App dir:  ${APP_DIR}"
   echo "Branch:   ${BRANCH}"
   echo "Data dir: ${DATA_DIR}"
+  echo
+  echo "Local synthetic run:"
+  echo "  mkdir -p /tmp/fenetre-smaller/data /tmp/fenetre-smaller/logs"
+  echo "  ${VENV_DIR}/bin/fenetre --config=${APP_DIR}/${LOCAL_CONFIG}"
+  echo
+  echo "Enable production service:"
+  echo "  sudo systemctl enable --now ${SERVICE_NAME}"
+  echo
   echo "Run:      sudo -u ${APP_USER} ${VENV_DIR}/bin/fenetre --config=${APP_DIR}/config.yaml"
 }
 
