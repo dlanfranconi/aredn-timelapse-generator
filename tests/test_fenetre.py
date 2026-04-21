@@ -5,7 +5,8 @@ from io import BytesIO
 import sys
 from types import SimpleNamespace
 
-from fenetre.fenetre import Picamera2Capture, get_pic_from_url, get_ssim_for_area
+from fenetre.fenetre import get_pic_from_url, get_ssim_for_area
+from fenetre.picamera import Picamera2Capture
 
 
 class TestFenetre(unittest.TestCase):
