@@ -22,13 +22,13 @@ dependencies = [
     "Pillow",
     "cairosvg",
     "piexif",
-    "netifaces",
 ]
 
 [project.optional-dependencies]
 gopro = [
     "bleak",
     "beautifulsoup4",
+    "netifaces",
 ]
 
 [project.scripts]

@@ -1,5 +1,4 @@
 import requests
-import netifaces
 import logging
 import time
 import socket

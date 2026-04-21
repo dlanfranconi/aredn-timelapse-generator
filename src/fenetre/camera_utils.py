@@ -1,9 +1,7 @@
 import logging
 from typing import Dict, Optional
 from urllib.parse import urlparse
-import pyexiv2
 
-import piexif
 import requests
 from PIL import Image, ImageStat
 from .postprocess import get_exif_dict

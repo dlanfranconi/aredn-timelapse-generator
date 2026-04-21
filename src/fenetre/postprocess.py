@@ -7,12 +7,17 @@ from typing import Dict, Optional, Tuple, Union
 
 import cairosvg
 import numpy as np
-import pyexiv2
+import piexif
 import pytz  # To get timezone from global_config easily
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from skimage import exposure
 
 from .sun_path_svg import create_sun_path_svg, overlay_time_bar
+
+try:
+    import pyexiv2
+except ImportError:
+    pyexiv2 = None
 
 logger = logging.getLogger(__name__)
 
@@ -535,48 +540,102 @@ def get_exif_dict(
     image_source: Union[bytes, bytearray, memoryview, str, os.PathLike],
 ) -> Dict:
     """
-    Reads metadata from image bytes or a filesystem path using pyexiv2 and returns a dictionary.
+    Reads metadata from image bytes or a filesystem path and returns a dictionary.
+
+    Prefer pyexiv2 when the expected API is available, but fall back to piexif for
+    platforms where the Debian pyexiv2 package exposes a different interface.
     """
-    exif_values = {}
-    try:
+    def normalize_numeric(value, default=None):
+        if value is None:
+            return default
+        try:
+            if isinstance(value, tuple) and len(value) == 2:
+                num, den = value
+                if den == 0:
+                    return default
+                return float(num) / float(den)
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="ignore")
+            if isinstance(value, str) and "/" in value:
+                num, den = value.split("/", 1)
+                den_f = float(den)
+                if den_f == 0:
+                    return default
+                return float(num) / den_f
+            return float(value)
+        except (ValueError, TypeError, ZeroDivisionError):
+            return default
+
+    def parse_pyexiv2_exif(exif: Dict) -> Dict:
+        return {
+            "iso": normalize_numeric(exif.get("Exif.Photo.ISOSpeedRatings")),
+            "focal_length": normalize_numeric(exif.get("Exif.Photo.FocalLength")),
+            "aperture": normalize_numeric(exif.get("Exif.Photo.FNumber")),
+            "exposure_time": normalize_numeric(exif.get("Exif.Photo.ExposureTime")),
+            "white_balance": normalize_numeric(exif.get("Exif.Photo.WhiteBalance")),
+            "width": normalize_numeric(exif.get("Exif.Image.ImageWidth"))
+            or normalize_numeric(exif.get("Exif.Photo.PixelXDimension")),
+            "height": normalize_numeric(exif.get("Exif.Image.ImageLength"))
+            or normalize_numeric(exif.get("Exif.Photo.PixelYDimension")),
+        }
+
+    def parse_piexif_exif(exif_dict: Dict, image_size: Optional[Tuple[int, int]]) -> Dict:
+        zeroth = exif_dict.get("0th", {})
+        exif = exif_dict.get("Exif", {})
+        width = normalize_numeric(zeroth.get(piexif.ImageIFD.ImageWidth))
+        height = normalize_numeric(zeroth.get(piexif.ImageIFD.ImageLength))
+        if width is None:
+            width = normalize_numeric(exif.get(piexif.ExifIFD.PixelXDimension))
+        if height is None:
+            height = normalize_numeric(exif.get(piexif.ExifIFD.PixelYDimension))
+        if image_size:
+            width = width or float(image_size[0])
+            height = height or float(image_size[1])
+        return {
+            "iso": normalize_numeric(exif.get(piexif.ExifIFD.ISOSpeedRatings)),
+            "focal_length": normalize_numeric(exif.get(piexif.ExifIFD.FocalLength)),
+            "aperture": normalize_numeric(exif.get(piexif.ExifIFD.FNumber)),
+            "exposure_time": normalize_numeric(exif.get(piexif.ExifIFD.ExposureTime)),
+            "white_balance": normalize_numeric(exif.get(piexif.ExifIFD.WhiteBalance)),
+            "width": width,
+            "height": height,
+        }
+
+    def load_with_piexif() -> Dict:
         if isinstance(image_source, (str, os.PathLike)):
-            with pyexiv2.Image(str(Path(image_source))) as img:
-                exif = img.read_exif()
+            source = str(Path(image_source))
+            exif_dict = piexif.load(source)
+            with Image.open(source) as img:
+                image_size = img.size
         elif isinstance(image_source, (bytes, bytearray, memoryview)):
-            with pyexiv2.ImageData(bytes(image_source)) as img:
-                exif = img.read_exif()
+            source = bytes(image_source)
+            exif_dict = piexif.load(source)
+            with Image.open(io.BytesIO(source)) as img:
+                image_size = img.size
         else:
             raise TypeError(f"Unsupported image source type: {type(image_source)}")
+        return parse_piexif_exif(exif_dict, image_size)
 
-        def get_value(key, default=None):
-            v = exif.get(key)
-            if v is None:
-                return default
-            try:
-                if isinstance(v, str) and "/" in v:
-                    num, den = v.split("/")
-                    return float(num) / float(den)
-                return float(v)
-            except (ValueError, TypeError):
-                return default
+    if not isinstance(image_source, (str, os.PathLike, bytes, bytearray, memoryview)):
+        raise TypeError(f"Unsupported image source type: {type(image_source)}")
 
-        exif_values["iso"] = get_value("Exif.Photo.ISOSpeedRatings")
-        exif_values["focal_length"] = get_value("Exif.Photo.FocalLength")
-        exif_values["aperture"] = get_value("Exif.Photo.FNumber")
-        exif_values["exposure_time"] = get_value("Exif.Photo.ExposureTime")
-        exif_values["white_balance"] = get_value("Exif.Photo.WhiteBalance")
-        exif_values["width"] = get_value("Exif.Image.ImageWidth") or get_value(
-            "Exif.Photo.PixelXDimension"
-        )
-        exif_values["height"] = get_value("Exif.Image.ImageLength") or get_value(
-            "Exif.Photo.PixelYDimension"
-        )
+    if pyexiv2 is not None and hasattr(pyexiv2, "Image") and hasattr(pyexiv2, "ImageData"):
+        try:
+            if isinstance(image_source, (str, os.PathLike)):
+                with pyexiv2.Image(str(Path(image_source))) as img:
+                    return parse_pyexiv2_exif(img.read_exif())
+            with pyexiv2.ImageData(bytes(image_source)) as img:
+                return parse_pyexiv2_exif(img.read_exif())
+        except Exception as e:
+            logger.warning(
+                "pyexiv2 metadata read failed, falling back to piexif: %s", e
+            )
 
+    try:
+        return load_with_piexif()
     except Exception as e:
-        logger.error(f"Error reading metadata with pyexiv2: {e}")
+        logger.error(f"Error reading metadata from image: {e}")
         raise
-
-    return exif_values
 
 
 def publish_metrics_from_exif_dict(exif_dict: Dict, camera_name: str):

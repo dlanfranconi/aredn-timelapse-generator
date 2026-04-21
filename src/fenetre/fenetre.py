@@ -11,6 +11,7 @@ import sys
 from collections import deque
 from datetime import datetime, timedelta
 from functools import partial
+from logging.handlers import RotatingFileHandler
 from threading import Thread
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -75,7 +76,7 @@ _GOPRO_BLE_AVAILABLE = True
 try:
     from fenetre.gopro_utility import GoProUtilityThread, format_gopro_sd_card
 except ModuleNotFoundError as e:
-    if e.name and e.name.startswith("bleak"):
+    if e.name and (e.name.startswith("bleak") or e.name == "netifaces"):
         GoProUtilityThread = None  # type: ignore[assignment]
         format_gopro_sd_card = None  # type: ignore[assignment]
         _GOPRO_BLE_AVAILABLE = False
