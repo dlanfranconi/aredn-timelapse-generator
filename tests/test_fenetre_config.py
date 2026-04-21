@@ -155,6 +155,42 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(timelapse_conf, {})
 
+    def test_config_load_picamera2_controls(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "picam": {
+                    "capture_method": "picamera2",
+                    "main_size": [4056, 3040],
+                    "buffer_count": 1,
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "exposure_value": 1.5,
+                    "denoise_mode": "HighQuality",
+                    "controls": {"AwbEnable": True},
+                    "night_settings": {
+                        "ae_enable": False,
+                        "exposure_time": 1000000,
+                        "analogue_gain": 2.0,
+                    },
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        picam = cameras_conf["picam"]
+        self.assertEqual(picam["capture_method"], "picamera2")
+        self.assertEqual(picam["main_size"], [4056, 3040])
+        self.assertEqual(picam["buffer_count"], 1)
+        self.assertEqual(picam["exposure_value"], 1.5)
+        self.assertEqual(picam["denoise_mode"], "HighQuality")
+        self.assertEqual(picam["controls"], {"AwbEnable": True})
+        self.assertEqual(picam["night_settings"]["exposure_time"], 1000000)
+        self.assertEqual(picam["night_settings"]["analogue_gain"], 2.0)
+        self.assertFalse(picam["night_settings"]["ae_enable"])
+
     def test_config_load_daily_timelapse_only(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

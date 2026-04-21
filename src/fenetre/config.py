@@ -513,6 +513,49 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
                     f"{path_prefix}.urlpaths_commands: expected a list of strings"
                 )
 
+        if "controls" in settings_block:
+            if isinstance(settings_block["controls"], dict):
+                block_out["controls"] = settings_block["controls"]
+            else:
+                errors.append(f"{path_prefix}.controls: expected mapping")
+
+        if "exposure_time" in settings_block:
+            block_out["exposure_time"] = _int(
+                settings_block.get("exposure_time"),
+                f"{path_prefix}.exposure_time",
+                errors,
+                min_value=1,
+            )
+
+        if "analogue_gain" in settings_block:
+            block_out["analogue_gain"] = _float(
+                settings_block.get("analogue_gain"),
+                f"{path_prefix}.analogue_gain",
+                errors,
+                min_value=0.0,
+            )
+
+        if "exposure_value" in settings_block:
+            block_out["exposure_value"] = _float(
+                settings_block.get("exposure_value"),
+                f"{path_prefix}.exposure_value",
+                errors,
+            )
+
+        if "denoise_mode" in settings_block:
+            block_out["denoise_mode"] = _str(
+                settings_block.get("denoise_mode"),
+                f"{path_prefix}.denoise_mode",
+                errors,
+            )
+
+        if "ae_enable" in settings_block:
+            block_out["ae_enable"] = _bool(
+                settings_block.get("ae_enable"),
+                f"{path_prefix}.ae_enable",
+                errors,
+            )
+
         return block_out
 
     if day_settings := validate_settings_block("day_settings"):
@@ -725,7 +768,14 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "tuning_file",
             "exposure_time",
             "analogue_gain",
+            "exposure_value",
             "denoise_mode",
+            "ae_enable",
+            "controls",
+            "main_size",
+            "buffer_count",
+            "startup_warmup_s",
+            "control_warmup_s",
             "gopro_ble_identifier",
             "bluetooth_adapter",
             "gopro_utility_poll_interval_s",

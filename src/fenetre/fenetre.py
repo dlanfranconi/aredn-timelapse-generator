@@ -303,40 +303,116 @@ def get_pic_from_local_command(
     return Image.open(BytesIO(s.stdout))
 
 
-def get_pic_from_picamera2(camera_config: Dict) -> Image.Image:
+class Picamera2Capture:
+    """Reusable native Raspberry Pi camera capture wrapper."""
+
+    def __init__(self, camera_config: Dict):
+        from libcamera import controls
+        from picamera2 import Picamera2
+
+        self.camera_config = camera_config
+        self.controls = controls
+        tuning = None
+        if camera_config.get("tuning_file"):
+            tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
+
+        if tuning is not None:
+            try:
+                self.picam2 = Picamera2(tuning=tuning)
+            except TypeError:
+                self.picam2 = Picamera2()
+        else:
+            self.picam2 = Picamera2()
+
+        still_config_kwargs = {}
+        if camera_config.get("main_size"):
+            still_config_kwargs["main"] = {"size": tuple(camera_config["main_size"])}
+        if camera_config.get("buffer_count"):
+            still_config_kwargs["buffer_count"] = camera_config["buffer_count"]
+        config = self.picam2.create_still_configuration(**still_config_kwargs)
+
+        if tuning is not None:
+            try:
+                self.picam2.configure(config, tuning=tuning)
+            except TypeError:
+                self.picam2.configure(config)
+        else:
+            self.picam2.configure(config)
+
+        self.picam2.start()
+        time.sleep(float(camera_config.get("startup_warmup_s", 1.0)))
+        self.last_mode = None
+        self.closed = False
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self.picam2.stop()
+        except Exception:
+            logger.debug("Failed to stop picamera2 cleanly.", exc_info=True)
+
+    def __del__(self):
+        self.close()
+
+    def _denoise_control_value(self, denoise_mode):
+        enum = self.controls.draft.NoiseReductionModeEnum
+        if not isinstance(denoise_mode, str):
+            return denoise_mode
+        try:
+            return getattr(enum, denoise_mode)
+        except AttributeError:
+            logger.warning(
+                "Unknown picamera2 denoise_mode '%s'; passing value through.",
+                denoise_mode,
+            )
+            return denoise_mode
+
+    def _controls_from_config(self, settings: Dict) -> Dict:
+        control_values = dict(settings.get("controls", {}) or {})
+
+        if settings.get("exposure_time") is not None:
+            control_values["ExposureTime"] = int(settings["exposure_time"])
+        if settings.get("analogue_gain") is not None:
+            control_values["AnalogueGain"] = float(settings["analogue_gain"])
+        if settings.get("exposure_value") is not None:
+            control_values["ExposureValue"] = float(settings["exposure_value"])
+        if settings.get("denoise_mode") is not None:
+            control_values["NoiseReductionMode"] = self._denoise_control_value(
+                settings["denoise_mode"]
+            )
+        if settings.get("ae_enable") is not None:
+            control_values["AeEnable"] = bool(settings["ae_enable"])
+
+        return control_values
+
+    def capture(self, mode: str = "unknown") -> Image.Image:
+        controls_to_apply = self._controls_from_config(self.camera_config)
+        mode_settings = self.camera_config.get(f"{mode}_settings", {})
+        controls_to_apply.update(self._controls_from_config(mode_settings))
+
+        if controls_to_apply:
+            self.picam2.set_controls(controls_to_apply)
+            if mode != self.last_mode:
+                time.sleep(float(self.camera_config.get("control_warmup_s", 0.5)))
+        self.last_mode = mode
+
+        jpeg_io = BytesIO()
+        self.picam2.capture_file(jpeg_io, format="jpeg")
+        jpeg_bytes = jpeg_io.getvalue()
+        pic = Image.open(BytesIO(jpeg_bytes))
+        pic.info["exif"] = pic.info.get("exif", b"")
+        return pic
+
+
+def get_pic_from_picamera2(camera_config: Dict, mode: str = "unknown") -> Image.Image:
     """Captures a picture from a Raspberry Pi camera using the picamera2 library."""
-    from libcamera import controls
-    from picamera2 import Picamera2
-
-    picam2 = Picamera2()
-
-    config = picam2.create_still_configuration()
-
-    # Apply tuning file if specified
-    if camera_config.get("tuning_file"):
-        tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
-        picam2.configure(config, tuning=tuning)
-    else:
-        picam2.configure(config)
-
-    # Set controls
-    if camera_config.get("exposure_time"):
-        picam2.set_controls({"ExposureTime": camera_config["exposure_time"]})
-    if camera_config.get("analogue_gain"):
-        picam2.set_controls({"AnalogueGain": camera_config["analogue_gain"]})
-    if camera_config.get("denoise_mode"):
-        picam2.set_controls(
-            {"NoiseReductionMode": controls.draft.NoiseReductionModeEnum.HighQuality}
-        )
-
-    picam2.start()
-    time.sleep(1)
-
-    # Capture to a memory buffer
-    buffer = picam2.capture_file("-")
-    picam2.stop()
-
-    return Image.open(BytesIO(buffer))
+    capture = Picamera2Capture(camera_config)
+    try:
+        return capture.capture(mode)
+    finally:
+        capture.close()
 
 
 def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
@@ -385,6 +461,8 @@ def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
 
 
 def snap(camera_name, camera_config: Dict):
+    picamera2_capture = None
+
     def clear_camera_gauges():
         for mode in ("unknown", "day", "night", "astro"):
             try:
@@ -420,6 +498,7 @@ def snap(camera_name, camera_config: Dict):
 
     # This is the capture function which is the only place in this snap thread where we have image source type specific info and logic.
     def capture(mode: str) -> Image.Image:
+        nonlocal picamera2_capture
 
         logger.info("%s: Fetching new picture.", camera_name)
 
@@ -462,9 +541,10 @@ def snap(camera_name, camera_config: Dict):
                 raise
             return Image.open(BytesIO(jpeg_bytes))
 
-        # capture_method: picamera2 is still to be implemented
         if camera_config.get("capture_method") == "picamera2":
-            return get_pic_from_picamera2(camera_config)
+            if picamera2_capture is None:
+                picamera2_capture = Picamera2Capture(camera_config)
+            return picamera2_capture.capture(mode)
         return None
 
     # Here we take the very first picture, we will only save it when we start the main loop. I don't remember why I implemented the loop that way but it made sense at the time.

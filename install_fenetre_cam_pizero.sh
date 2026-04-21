@@ -34,6 +34,7 @@ PYTHON_PACKAGES=(
   python3-venv
   python3-requests
   python3-pil
+  python3-picamera2
 )
 
 SYSTEM_PACKAGES=(

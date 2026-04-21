@@ -2,8 +2,10 @@ import unittest
 from unittest.mock import patch, MagicMock
 from PIL import Image
 from io import BytesIO
+import sys
+from types import SimpleNamespace
 
-from fenetre.fenetre import get_pic_from_url
+from fenetre.fenetre import Picamera2Capture, get_pic_from_url
 
 
 class TestFenetre(unittest.TestCase):
@@ -58,6 +60,98 @@ class TestFenetre(unittest.TestCase):
             "http://example.com/image.jpg",
             timeout=10,
             headers={'Accept': 'image/*,*'}
+        )
+
+    def test_picamera2_capture_applies_base_and_mode_controls(self):
+        instances = []
+
+        class FakePicamera2:
+            @staticmethod
+            def load_tuning_file(path):
+                return {"tuning_file": path}
+
+            def __init__(self, tuning=None):
+                self.tuning = tuning
+                self.configured = None
+                self.controls = []
+                self.started = False
+                self.stopped = False
+                instances.append(self)
+
+            def create_still_configuration(self, **kwargs):
+                return {"still": kwargs}
+
+            def configure(self, config, tuning=None):
+                self.configured = (config, tuning)
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                self.stopped = True
+
+            def set_controls(self, controls):
+                self.controls.append(controls)
+
+            def capture_file(self, output, format=None):
+                img = Image.new("RGB", (8, 6), color="red")
+                img.save(output, format="JPEG")
+
+        fake_controls = SimpleNamespace(
+            draft=SimpleNamespace(
+                NoiseReductionModeEnum=SimpleNamespace(HighQuality=42)
+            )
+        )
+
+        old_picamera2 = sys.modules.get("picamera2")
+        old_libcamera = sys.modules.get("libcamera")
+        sys.modules["picamera2"] = SimpleNamespace(Picamera2=FakePicamera2)
+        sys.modules["libcamera"] = SimpleNamespace(controls=fake_controls)
+        try:
+            capture = Picamera2Capture(
+                {
+                    "tuning_file": "/tmp/tuning.json",
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "main_size": [4056, 3040],
+                    "exposure_value": 1.5,
+                    "denoise_mode": "HighQuality",
+                    "night_settings": {
+                        "ae_enable": False,
+                        "exposure_time": 1000000,
+                        "analogue_gain": 2.0,
+                    },
+                }
+            )
+            pic = capture.capture("night")
+            capture.close()
+        finally:
+            if old_picamera2 is None:
+                sys.modules.pop("picamera2", None)
+            else:
+                sys.modules["picamera2"] = old_picamera2
+            if old_libcamera is None:
+                sys.modules.pop("libcamera", None)
+            else:
+                sys.modules["libcamera"] = old_libcamera
+
+        self.assertEqual(pic.size, (8, 6))
+        fake = instances[0]
+        self.assertTrue(fake.started)
+        self.assertTrue(fake.stopped)
+        self.assertEqual(
+            fake.configured[0],
+            {"still": {"main": {"size": (4056, 3040)}}},
+        )
+        self.assertEqual(
+            fake.controls[-1],
+            {
+                "ExposureValue": 1.5,
+                "NoiseReductionMode": 42,
+                "AeEnable": False,
+                "ExposureTime": 1000000,
+                "AnalogueGain": 2.0,
+            },
         )
 
 if __name__ == '__main__':
