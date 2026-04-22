@@ -1,13 +1,42 @@
 cameras:
   picam-hq-6mm:
     capture_method: picamera2
-    exposure_value: 1.5
     denoise_mode: HighQuality
+    day_settings:
+      trigger_exposure_composite_value: 2.0
+    night_settings:
+      trigger_exposure_composite_value: 3.0
+    exposure_control:
+      enabled: true
+      default_mode: day
+      target_luma: 0.45
+      deadband: 0.08
+      min_adjustment_factor: 0.3
+      max_adjustment_factor: 3.0
+      metering_area: 0.00,0.00,1.00,1.00
+      day:
+        enabled: true
+        min_exposure_time: 100
+        max_exposure_time: 1000000
+        min_analogue_gain: 1.0
+        max_analogue_gain: 4.0
+        start_exposure_time: 1000
+        start_analogue_gain: 1.0
+      night:
+        enabled: true
+        min_exposure_time: 1000
+        max_exposure_time: 15000000
+        min_analogue_gain: 2.0
+        max_analogue_gain: 2.0
+        start_exposure_time: 1000000
+        start_analogue_gain: 2.0
     lat: 37.6
     lon: -122.4
     sunrise_sunset:
       enabled: True
     postprocessing:
+      - type: rotate
+        angle: 180
       - type: resize
         height: 1440
       - type: timestamp
@@ -34,3 +63,5 @@ admin_server:
 
 timelapse:
   daily_timelapse:
+    file_extension: mp4 # Only available option on pi zero
+    framerate: 30 # Max available on pi zero

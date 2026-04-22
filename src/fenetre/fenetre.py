@@ -351,6 +351,28 @@ def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
 
 def snap(camera_name, camera_config: Dict):
     picamera2_capture = None
+    picamera2_initial_exposure_state = None
+
+    def load_picamera2_exposure_state() -> Optional[Dict]:
+        metadata_path = os.path.join(
+            global_config["work_dir"], "photos", camera_name, "metadata.json"
+        )
+        try:
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+        except FileNotFoundError:
+            return None
+        except Exception:
+            logger.warning(
+                "%s: Failed to read previous metadata for exposure recovery.",
+                camera_name,
+                exc_info=True,
+            )
+            return None
+        exposure_state = metadata.get("picamera2_exposure_control")
+        if isinstance(exposure_state, dict):
+            return exposure_state
+        return None
 
     def clear_camera_gauges():
         for mode in ("unknown", "day", "night", "astro"):
@@ -384,10 +406,12 @@ def snap(camera_name, camera_config: Dict):
     camera_online_metric.set(0.0)
     if mqtt_manager:
         mqtt_manager.publish_camera_state(camera_name, False)
+    if camera_config.get("capture_method") == "picamera2":
+        picamera2_initial_exposure_state = load_picamera2_exposure_state()
 
     # This is the capture function which is the only place in this snap thread where we have image source type specific info and logic.
     def capture(mode: str) -> Image.Image:
-        nonlocal picamera2_capture
+        nonlocal picamera2_capture, picamera2_initial_exposure_state
 
         logger.info("%s: Fetching new picture.", camera_name)
 
@@ -432,7 +456,11 @@ def snap(camera_name, camera_config: Dict):
 
         if camera_config.get("capture_method") == "picamera2":
             if picamera2_capture is None:
-                picamera2_capture = Picamera2Capture(camera_config)
+                picamera2_capture = Picamera2Capture(
+                    camera_config,
+                    initial_exposure_state=picamera2_initial_exposure_state,
+                )
+                picamera2_initial_exposure_state = None
             return picamera2_capture.capture(mode)
         return None
 
@@ -504,6 +532,10 @@ def snap(camera_name, camera_config: Dict):
             "iso": previous_exif.get("iso"),
             "shutter_speed": format_shutter_speed(previous_exif.get("exposure_time")),
         }
+        if picamera2_capture is not None:
+            exposure_state = picamera2_capture.get_exposure_control_state()
+            if exposure_state.get("modes"):
+                metadata["picamera2_exposure_control"] = exposure_state
         metadata_path = os.path.join(previous_pic_dir, os.path.pardir, "metadata.json")
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=4)

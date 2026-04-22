@@ -772,6 +772,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "denoise_mode",
             "ae_enable",
             "controls",
+            "exposure_control",
             "main_size",
             "buffer_count",
             "startup_warmup_s",

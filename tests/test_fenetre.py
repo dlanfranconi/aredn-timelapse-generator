@@ -155,6 +155,251 @@ class TestFenetre(unittest.TestCase):
             },
         )
 
+    def test_picamera2_exposure_control_updates_next_day_capture(self):
+        instances = []
+
+        class FakePicamera2:
+            def __init__(self):
+                self.controls = []
+                instances.append(self)
+
+            def create_still_configuration(self, **kwargs):
+                return {}
+
+            def configure(self, config, tuning=None):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+            def set_controls(self, controls):
+                self.controls.append(controls)
+
+            def capture_file(self, output, format=None):
+                img = Image.new("RGB", (8, 6), color="white")
+                img.save(output, format="JPEG")
+
+            def capture_metadata(self):
+                return {"ExposureTime": 100000, "AnalogueGain": 8.0}
+
+        fake_controls = SimpleNamespace(
+            draft=SimpleNamespace(
+                NoiseReductionModeEnum=SimpleNamespace(HighQuality=42)
+            )
+        )
+
+        old_picamera2 = sys.modules.get("picamera2")
+        old_libcamera = sys.modules.get("libcamera")
+        sys.modules["picamera2"] = SimpleNamespace(Picamera2=FakePicamera2)
+        sys.modules["libcamera"] = SimpleNamespace(controls=fake_controls)
+        try:
+            capture = Picamera2Capture(
+                {
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "exposure_control": {
+                        "enabled": True,
+                        "target_luma": 0.45,
+                        "min_adjustment_factor": 0.8,
+                        "max_adjustment_factor": 1.25,
+                        "day": {
+                            "enabled": True,
+                            "min_exposure_time": 100,
+                            "max_exposure_time": 20000,
+                            "min_analogue_gain": 1.0,
+                            "max_analogue_gain": 4.0,
+                            "start_exposure_time": 1000,
+                            "start_analogue_gain": 1.0,
+                        },
+                    },
+                }
+            )
+            capture.capture("day")
+            capture.capture("day")
+            capture.close()
+        finally:
+            if old_picamera2 is None:
+                sys.modules.pop("picamera2", None)
+            else:
+                sys.modules["picamera2"] = old_picamera2
+            if old_libcamera is None:
+                sys.modules.pop("libcamera", None)
+            else:
+                sys.modules["libcamera"] = old_libcamera
+
+        self.assertEqual(
+            instances[0].controls[-1],
+            {"AeEnable": False, "ExposureTime": 800, "AnalogueGain": 1.0},
+        )
+        self.assertEqual(
+            capture.get_exposure_control_state()["modes"]["day"],
+            {"ae_enable": False, "exposure_time": 640, "analogue_gain": 1.0},
+        )
+
+    def test_picamera2_exposure_control_restores_initial_state(self):
+        instances = []
+
+        class FakePicamera2:
+            def __init__(self):
+                self.controls = []
+                instances.append(self)
+
+            def create_still_configuration(self, **kwargs):
+                return {}
+
+            def configure(self, config, tuning=None):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+            def set_controls(self, controls):
+                self.controls.append(controls)
+
+            def capture_file(self, output, format=None):
+                img = Image.new("RGB", (8, 6), color="white")
+                img.save(output, format="JPEG")
+
+            def capture_metadata(self):
+                return {"ExposureTime": 100000, "AnalogueGain": 8.0}
+
+        fake_controls = SimpleNamespace(
+            draft=SimpleNamespace(
+                NoiseReductionModeEnum=SimpleNamespace(HighQuality=42)
+            )
+        )
+
+        old_picamera2 = sys.modules.get("picamera2")
+        old_libcamera = sys.modules.get("libcamera")
+        sys.modules["picamera2"] = SimpleNamespace(Picamera2=FakePicamera2)
+        sys.modules["libcamera"] = SimpleNamespace(controls=fake_controls)
+        try:
+            capture = Picamera2Capture(
+                {
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "exposure_control": {
+                        "enabled": True,
+                        "target_luma": 0.45,
+                        "min_adjustment_factor": 0.8,
+                        "max_adjustment_factor": 1.25,
+                        "day": {"enabled": True},
+                    },
+                },
+                initial_exposure_state={
+                    "enabled": True,
+                    "modes": {
+                        "day": {
+                            "ae_enable": False,
+                            "exposure_time": 500,
+                            "analogue_gain": 2.0,
+                        }
+                    },
+                },
+            )
+            capture.capture("day")
+            capture.close()
+        finally:
+            if old_picamera2 is None:
+                sys.modules.pop("picamera2", None)
+            else:
+                sys.modules["picamera2"] = old_picamera2
+            if old_libcamera is None:
+                sys.modules.pop("libcamera", None)
+            else:
+                sys.modules["libcamera"] = old_libcamera
+
+        self.assertEqual(
+            instances[0].controls[0],
+            {"AeEnable": False, "ExposureTime": 500, "AnalogueGain": 2.0},
+        )
+
+    def test_picamera2_night_exposure_control_locks_analogue_gain(self):
+        class FakePicamera2:
+            def create_still_configuration(self, **kwargs):
+                return {}
+
+            def configure(self, config, tuning=None):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+            def set_controls(self, controls):
+                pass
+
+            def capture_file(self, output, format=None):
+                img = Image.new("RGB", (8, 6), color="black")
+                img.save(output, format="JPEG")
+
+            def capture_metadata(self):
+                return {"ExposureTime": 100000, "AnalogueGain": 8.0}
+
+        fake_controls = SimpleNamespace(
+            draft=SimpleNamespace(
+                NoiseReductionModeEnum=SimpleNamespace(HighQuality=42)
+            )
+        )
+
+        old_picamera2 = sys.modules.get("picamera2")
+        old_libcamera = sys.modules.get("libcamera")
+        sys.modules["picamera2"] = SimpleNamespace(Picamera2=FakePicamera2)
+        sys.modules["libcamera"] = SimpleNamespace(controls=fake_controls)
+        try:
+            capture = Picamera2Capture(
+                {
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "exposure_control": {
+                        "enabled": True,
+                        "max_adjustment_factor": 3.0,
+                        "night": {
+                            "enabled": True,
+                            "min_exposure_time": 1000,
+                            "max_exposure_time": 15000000,
+                            "min_analogue_gain": 2.0,
+                            "max_analogue_gain": 2.0,
+                            "start_exposure_time": 1000000,
+                            "start_analogue_gain": 2.0,
+                        },
+                    },
+                }
+            )
+            capture.capture("night")
+            capture.close()
+        finally:
+            if old_picamera2 is None:
+                sys.modules.pop("picamera2", None)
+            else:
+                sys.modules["picamera2"] = old_picamera2
+            if old_libcamera is None:
+                sys.modules.pop("libcamera", None)
+            else:
+                sys.modules["libcamera"] = old_libcamera
+
+        self.assertEqual(
+            capture.get_exposure_control_state()["modes"]["night"],
+            {"ae_enable": False, "exposure_time": 3000000, "analogue_gain": 2.0},
+        )
+
     def test_get_ssim_for_area_clamps_crop_to_image_size(self):
         image1 = Image.new("RGB", (1921, 1440), color="black")
         image2 = Image.new("RGB", (1921, 1440), color="black")

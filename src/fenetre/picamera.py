@@ -1,17 +1,56 @@
 import logging
 import time
 from io import BytesIO
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_EXPOSURE_CONTROL = {
+    "enabled": False,
+    "default_mode": "day",
+    "target_luma": 0.45,
+    "deadband": 0.08,
+    "min_adjustment_factor": 0.8,
+    "max_adjustment_factor": 1.25,
+    "metering_area": None,
+    "day": {
+        "enabled": True,
+        "min_exposure_time": 100,
+        "max_exposure_time": 20000,
+        "min_analogue_gain": 1.0,
+        "max_analogue_gain": 4.0,
+        "start_exposure_time": 1000,
+        "start_analogue_gain": 1.0,
+    },
+    "night": {
+        "enabled": False,
+        "min_exposure_time": 1000,
+        "max_exposure_time": 15000000,
+        "min_analogue_gain": 2.0,
+        "max_analogue_gain": 2.0,
+        "start_exposure_time": 1000000,
+        "start_analogue_gain": 2.0,
+    },
+    "astro": {
+        "enabled": False,
+        "min_exposure_time": 1000000,
+        "max_exposure_time": 15000000,
+        "min_analogue_gain": 2.0,
+        "max_analogue_gain": 2.0,
+        "start_exposure_time": 5000000,
+        "start_analogue_gain": 2.0,
+    },
+}
+
 
 class Picamera2Capture:
     """Reusable native Raspberry Pi camera capture wrapper."""
 
-    def __init__(self, camera_config: Dict):
+    def __init__(
+        self, camera_config: Dict, initial_exposure_state: Optional[Dict] = None
+    ):
         self.picam2 = None
         self.closed = True
         self.started = False
@@ -22,6 +61,9 @@ class Picamera2Capture:
         try:
             self.camera_config = camera_config
             self.controls = controls
+            self.exposure_control = self._exposure_control_config()
+            self.dynamic_controls_by_mode = {}
+            self._restore_exposure_control_state(initial_exposure_state)
             tuning = None
             if camera_config.get("tuning_file"):
                 tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
@@ -112,10 +154,210 @@ class Picamera2Capture:
 
         return control_values
 
+    def _exposure_control_config(self) -> Dict:
+        configured = self.camera_config.get("exposure_control", {}) or {}
+        out = dict(DEFAULT_EXPOSURE_CONTROL)
+        mode_names = ("day", "night", "astro")
+        out.update({k: v for k, v in configured.items() if k not in mode_names})
+        for mode_name in mode_names:
+            out[mode_name] = dict(DEFAULT_EXPOSURE_CONTROL[mode_name])
+            out[mode_name].update(configured.get(mode_name, {}) or {})
+        return out
+
+    def _exposure_mode(self, mode: str) -> str:
+        if mode in ("day", "night", "astro"):
+            return mode
+        return self.exposure_control.get("default_mode", "day")
+
+    def _restore_exposure_control_state(self, exposure_state: Optional[Dict]) -> None:
+        if not exposure_state:
+            return
+        modes = exposure_state.get("modes", {})
+        if not isinstance(modes, dict):
+            return
+
+        for mode, controls in modes.items():
+            if mode not in ("day", "night", "astro"):
+                continue
+            if not isinstance(controls, dict):
+                continue
+            exposure_time = controls.get("exposure_time")
+            analogue_gain = controls.get("analogue_gain")
+            if exposure_time is None or analogue_gain is None:
+                continue
+            try:
+                self.dynamic_controls_by_mode[mode] = {
+                    "AeEnable": False,
+                    "ExposureTime": int(exposure_time),
+                    "AnalogueGain": float(analogue_gain),
+                }
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid restored picamera exposure state for mode %s: %s",
+                    mode,
+                    controls,
+                )
+
+        if self.dynamic_controls_by_mode:
+            logger.info(
+                "Restored picamera exposure control state for modes: %s",
+                ", ".join(sorted(self.dynamic_controls_by_mode)),
+            )
+
+    def get_exposure_control_state(self) -> Dict:
+        modes = {}
+        for mode, controls in self.dynamic_controls_by_mode.items():
+            modes[mode] = {
+                "ae_enable": bool(controls.get("AeEnable", False)),
+                "exposure_time": int(controls["ExposureTime"]),
+                "analogue_gain": float(controls["AnalogueGain"]),
+            }
+        return {
+            "enabled": bool(self.exposure_control.get("enabled", False)),
+            "modes": modes,
+        }
+
+    def _capture_metadata(self) -> Dict:
+        try:
+            metadata = self.picam2.capture_metadata()
+        except AttributeError:
+            return {}
+        except Exception:
+            logger.debug("Failed to read picamera2 capture metadata.", exc_info=True)
+            return {}
+        return metadata or {}
+
+    def _crop_box(
+        self, image: Image.Image, area: Optional[str]
+    ) -> Optional[Tuple[int, int, int, int]]:
+        if not area:
+            return None
+        try:
+            values = [float(i) for i in area.split(",")]
+        except (AttributeError, ValueError):
+            logger.warning("Invalid picamera exposure metering_area '%s'.", area)
+            return None
+        if len(values) != 4:
+            logger.warning("Invalid picamera exposure metering_area '%s'.", area)
+            return None
+
+        width, height = image.size
+        if all(v <= 1.0 for v in values):
+            x1, y1, x2, y2 = (
+                int(width * values[0]),
+                int(height * values[1]),
+                int(width * values[2]),
+                int(height * values[3]),
+            )
+        else:
+            x1, y1, x2, y2 = (int(v) for v in values)
+
+        crop_box = (
+            max(0, min(width, x1)),
+            max(0, min(height, y1)),
+            max(0, min(width, x2)),
+            max(0, min(height, y2)),
+        )
+        if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+            logger.warning(
+                "Invalid picamera exposure metering_area '%s' for image size %s.",
+                area,
+                image.size,
+            )
+            return None
+        return crop_box
+
+    def _measure_luma(self, pic: Image.Image) -> float:
+        crop_box = self._crop_box(pic, self.exposure_control.get("metering_area"))
+        target = pic.crop(crop_box) if crop_box else pic
+        thumbnail = target.convert("L").resize((64, 64))
+        midpoint = thumbnail.width * thumbnail.height // 2
+        seen = 0
+        for luma, count in enumerate(thumbnail.histogram()):
+            seen += count
+            if seen > midpoint:
+                return luma / 255.0
+        return 0.0
+
+    def _bounded_factor(self, measured_luma: float) -> float:
+        target_luma = float(self.exposure_control.get("target_luma", 0.45))
+        deadband = float(self.exposure_control.get("deadband", 0.08))
+        if measured_luma <= 0:
+            raw_factor = float(self.exposure_control.get("max_adjustment_factor", 1.25))
+        else:
+            raw_factor = target_luma / measured_luma
+        if abs(raw_factor - 1.0) < deadband:
+            return 1.0
+        return max(
+            float(self.exposure_control.get("min_adjustment_factor", 0.8)),
+            min(
+                float(self.exposure_control.get("max_adjustment_factor", 1.25)),
+                raw_factor,
+            ),
+        )
+
+    def _update_exposure_control(
+        self, mode: str, pic: Image.Image, metadata: Dict
+    ) -> None:
+        if not self.exposure_control.get("enabled", False):
+            return
+
+        exposure_mode = self._exposure_mode(mode)
+        mode_config = self.exposure_control.get(exposure_mode, {}) or {}
+        if not mode_config.get("enabled", False):
+            return
+
+        measured_luma = self._measure_luma(pic)
+        factor = self._bounded_factor(measured_luma)
+        previous_controls = self.dynamic_controls_by_mode.get(exposure_mode, {})
+        current_exposure_time = int(
+            previous_controls.get(
+                "ExposureTime",
+                mode_config.get(
+                    "start_exposure_time", metadata.get("ExposureTime", 1000)
+                ),
+            )
+        )
+        current_gain = float(
+            previous_controls.get(
+                "AnalogueGain",
+                mode_config.get(
+                    "start_analogue_gain", metadata.get("AnalogueGain", 1.0)
+                ),
+            )
+        )
+        min_exposure = int(mode_config.get("min_exposure_time", 100))
+        max_exposure = int(mode_config.get("max_exposure_time", 20000))
+        min_gain = float(mode_config.get("min_analogue_gain", 1.0))
+        max_gain = float(mode_config.get("max_analogue_gain", 4.0))
+
+        desired_total = current_exposure_time * current_gain * factor
+        next_exposure_time = int(
+            max(min_exposure, min(max_exposure, desired_total / current_gain))
+        )
+        next_gain = max(min_gain, min(max_gain, desired_total / next_exposure_time))
+
+        self.dynamic_controls_by_mode[exposure_mode] = {
+            "AeEnable": False,
+            "ExposureTime": next_exposure_time,
+            "AnalogueGain": next_gain,
+        }
+        logger.info(
+            "Picamera exposure control mode=%s luma=%.3f factor=%.3f "
+            "exposure_time=%dus analogue_gain=%.2f",
+            exposure_mode,
+            measured_luma,
+            factor,
+            next_exposure_time,
+            next_gain,
+        )
+
     def capture(self, mode: str = "unknown") -> Image.Image:
         controls_to_apply = self._controls_from_config(self.camera_config)
         mode_settings = self.camera_config.get(f"{mode}_settings", {})
         controls_to_apply.update(self._controls_from_config(mode_settings))
+        exposure_mode = self._exposure_mode(mode)
+        controls_to_apply.update(self.dynamic_controls_by_mode.get(exposure_mode, {}))
 
         if controls_to_apply:
             self.picam2.set_controls(controls_to_apply)
@@ -128,6 +370,8 @@ class Picamera2Capture:
         jpeg_bytes = jpeg_io.getvalue()
         pic = Image.open(BytesIO(jpeg_bytes))
         pic.info["exif"] = pic.info.get("exif", b"")
+        metadata = self._capture_metadata()
+        self._update_exposure_control(mode, pic, metadata)
         return pic
 
 

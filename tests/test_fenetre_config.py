@@ -168,6 +168,13 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "exposure_value": 1.5,
                     "denoise_mode": "HighQuality",
                     "controls": {"AwbEnable": True},
+                    "exposure_control": {
+                        "enabled": True,
+                        "day": {
+                            "min_exposure_time": 100,
+                            "max_exposure_time": 20000,
+                        },
+                    },
                     "night_settings": {
                         "ae_enable": False,
                         "exposure_time": 1000000,
@@ -187,6 +194,9 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(picam["exposure_value"], 1.5)
         self.assertEqual(picam["denoise_mode"], "HighQuality")
         self.assertEqual(picam["controls"], {"AwbEnable": True})
+        self.assertEqual(
+            picam["exposure_control"]["day"]["max_exposure_time"], 20000
+        )
         self.assertEqual(picam["night_settings"]["exposure_time"], 1000000)
         self.assertEqual(picam["night_settings"]["analogue_gain"], 2.0)
         self.assertFalse(picam["night_settings"]["ae_enable"])
