@@ -59,7 +59,7 @@ from fenetre.camera_utils import (
     format_shutter_speed,
 )
 from fenetre.config import config_load
-from fenetre.daylight import run_end_of_day
+from fenetre.daylight import observe_daylight_frame, run_end_of_day
 from fenetre.picamera import Picamera2Capture
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.timelapse import (
@@ -507,6 +507,13 @@ def snap(camera_name, camera_config: Dict):
                 global_config,
                 camera_config,
             )
+    with profiler.timed(f"camera.{camera_name}.daylight_observe"):
+        observe_daylight_frame(
+            camera_name,
+            previous_pic_fullpath,
+            previous_pic,
+            camera_config.get("sky_area"),
+        )
     fixed_snap_interval = camera_config.get("snap_interval_s", None)
     if camera_name not in sleep_intervals:
         sleep_intervals[camera_name] = (
@@ -634,6 +641,13 @@ def snap(camera_name, camera_config: Dict):
                     global_config,
                     camera_config,
                 )
+        with profiler.timed(f"camera.{camera_name}.daylight_observe"):
+            observe_daylight_frame(
+                camera_name,
+                new_pic_fullpath,
+                new_pic,
+                camera_config.get("sky_area"),
+            )
         # SSIM logic
         if not (sunrise_sunset or fixed_snap_interval):
             with profiler.timed(f"camera.{camera_name}.ssim"):

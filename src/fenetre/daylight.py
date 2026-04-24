@@ -3,9 +3,10 @@ import glob
 import logging
 import os
 import re
+import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SKY_COLOR = (10, 10, 20)  # Dark blue-grey for missing minutes or errors
 DEFAULT_SKY_AREA = (0, 50, 600, 150)  # Default crop area for the sky in the pictures
 DAILY_BAND_HEIGHT = 1440  # 24 hours * 60 minutes
+_daylight_cache_lock = threading.Lock()
+_daylight_cache: Dict[str, Dict[str, Dict[str, object]]] = defaultdict(dict)
 
 
 def get_average_color_of_area(
@@ -86,7 +89,12 @@ def run_end_of_day(camera_name, day_dir_path, sky_area):
             logger.error(f"Error saving default daily band {band_save_path}: {e}")
         return
 
-    create_daily_band(day_dir_path, sky_coords)
+    observed_minute_colors = pop_observed_daylight_samples(camera_name, day_dir_path)
+    create_daily_band(
+        day_dir_path,
+        sky_coords,
+        final_minute_colors=observed_minute_colors,
+    )
     year, month, _ = os.path.split(day_dir_path)[-1].split("-")
     camera_dir = os.path.join(day_dir_path, os.path.pardir)
     create_monthly_image(f"{year}-{month}", camera_dir)
@@ -104,8 +112,151 @@ def get_avg_color(image, crop_box):
         return DEFAULT_SKY_COLOR
 
 
+def _build_daily_band_image(final_minute_colors: Dict[int, Tuple[int, int, int]]) -> Image.Image:
+    daily_band_image = Image.new("RGB", (1, DAILY_BAND_HEIGHT))
+    draw = ImageDraw.Draw(daily_band_image)
+    last_known_color = DEFAULT_SKY_COLOR
+    for minute in range(DAILY_BAND_HEIGHT):
+        if minute in final_minute_colors:
+            current_color = final_minute_colors[minute]
+            last_known_color = current_color
+        else:
+            current_color = last_known_color
+        draw.point((0, minute), fill=current_color)
+    return daily_band_image
+
+
+def _save_daily_band_from_final_colors(
+    day_dir_path: str, final_minute_colors: Dict[int, Tuple[int, int, int]]
+):
+    daily_band_image = _build_daily_band_image(final_minute_colors)
+    band_save_path = os.path.join(day_dir_path, "daylight.png")
+    try:
+        daily_band_image.save(band_save_path)
+        print(f"      Saved daily band to {band_save_path}")
+        return band_save_path
+    except Exception as e:
+        print(f"      Error saving daily band {band_save_path}: {e}")
+        return None
+
+
+def _finalize_minute_colors(
+    minute_colors_accumulator: Dict[int, List[Tuple[int, int, int]]]
+) -> Dict[int, Tuple[int, int, int]]:
+    final_minute_colors = {}
+    for minute, colors_list in minute_colors_accumulator.items():
+        if colors_list:
+            avg_r = int(sum(c[0] for c in colors_list) / len(colors_list))
+            avg_g = int(sum(c[1] for c in colors_list) / len(colors_list))
+            avg_b = int(sum(c[2] for c in colors_list) / len(colors_list))
+            final_minute_colors[minute] = (avg_r, avg_g, avg_b)
+    return final_minute_colors
+
+
+def _finalize_minute_stats(
+    minute_stats: Dict[int, Tuple[int, int, int, int]]
+) -> Dict[int, Tuple[int, int, int]]:
+    final_minute_colors = {}
+    for minute, (sum_r, sum_g, sum_b, count) in minute_stats.items():
+        if count > 0:
+            final_minute_colors[minute] = (
+                int(sum_r / count),
+                int(sum_g / count),
+                int(sum_b / count),
+            )
+    return final_minute_colors
+
+
+def _extract_day_and_minute_from_path(pic_path: str) -> Tuple[Optional[str], Optional[int]]:
+    day_dir = os.path.basename(os.path.dirname(pic_path))
+    filename = os.path.basename(pic_path)
+    match = re.match(
+        r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})([A-Z]{3})?\.jpg",
+        filename,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return day_dir, int(match.group(2)) * 60 + int(match.group(3))
+
+
+def _list_minutes_present_on_disk(day_dir_path: str) -> set[int]:
+    observed_minutes = set()
+    for filename in os.listdir(day_dir_path):
+        if not filename.lower().endswith(".jpg"):
+            continue
+        _, minute_of_day = _extract_day_and_minute_from_path(
+            os.path.join(day_dir_path, filename)
+        )
+        if minute_of_day is not None:
+            observed_minutes.add(minute_of_day)
+    return observed_minutes
+
+
+def observe_daylight_frame(
+    camera_name: str, pic_path: str, image: Image.Image, sky_area: Optional[str]
+) -> None:
+    if not sky_area:
+        return
+    day_key, minute_of_day = _extract_day_and_minute_from_path(pic_path)
+    if day_key is None or minute_of_day is None:
+        return
+    sky_coords = parse_sky_area(sky_area, image.size)
+    if not sky_coords:
+        return
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    avg_color = get_avg_color(image, sky_coords)
+    with _daylight_cache_lock:
+        camera_days = _daylight_cache[camera_name]
+        day_entry = camera_days.setdefault(
+            day_key, {"minute_stats": {}, "observed_minutes": set()}
+        )
+        sum_r, sum_g, sum_b, count = day_entry["minute_stats"].get(
+            minute_of_day, (0, 0, 0, 0)
+        )
+        day_entry["minute_stats"][minute_of_day] = (
+            sum_r + avg_color[0],
+            sum_g + avg_color[1],
+            sum_b + avg_color[2],
+            count + 1,
+        )
+        day_entry["observed_minutes"].add(minute_of_day)
+
+
+def pop_observed_daylight_samples(
+    camera_name: str, day_dir_path: str
+) -> Optional[Dict[int, Tuple[int, int, int]]]:
+    day_key = os.path.basename(day_dir_path)
+    on_disk_minutes = _list_minutes_present_on_disk(day_dir_path)
+    with _daylight_cache_lock:
+        camera_days = _daylight_cache.get(camera_name)
+        if not camera_days:
+            return None
+        day_entry = camera_days.get(day_key)
+        if not day_entry:
+            return None
+        observed_minutes = set(day_entry.get("observed_minutes", set()))
+        if not on_disk_minutes.issubset(observed_minutes):
+            logger.info(
+                "Daylight cache for %s/%s is incomplete (%s cached minutes for %s on-disk minutes); falling back to disk scan.",
+                camera_name,
+                day_key,
+                len(observed_minutes),
+                len(on_disk_minutes),
+            )
+            return None
+        minute_stats = dict(day_entry.get("minute_stats", {}))
+        del camera_days[day_key]
+        if not camera_days:
+            _daylight_cache.pop(camera_name, None)
+    return _finalize_minute_stats(minute_stats)
+
+
 def create_daily_band(
-    day_dir_path: str, sky_coords: Optional[Tuple[int, int, int, int]]
+    day_dir_path: str,
+    sky_coords: Optional[Tuple[int, int, int, int]],
+    final_minute_colors: Optional[Dict[int, Tuple[int, int, int]]] = None,
 ):
     """
     Processes images in a daily directory to create a 1x1440 pixel band.
@@ -113,6 +264,9 @@ def create_daily_band(
     Saves it as 'daylight.png' in day_dir_path.
     Returns the path to the saved band or None if failed.
     """
+    if final_minute_colors is not None:
+        return _save_daily_band_from_final_colors(day_dir_path, final_minute_colors)
+
     minute_colors_accumulator = defaultdict(list)
 
     image_files = sorted(
@@ -159,34 +313,9 @@ def create_daily_band(
         else:
             print(f"      Filename {filename} does not match expected pattern.")
 
-    final_minute_colors = {}
-    for minute, colors_list in minute_colors_accumulator.items():
-        if colors_list:
-            avg_r = int(sum(c[0] for c in colors_list) / len(colors_list))
-            avg_g = int(sum(c[1] for c in colors_list) / len(colors_list))
-            avg_b = int(sum(c[2] for c in colors_list) / len(colors_list))
-            final_minute_colors[minute] = (avg_r, avg_g, avg_b)
-
-    daily_band_image = Image.new("RGB", (1, DAILY_BAND_HEIGHT))
-    draw = ImageDraw.Draw(daily_band_image)
-    last_known_color = DEFAULT_SKY_COLOR
-
-    for minute in range(DAILY_BAND_HEIGHT):
-        if minute in final_minute_colors:
-            current_color = final_minute_colors[minute]
-            last_known_color = current_color
-        else:
-            current_color = last_known_color  # Use previous minute's color
-        draw.point((0, minute), fill=current_color)
-
-    band_save_path = os.path.join(day_dir_path, "daylight.png")
-    try:
-        daily_band_image.save(band_save_path)
-        print(f"      Saved daily band to {band_save_path}")
-        return band_save_path
-    except Exception as e:
-        print(f"      Error saving daily band {band_save_path}: {e}")
-        return None
+    return _save_daily_band_from_final_colors(
+        day_dir_path, _finalize_minute_colors(minute_colors_accumulator)
+    )
 
 
 def create_monthly_image(year_month_str: str, camera_data_path: str):
