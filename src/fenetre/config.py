@@ -118,6 +118,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "ui",
         "deployment_name",
         "mqtt",
+        "profiler",
+        "serialize_background_jobs",
     }
     _warn_unknown_keys("global", cfg, allowed)
 
@@ -197,6 +199,28 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default=5,
         min_value=0,
     )
+    serialize_background_jobs = cfg.get("serialize_background_jobs")
+    if isinstance(serialize_background_jobs, bool):
+        out["serialize_background_jobs"] = serialize_background_jobs
+    elif serialize_background_jobs is None:
+        out["serialize_background_jobs"] = "auto"
+    elif isinstance(serialize_background_jobs, str):
+        if serialize_background_jobs not in {"auto", "true", "false"}:
+            errors.append(
+                "global.serialize_background_jobs: expected bool or one of ['auto', 'true', 'false']"
+            )
+            out["serialize_background_jobs"] = "auto"
+        elif serialize_background_jobs == "true":
+            out["serialize_background_jobs"] = True
+        elif serialize_background_jobs == "false":
+            out["serialize_background_jobs"] = False
+        else:
+            out["serialize_background_jobs"] = "auto"
+    else:
+        errors.append(
+            "global.serialize_background_jobs: expected bool or one of ['auto', 'true', 'false']"
+        )
+        out["serialize_background_jobs"] = "auto"
 
     out["deployment_name"] = _str(
         cfg.get("deployment_name"),
@@ -365,6 +389,52 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default="homeassistant",
     )
     out["mqtt"] = mqtt_out
+
+    profiler_cfg = _dict(cfg.get("profiler"), "global.profiler", errors)
+    profiler_out = {}
+    _warn_unknown_keys(
+        "global.profiler",
+        profiler_cfg,
+        {
+            "enabled",
+            "sample_interval_s",
+            "report_interval_s",
+            "max_stack_depth",
+            "max_entries",
+        },
+    )
+    profiler_out["enabled"] = _bool(
+        profiler_cfg.get("enabled"), "global.profiler.enabled", errors, default=False
+    )
+    profiler_out["sample_interval_s"] = _float(
+        profiler_cfg.get("sample_interval_s"),
+        "global.profiler.sample_interval_s",
+        errors,
+        default=0.25,
+        min_value=0.01,
+    )
+    profiler_out["report_interval_s"] = _float(
+        profiler_cfg.get("report_interval_s"),
+        "global.profiler.report_interval_s",
+        errors,
+        default=60.0,
+        min_value=1.0,
+    )
+    profiler_out["max_stack_depth"] = _int(
+        profiler_cfg.get("max_stack_depth"),
+        "global.profiler.max_stack_depth",
+        errors,
+        default=8,
+        min_value=1,
+    )
+    profiler_out["max_entries"] = _int(
+        profiler_cfg.get("max_entries"),
+        "global.profiler.max_entries",
+        errors,
+        default=10,
+        min_value=1,
+    )
+    out["profiler"] = profiler_out
     return out
 
 

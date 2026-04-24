@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from skimage import exposure
 
 from .sun_path_svg import create_sun_path_svg, overlay_time_bar
+from fenetre import profiler
 
 try:
     import pyexiv2
@@ -399,24 +400,50 @@ def postprocess(
         camera_config = {}
 
     # Correct orientation based on EXIF data before any processing
-    pic = ImageOps.exif_transpose(pic)
+    with profiler.timed("postprocess.exif_transpose"):
+        pic = ImageOps.exif_transpose(pic)
 
-    for step in postprocessing_steps:
+    step_index = 0
+    while step_index < len(postprocessing_steps):
+        step = postprocessing_steps[step_index]
+        next_step = (
+            postprocessing_steps[step_index + 1]
+            if step_index + 1 < len(postprocessing_steps)
+            else None
+        )
+        if (
+            step["type"] == "rotate"
+            and int(step.get("angle", 0)) % 360 == 180
+            and next_step
+            and next_step["type"] == "resize"
+        ):
+            logger.debug("Applying resize before 180-degree rotate")
+            with profiler.timed("postprocess.resize"):
+                pic = resize(pic, next_step.get("width"), next_step.get("height"))
+            with profiler.timed("postprocess.rotate"):
+                pic = rotate(pic, step["angle"])
+            step_index += 2
+            continue
+
         if step["type"] == "crop":
             logger.debug(f"Cropping image to area: {step['area']}")
-            pic = crop(pic, step["area"])
+            with profiler.timed("postprocess.crop"):
+                pic = crop(pic, step["area"])
         elif step["type"] == "resize":
             logger.debug(
                 f"Resizing image to width: {step.get('width')}, height: {step.get('height')}"
             )
-            pic = resize(pic, step.get("width"), step.get("height"))
+            with profiler.timed("postprocess.resize"):
+                pic = resize(pic, step.get("width"), step.get("height"))
         elif step["type"] == "rotate":
             if "angle" in step:
                 logger.debug(f"Rotating image by {step['angle']} degrees")
-                pic = rotate(pic, step["angle"])
+                with profiler.timed("postprocess.rotate"):
+                    pic = rotate(pic, step["angle"])
         elif step["type"] == "awb":
             logger.debug("Applying auto white balance to image")
-            pic = auto_white_balance(pic)
+            with profiler.timed("postprocess.awb"):
+                pic = auto_white_balance(pic)
         elif step["type"] == "timestamp":
             if step.get("enabled", False):
                 logger.debug(
@@ -429,20 +456,21 @@ def postprocess(
                     f"background_padding={step.get('background_padding', 2)}, "
                     f"custom_text={step.get('custom_text', None)}"
                 )
-                pic = add_timestamp(
-                    pic,
-                    text_format=step.get("format", "%Y-%m-%d %H:%M:%S %Z"),
-                    position=step.get("position", "bottom_right"),
-                    size=step.get("size", 24),
-                    color=step.get("color", "white"),
-                    font_path=step.get(
-                        "font_path"
-                    ),  # Allow custom font path from config
-                    background_color=step.get("background_color", None),
-                    background_padding=step.get("background_padding", 2),
-                    custom_text=step.get("custom_text", None),
-                    timezone=global_config.get("timezone", "UTC"),
-                )
+                with profiler.timed("postprocess.timestamp"):
+                    pic = add_timestamp(
+                        pic,
+                        text_format=step.get("format", "%Y-%m-%d %H:%M:%S %Z"),
+                        position=step.get("position", "bottom_right"),
+                        size=step.get("size", 24),
+                        color=step.get("color", "white"),
+                        font_path=step.get(
+                            "font_path"
+                        ),  # Allow custom font path from config
+                        background_color=step.get("background_color", None),
+                        background_padding=step.get("background_padding", 2),
+                        custom_text=step.get("custom_text", None),
+                        timezone=global_config.get("timezone", "UTC"),
+                    )
         elif step["type"] == "text":
             if step.get("enabled", False) and step.get("text_content"):
                 logger.debug(
@@ -455,16 +483,17 @@ def postprocess(
                     f"background_color={step.get('background_color', None)}, "
                     f"background_padding={step.get('background_padding', 2)}"
                 )
-                pic = _add_text_overlay(
-                    pic=pic,
-                    text_to_draw=step.get("text_content"),
-                    position=step.get("position", "bottom_right"),
-                    size=step.get("size", 24),
-                    color=step.get("color", "white"),
-                    font_path=step.get("font_path", None),
-                    background_color=step.get("background_color", None),
-                    background_padding=step.get("background_padding", 2),
-                )
+                with profiler.timed("postprocess.text"):
+                    pic = _add_text_overlay(
+                        pic=pic,
+                        text_to_draw=step.get("text_content"),
+                        position=step.get("position", "bottom_right"),
+                        size=step.get("size", 24),
+                        color=step.get("color", "white"),
+                        font_path=step.get("font_path", None),
+                        background_color=step.get("background_color", None),
+                        background_padding=step.get("background_padding", 2),
+                    )
             elif not step.get("text_content") and step.get("enabled", False):
                 logger.warning(
                     "Generic text step is enabled but no 'text_content' was provided."
@@ -472,7 +501,10 @@ def postprocess(
         elif step["type"] == "sun_path":
             if step.get("enabled", False):
                 logger.debug("Adding sun path overlay")
-                pic = _add_sun_path_overlay(pic, global_config, camera_config, step)
+                with profiler.timed("postprocess.sun_path"):
+                    pic = _add_sun_path_overlay(pic, global_config, camera_config, step)
+
+        step_index += 1
 
     return pic
 
@@ -496,6 +528,8 @@ def rotate(pic: Image.Image, angle: int) -> Image.Image:
     """
     Rotates an image by a specified angle.
     """
+    if angle % 360 == 180:
+        return pic.transpose(Image.Transpose.ROTATE_180)
     return pic.rotate(angle, expand=True)
 
 
@@ -515,6 +549,8 @@ def resize(
     if height is None and width is not None:
         aspect_ratio = pic.height / pic.width
         height = int(width * aspect_ratio)
+    if pic.size == (width, height):
+        return pic
     return pic.resize(size=(width, height), reducing_gap=3.0)  # type: ignore
 
 

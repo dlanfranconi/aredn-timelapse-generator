@@ -1,6 +1,7 @@
 cameras:
   picam-hq-6mm:
     capture_method: picamera2
+    main_size: [1920, 1440]
     denoise_mode: HighQuality
     day_settings:
       trigger_exposure_composite_value: 2.0
@@ -9,11 +10,12 @@ cameras:
     exposure_control:
       enabled: true
       default_mode: day
-      target_luma: 0.45
+      target_luma: 0.35
       deadband: 0.08
+      adjustment_strength: 0.35
       min_adjustment_factor: 0.3
       max_adjustment_factor: 3.0
-      metering_area: 0.00,0.00,1.00,1.00
+      metering_area: 0.00,0.65,1.00,1.00
       day:
         enabled: true
         min_exposure_time: 100
@@ -39,6 +41,23 @@ cameras:
         angle: 180
       - type: resize
         height: 1440
+      - background_color: rgba(255, 255, 255, 0.3)
+        enabled: true
+        major_bar_color: grey
+        major_bar_width: 4
+        minor_bar_color: '#333333'
+        minor_bar_width: 2
+        overlay_bar_color: rgba(255, 0, 0, 0.5)
+        overlay_bar_width: 4
+        overlay_border_color: white
+        overlay_border_width: 3
+        overlay_rect_height_ratio: 1
+        overlay_rect_width: 15
+        overlay_width: 1000
+        padding: 5
+        position: bottom_center
+        sun_arc_color: rgba(255, 125, 0, 0.65)
+        type: sun_path
       - type: timestamp
         enabled: true
         size: 24
@@ -52,6 +71,12 @@ global:
   timezone: America/Los_Angeles
   work_dir: /srv/fenetre/data
   deployement_name: zerohq.fenetre.cam
+  profiler:
+    enabled: false
+    sample_interval_s: 0.25
+    report_interval_s: 60
+    max_stack_depth: 8
+    max_entries: 10
   storage_management:
     enabled: true
     check_interval_s: 600
@@ -63,5 +88,3 @@ admin_server:
 
 timelapse:
   daily_timelapse:
-    file_extension: mp4 # Only available option on pi zero
-    framerate: 30 # Max available on pi zero

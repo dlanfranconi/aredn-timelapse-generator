@@ -6,6 +6,7 @@ global: #Requires app restart
     fenetre.gopro: DEBUG
     fenetre.postprocess: WARNING
   timezone: "America/Los_Angeles"
+  serialize_background_jobs: auto # auto enables on single-core systems like Pi Zero
   sunrise_sunset_interval_s: 10
   storage_management:
     enabled: true

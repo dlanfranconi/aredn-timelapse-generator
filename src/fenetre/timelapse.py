@@ -13,6 +13,7 @@ from PIL import Image
 
 from fenetre.admin_server import metric_timelapse_queue_size
 from fenetre.platform_utils import is_raspberry_pi
+from fenetre import profiler
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +204,14 @@ def create_timelapse(
         ]
         logger.info(f"Running ffmpeg first pass: {' '.join(first_pass_cmd)}")
         if not dry_run:
-            subprocess.run(
-                first_pass_cmd,
-                cwd=tmp_dir,  # We need a temporary file to store the first pass log
-                check=True,
-                stdout=ffmpeg_log_stream,
-                stderr=ffmpeg_log_stream,
-            )
+            with profiler.timed("timelapse.ffmpeg_first_pass"):
+                subprocess.run(
+                    first_pass_cmd,
+                    cwd=tmp_dir,  # We need a temporary file to store the first pass log
+                    check=True,
+                    stdout=ffmpeg_log_stream,
+                    stderr=ffmpeg_log_stream,
+                )
 
             second_pass_cmd = ffmpeg_cmd + [
                 "-pass",
@@ -218,24 +220,26 @@ def create_timelapse(
             ]
             logger.info(f"Running ffmpeg second pass: {' '.join(second_pass_cmd)}")
             if not dry_run:
+                with profiler.timed("timelapse.ffmpeg_second_pass"):
+                    subprocess.run(
+                        second_pass_cmd,
+                        cwd=tmp_dir,
+                        check=True,
+                        stdout=ffmpeg_log_stream,
+                        stderr=ffmpeg_log_stream,
+                    )
+    else:
+        final_cmd = ffmpeg_cmd + [os.path.abspath(tmp_timelapse_filepath)]
+        logger.info(f"Running ffmpeg: {' '.join(final_cmd)}")
+        if not dry_run:
+            with profiler.timed("timelapse.ffmpeg"):
                 subprocess.run(
-                    second_pass_cmd,
+                    final_cmd,
                     cwd=tmp_dir,
                     check=True,
                     stdout=ffmpeg_log_stream,
                     stderr=ffmpeg_log_stream,
                 )
-    else:
-        final_cmd = ffmpeg_cmd + [os.path.abspath(tmp_timelapse_filepath)]
-        logger.info(f"Running ffmpeg: {' '.join(final_cmd)}")
-        if not dry_run:
-            subprocess.run(
-                final_cmd,
-                cwd=tmp_dir,
-                check=True,
-                stdout=ffmpeg_log_stream,
-                stderr=ffmpeg_log_stream,
-            )
     if isinstance(ffmpeg_log_stream, TextIOWrapper):
         ffmpeg_log_stream.close()
 

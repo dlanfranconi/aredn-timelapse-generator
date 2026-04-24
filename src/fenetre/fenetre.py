@@ -72,6 +72,7 @@ from fenetre.timelapse import (
 from fenetre.ui_utils import copy_public_html_files
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.mqtt import MQTTManager
+from fenetre import profiler
 
 _GOPRO_BLE_AVAILABLE = True
 try:
@@ -112,6 +113,7 @@ admin_server_instance_global = None
 exit_event = threading.Event()
 timelapse_queue_file = None
 timelapse_queue_lock = threading.Lock()
+background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
 
 
@@ -125,6 +127,24 @@ def configure_mqtt_manager(global_cfg: Dict) -> None:
     if mqtt_cfg.get("enabled"):
         deployment_name = global_cfg.get("deployment_name", "fenetre.cam")
         mqtt_manager = MQTTManager(deployment_name, mqtt_cfg)
+
+
+def configure_profiler(global_cfg: Dict) -> None:
+    profiler.configure(global_cfg.get("profiler", {}))
+    profiler.start()
+
+
+def run_serialized_background_job(job_name: str, func: Callable, *args, **kwargs):
+    """Run a heavy background task without overlapping other heavy background tasks."""
+    serialize_background_jobs = global_config.get("serialize_background_jobs", "auto")
+    if serialize_background_jobs == "auto":
+        serialize_background_jobs = (os.cpu_count() or 1) <= 1
+    if not serialize_background_jobs:
+        return func(*args, **kwargs)
+    logger.info(f"Waiting for background job slot: {job_name}")
+    with background_job_lock:
+        logger.info(f"Starting serialized background job: {job_name}")
+        return func(*args, **kwargs)
 
 
 def interruptible_sleep(
@@ -247,29 +267,31 @@ def get_pic_dir_and_filename(camera_name: str) -> Tuple[str, str]:
 def write_pic_to_disk(
     pic: Image.Image, pic_path: str, optimize: bool = False, exif_data: bytes = b""
 ):
-    os.makedirs(os.path.dirname(pic_path), exist_ok=True)
-    os.chmod(os.path.dirname(pic_path), 33277)  # rwxrwxr-x
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Saving picture {pic_path}")
-    if optimize is True:
-        jpeg_io = BytesIO()
-        pic.convert("RGB").save(jpeg_io, format="JPEG", quality=90, exif=exif_data)
-        jpeg_io.seek(0)
-        jpeg_bytes = jpeg_io.read()
-        optimized_jpeg_bytes = mozjpeg_lossless_optimization.optimize(jpeg_bytes)
-        with open(pic_path, "wb") as output_file:
-            output_file.write(optimized_jpeg_bytes)
-    else:
-        pic.convert("RGB").save(pic_path, exif=exif_data)
+    with profiler.timed("picture.write_to_disk"):
+        os.makedirs(os.path.dirname(pic_path), exist_ok=True)
+        os.chmod(os.path.dirname(pic_path), 33277)  # rwxrwxr-x
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Saving picture {pic_path}")
+        if optimize is True:
+            jpeg_io = BytesIO()
+            pic.convert("RGB").save(jpeg_io, format="JPEG", quality=90, exif=exif_data)
+            jpeg_io.seek(0)
+            jpeg_bytes = jpeg_io.read()
+            optimized_jpeg_bytes = mozjpeg_lossless_optimization.optimize(jpeg_bytes)
+            with open(pic_path, "wb") as output_file:
+                output_file.write(optimized_jpeg_bytes)
+        else:
+            pic.convert("RGB").save(pic_path, exif=exif_data)
 
 
 def update_latest_link(pic_path: str):
-    cam_dir = os.path.join(os.path.dirname(pic_path), os.pardir)
-    tmp_link = os.path.join(cam_dir, "new.jpg")
-    latest_link = os.path.join(cam_dir, "latest.jpg")
-    relative_path = os.path.relpath(pic_path, cam_dir)
-    os.symlink(relative_path, tmp_link)
-    os.rename(tmp_link, latest_link)
+    with profiler.timed("picture.update_latest_link"):
+        cam_dir = os.path.join(os.path.dirname(pic_path), os.pardir)
+        tmp_link = os.path.join(cam_dir, "new.jpg")
+        latest_link = os.path.join(cam_dir, "latest.jpg")
+        relative_path = os.path.relpath(pic_path, cam_dir)
+        os.symlink(relative_path, tmp_link)
+        os.rename(tmp_link, latest_link)
 
 
 def get_pic_from_local_command(
@@ -469,7 +491,8 @@ def snap(camera_name, camera_config: Dict):
     previous_pic_fullpath = os.path.join(previous_pic_dir, previous_pic_filename)
     previous_mode = "unknown"
     try:
-        previous_pic = capture(mode=previous_mode)
+        with profiler.timed(f"camera.{camera_name}.capture"):
+            previous_pic = capture(mode=previous_mode)
     except Exception as e:
         error_msg = f"Failed to capture initial image for {camera_name}: {e}"
         logger.error(error_msg, exc_info=True)
@@ -477,12 +500,13 @@ def snap(camera_name, camera_config: Dict):
         raise
     previous_exif_bytes = previous_pic.info.get("exif") or b""
     if len(camera_config.get("postprocessing", [])) > 0:
-        previous_pic = postprocess(
-            previous_pic,
-            camera_config.get("postprocessing", []),
-            global_config,
-            camera_config,
-        )
+        with profiler.timed(f"camera.{camera_name}.postprocess"):
+            previous_pic = postprocess(
+                previous_pic,
+                camera_config.get("postprocessing", []),
+                global_config,
+                camera_config,
+            )
     fixed_snap_interval = camera_config.get("snap_interval_s", None)
     if camera_name not in sleep_intervals:
         sleep_intervals[camera_name] = (
@@ -503,13 +527,15 @@ def snap(camera_name, camera_config: Dict):
         # Read EXIF data that will be used for metrics
         from .postprocess import get_exif_dict
 
-        previous_exif = get_exif_dict(previous_pic_fullpath)
+        with profiler.timed(f"camera.{camera_name}.exif_read"):
+            previous_exif = get_exif_dict(previous_pic_fullpath)
 
         # Gather and publish metrics after we have succesfully written the picture on disk
         # TODO: We should only do that if the admin server is enabled.
         if camera_config.get("gather_metrics", True):
             try:
-                publish_metrics_from_exif_dict(previous_exif, camera_name)
+                with profiler.timed(f"camera.{camera_name}.publish_exif_metrics"):
+                    publish_metrics_from_exif_dict(previous_exif, camera_name)
             except Exception as e:
                 logger.error(
                     f"Error gathering metrics for {previous_pic_fullpath}: {e}"
@@ -537,9 +563,10 @@ def snap(camera_name, camera_config: Dict):
             if exposure_state.get("modes"):
                 metadata["picamera2_exposure_control"] = exposure_state
         metadata_path = os.path.join(previous_pic_dir, os.path.pardir, "metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=4)
-            logger.debug(f"{camera_name}: Updated metadata file {metadata_path}")
+        with profiler.timed(f"camera.{camera_name}.metadata_write"):
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=4)
+                logger.debug(f"{camera_name}: Updated metadata file {metadata_path}")
 
         current_mode = get_day_night_from_exif(
             previous_exif, camera_config, previous_mode, previous_pic_fullpath
@@ -587,7 +614,8 @@ def snap(camera_name, camera_config: Dict):
             )
 
         try:
-            new_pic = capture(current_mode)
+            with profiler.timed(f"camera.{camera_name}.capture"):
+                new_pic = capture(current_mode)
         except Exception as e:
             error_msg = f"Could not fetch picture for {camera_name}: {e}"
             logger.warning(error_msg)
@@ -599,17 +627,19 @@ def snap(camera_name, camera_config: Dict):
             raise ValueError
         new_exif_bytes = new_pic.info.get("exif") or b""
         if len(camera_config.get("postprocessing", [])) > 0:
-            new_pic = postprocess(
-                new_pic,
-                camera_config.get("postprocessing", []),
-                global_config,
-                camera_config,
-            )
+            with profiler.timed(f"camera.{camera_name}.postprocess"):
+                new_pic = postprocess(
+                    new_pic,
+                    camera_config.get("postprocessing", []),
+                    global_config,
+                    camera_config,
+                )
         # SSIM logic
         if not (sunrise_sunset or fixed_snap_interval):
-            ssim = get_ssim_for_area(
-                previous_pic, new_pic, camera_config.get("ssim_area", None)
-            )
+            with profiler.timed(f"camera.{camera_name}.ssim"):
+                ssim = get_ssim_for_area(
+                    previous_pic, new_pic, camera_config.get("ssim_area", None)
+                )
             ssim_setpoint = camera_config.get("ssim_setpoint", 0.85)
             if ssim < ssim_setpoint:
                 sleep_intervals[camera_name] = sleep_intervals[camera_name] * 0.9
@@ -1093,6 +1123,7 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
             log_backup_count=global_config.get("log_backup_count", 5),
         )
         apply_module_levels(global_config.get("logging_levels", {}))
+        configure_profiler(global_config)
         configure_mqtt_manager(global_config)
 
         try:
@@ -1138,6 +1169,7 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
         global_config = new_global_config
         admin_server_config = new_admin_server_config
         timelapse_config = new_timelapse_config
+        configure_profiler(global_config)
         configure_mqtt_manager(global_config)
 
     # Update cameras_config and manage camera threads
@@ -1380,6 +1412,8 @@ def shutdown_application():
         mqtt_manager.stop()
         mqtt_manager = None
 
+    profiler.stop()
+
     # Stop Timelapse and Daylight threads
     global timelapse_thread_global, daylight_thread_global
     if timelapse_thread_global and timelapse_thread_global.is_alive():
@@ -1462,7 +1496,11 @@ def frequent_timelapse_loop():
             if timelapse_settings.get("framerate"):
                 timelapse_args["framerate"] = timelapse_settings.get("framerate")
 
-            result = create_timelapse(**timelapse_args)
+            result = run_serialized_background_job(
+                f"frequent_timelapse:{pic_dir}",
+                create_timelapse,
+                **timelapse_args,
+            )
             if result:
                 camera_name = os.path.basename(
                     os.path.dirname(os.path.normpath(pic_dir))
@@ -1500,7 +1538,9 @@ def timelapse_loop():
 
         if dir_to_process:
             try:
-                result = create_timelapse(
+                result = run_serialized_background_job(
+                    f"daily_timelapse:{dir_to_process}",
+                    create_timelapse,
                     dir=dir_to_process,
                     overwrite=True,
                     two_pass=daily_cfg.get("ffmpeg_2pass", True),
@@ -1575,7 +1615,13 @@ def daylight_loop():
                 logger.info(
                     f"Running daylight in {daily_pic_dir} with sky_area {sky_area}"
                 )
-                run_end_of_day(camera_name, daily_pic_dir, sky_area)
+                run_serialized_background_job(
+                    f"daylight:{daily_pic_dir}",
+                    run_end_of_day,
+                    camera_name,
+                    daily_pic_dir,
+                    sky_area,
+                )
                 daily_cfg = timelapse_config.get("daily_timelapse")
                 if daily_cfg and daily_cfg.get("enabled", True):
                     add_to_timelapse_queue(

@@ -5,6 +5,8 @@ from typing import Dict, Optional, Tuple
 
 from PIL import Image
 
+from fenetre import profiler
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_EXPOSURE_CONTROL = {
@@ -12,6 +14,7 @@ DEFAULT_EXPOSURE_CONTROL = {
     "default_mode": "day",
     "target_luma": 0.45,
     "deadband": 0.08,
+    "adjustment_strength": 1.0,
     "min_adjustment_factor": 0.8,
     "max_adjustment_factor": 1.25,
     "metering_area": None,
@@ -267,10 +270,24 @@ class Picamera2Capture:
             return None
         return crop_box
 
-    def _measure_luma(self, pic: Image.Image) -> float:
+    def _is_full_image_crop(
+        self, image: Image.Image, crop_box: Optional[Tuple[int, int, int, int]]
+    ) -> bool:
+        return crop_box is None or crop_box == (0, 0, image.width, image.height)
+
+    def _measure_luma(
+        self, pic: Image.Image, jpeg_bytes: Optional[bytes] = None
+    ) -> float:
         crop_box = self._crop_box(pic, self.exposure_control.get("metering_area"))
-        target = pic.crop(crop_box) if crop_box else pic
-        thumbnail = target.convert("L").resize((64, 64))
+        if jpeg_bytes and self._is_full_image_crop(pic, crop_box):
+            with Image.open(BytesIO(jpeg_bytes)) as luma_pic:
+                luma_pic.draft("L", (64, 64))
+                thumbnail = luma_pic.convert("L")
+                thumbnail.thumbnail((64, 64), reducing_gap=3.0)
+        else:
+            thumbnail = pic.resize((64, 64), box=crop_box, reducing_gap=3.0).convert(
+                "L"
+            )
         midpoint = thumbnail.width * thumbnail.height // 2
         seen = 0
         for luma, count in enumerate(thumbnail.histogram()):
@@ -288,16 +305,24 @@ class Picamera2Capture:
             raw_factor = target_luma / measured_luma
         if abs(raw_factor - 1.0) < deadband:
             return 1.0
+        adjustment_strength = max(
+            0.0, min(1.0, float(self.exposure_control.get("adjustment_strength", 1.0)))
+        )
+        adjusted_factor = 1.0 + ((raw_factor - 1.0) * adjustment_strength)
         return max(
             float(self.exposure_control.get("min_adjustment_factor", 0.8)),
             min(
                 float(self.exposure_control.get("max_adjustment_factor", 1.25)),
-                raw_factor,
+                adjusted_factor,
             ),
         )
 
     def _update_exposure_control(
-        self, mode: str, pic: Image.Image, metadata: Dict
+        self,
+        mode: str,
+        pic: Image.Image,
+        metadata: Dict,
+        jpeg_bytes: Optional[bytes] = None,
     ) -> None:
         if not self.exposure_control.get("enabled", False):
             return
@@ -307,7 +332,7 @@ class Picamera2Capture:
         if not mode_config.get("enabled", False):
             return
 
-        measured_luma = self._measure_luma(pic)
+        measured_luma = self._measure_luma(pic, jpeg_bytes=jpeg_bytes)
         factor = self._bounded_factor(measured_luma)
         previous_controls = self.dynamic_controls_by_mode.get(exposure_mode, {})
         current_exposure_time = int(
@@ -332,10 +357,12 @@ class Picamera2Capture:
         max_gain = float(mode_config.get("max_analogue_gain", 4.0))
 
         desired_total = current_exposure_time * current_gain * factor
+        next_gain = min_gain
         next_exposure_time = int(
-            max(min_exposure, min(max_exposure, desired_total / current_gain))
+            max(min_exposure, min(max_exposure, desired_total / next_gain))
         )
-        next_gain = max(min_gain, min(max_gain, desired_total / next_exposure_time))
+        if desired_total > next_exposure_time * next_gain:
+            next_gain = max(min_gain, min(max_gain, desired_total / next_exposure_time))
 
         self.dynamic_controls_by_mode[exposure_mode] = {
             "AeEnable": False,
@@ -360,18 +387,23 @@ class Picamera2Capture:
         controls_to_apply.update(self.dynamic_controls_by_mode.get(exposure_mode, {}))
 
         if controls_to_apply:
-            self.picam2.set_controls(controls_to_apply)
+            with profiler.timed("picamera2.set_controls"):
+                self.picam2.set_controls(controls_to_apply)
             if mode != self.last_mode:
                 time.sleep(float(self.camera_config.get("control_warmup_s", 0.5)))
         self.last_mode = mode
 
         jpeg_io = BytesIO()
-        self.picam2.capture_file(jpeg_io, format="jpeg")
-        jpeg_bytes = jpeg_io.getvalue()
-        pic = Image.open(BytesIO(jpeg_bytes))
+        with profiler.timed("picamera2.capture_file"):
+            self.picam2.capture_file(jpeg_io, format="jpeg")
+        with profiler.timed("picamera2.open_jpeg"):
+            jpeg_bytes = jpeg_io.getvalue()
+            pic = Image.open(BytesIO(jpeg_bytes))
         pic.info["exif"] = pic.info.get("exif", b"")
-        metadata = self._capture_metadata()
-        self._update_exposure_control(mode, pic, metadata)
+        with profiler.timed("picamera2.capture_metadata"):
+            metadata = self._capture_metadata()
+        with profiler.timed("picamera2.exposure_control"):
+            self._update_exposure_control(mode, pic, metadata, jpeg_bytes=jpeg_bytes)
         return pic
 
 
