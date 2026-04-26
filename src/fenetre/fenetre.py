@@ -64,6 +64,7 @@ from fenetre.picamera import Picamera2Capture
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.timelapse import (
     add_to_timelapse_queue,
+    create_incremental_hls_timelapse,
     create_timelapse,
     get_next_from_timelapse_queue,
     get_queue_size_and_set_metric,
@@ -1494,27 +1495,37 @@ def frequent_timelapse_loop():
         timelapse_settings_tuple = frequent_timelapse_q.popleft()
         pic_dir, timelapse_settings = timelapse_settings_tuple
         try:
+            output_format = timelapse_settings.get("output_format", "file")
             timelapse_args = {
                 "dir": pic_dir,
-                "overwrite": True,
-                "two_pass": timelapse_settings.get("ffmpeg_2pass", False),
                 "log_dir": global_config.get("log_dir"),
                 "ffmpeg_options": timelapse_settings.get("ffmpeg_options", ""),
                 "log_max_bytes": global_config.get("log_max_bytes", 10000000),
                 "log_backup_count": global_config.get("log_backup_count", 5),
             }
-            if timelapse_settings.get("file_extension"):
-                timelapse_args["file_extension"] = timelapse_settings.get(
-                    "file_extension"
-                )
             if timelapse_settings.get("framerate"):
                 timelapse_args["framerate"] = timelapse_settings.get("framerate")
 
-            result = run_serialized_background_job(
-                f"frequent_timelapse:{pic_dir}",
-                create_timelapse,
-                **timelapse_args,
-            )
+            if output_format == "hls":
+                result = run_serialized_background_job(
+                    f"frequent_timelapse_hls:{pic_dir}",
+                    create_incremental_hls_timelapse,
+                    **timelapse_args,
+                )
+            else:
+                timelapse_args["overwrite"] = True
+                timelapse_args["two_pass"] = timelapse_settings.get(
+                    "ffmpeg_2pass", False
+                )
+                if timelapse_settings.get("file_extension"):
+                    timelapse_args["file_extension"] = timelapse_settings.get(
+                        "file_extension"
+                    )
+                result = run_serialized_background_job(
+                    f"frequent_timelapse:{pic_dir}",
+                    create_timelapse,
+                    **timelapse_args,
+                )
             if result:
                 camera_name = os.path.basename(
                     os.path.dirname(os.path.normpath(pic_dir))

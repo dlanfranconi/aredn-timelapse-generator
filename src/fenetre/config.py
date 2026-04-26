@@ -503,11 +503,32 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             "timelapse.frequent_timelapse.ffmpeg_options",
             errors,
         )
+        ft_out["output_format"] = _str(
+            ft.get("output_format"),
+            "timelapse.frequent_timelapse.output_format",
+            errors,
+            default="file",
+            choices={"file", "hls"},
+        )
         ft_out["file_extension"] = _str(
             ft.get("file_extension"),
             "timelapse.frequent_timelapse.file_extension",
             errors,
             default="mp4",
+        )
+        ft_out["framerate"] = _int(
+            ft.get("framerate"),
+            "timelapse.frequent_timelapse.framerate",
+            errors,
+            default=30,
+            min_value=1,
+        )
+        ft_out["interval_s"] = _int(
+            ft.get("interval_s"),
+            "timelapse.frequent_timelapse.interval_s",
+            errors,
+            default=1200,
+            min_value=1,
         )
         out["frequent_timelapse"] = ft_out
 

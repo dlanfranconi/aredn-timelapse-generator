@@ -4,32 +4,32 @@ cameras:
     main_size: [1920, 1440]
     denoise_mode: HighQuality
     day_settings:
-      trigger_exposure_composite_value: 2.0
+      trigger_exposure_composite_value: 1.8
     night_settings:
-      trigger_exposure_composite_value: 3.0
+      trigger_exposure_composite_value: 1.99
     exposure_control:
       enabled: true
       default_mode: day
-      target_luma: 0.35
-      deadband: 0.08
+      target_luma: 0.45
+      deadband: 0.10
       adjustment_strength: 0.35
-      min_adjustment_factor: 0.3
+      min_adjustment_factor: 0.15
       max_adjustment_factor: 3.0
-      metering_area: 0.00,0.65,1.00,1.00
+      metering_area: 0.00,0.00,1.00,1.00
       day:
         enabled: true
         min_exposure_time: 100
         max_exposure_time: 1000000
         min_analogue_gain: 1.0
-        max_analogue_gain: 4.0
+        max_analogue_gain: 2.0
         start_exposure_time: 1000
         start_analogue_gain: 1.0
       night:
         enabled: true
         min_exposure_time: 1000
-        max_exposure_time: 15000000
+        max_exposure_time: 20000000
         min_analogue_gain: 2.0
-        max_analogue_gain: 2.0
+        max_analogue_gain: 4.0
         start_exposure_time: 1000000
         start_analogue_gain: 2.0
     lat: 37.6
@@ -69,6 +69,7 @@ cameras:
     redirect_stderr: true
 global:
   timezone: America/Los_Angeles
+  serialize_background_jobs: auto
   work_dir: /srv/fenetre/data
   deployement_name: zerohq.fenetre.cam
   profiler:
@@ -87,4 +88,12 @@ admin_server:
   enabled: true #Useful for metrics
 
 timelapse:
+  frequent_timelapse:
+    enabled: true
+    output_format: hls
+    interval_s: 1800
+    file_extension: mp4
+    framerate: 30
   daily_timelapse:
+    file_extension: mp4
+    framerate: 30

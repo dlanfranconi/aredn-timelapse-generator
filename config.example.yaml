@@ -30,6 +30,7 @@ global: #Requires app restart
 
 timelapse:
   frequent_timelapse:
+    output_format: file # file, hls
     # For the frequent timelapse, we typically use a hardware encoder to offload the CPU since it runs often. 2 pass is unecessary.
     ffmpeg_2pass: false
     # Recommended encoder for Intel

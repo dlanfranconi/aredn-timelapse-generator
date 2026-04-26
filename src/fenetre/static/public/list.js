@@ -265,6 +265,14 @@ function formatDate(date) {
     return `${year}-${month}-${day}`;
 }
 
+function buildTimelapsePlayerUrl(src, title) {
+    const params = new URLSearchParams({
+        src,
+        title,
+    });
+    return `timelapse.html?${params.toString()}`;
+}
+
 function createCameraListItem(camera) {
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
@@ -547,7 +555,15 @@ function updateCamera(camera, cameraData) {
             const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
             const minutesElapsed = (today - startOfDay) / 60000;
             const cacheBuster = Math.floor(minutesElapsed / 20);
-            linkTimelapseToday.href = `${photo_dir}/${todayStr}/${todayStr}.${frequentTimelapseExtension}?v=${cacheBuster}`;
+            const frequentTimelapseUrl = `${photo_dir}/${todayStr}/${todayStr}.${frequentTimelapseExtension}?v=${cacheBuster}`;
+            if (frequentTimelapseExtension === 'm3u8') {
+                linkTimelapseToday.href = buildTimelapsePlayerUrl(
+                    frequentTimelapseUrl,
+                    `${camera.title} ${todayStr} Frequent Timelapse`
+                );
+            } else {
+                linkTimelapseToday.href = frequentTimelapseUrl;
+            }
             linkTimelapseToday.textContent = `Today's Timelapse`;
 
             linkTimelapse.href = `${photo_dir}/${yesterdayStr}/${yesterdayStr}.${timelapseExtension}`;
