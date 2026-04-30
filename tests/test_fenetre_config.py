@@ -194,9 +194,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(picam["exposure_value"], 1.5)
         self.assertEqual(picam["denoise_mode"], "HighQuality")
         self.assertEqual(picam["controls"], {"AwbEnable": True})
-        self.assertEqual(
-            picam["exposure_control"]["day"]["max_exposure_time"], 20000
-        )
+        self.assertEqual(picam["exposure_control"]["day"]["max_exposure_time"], 20000)
         self.assertEqual(picam["night_settings"]["exposure_time"], 1000000)
         self.assertEqual(picam["night_settings"]["analogue_gain"], 2.0)
         self.assertFalse(picam["night_settings"]["ae_enable"])
@@ -248,6 +246,7 @@ class FenetreConfigTestCase(unittest.TestCase):
     @patch("fenetre.fenetre.update_cameras_metadata")
     @patch("fenetre.fenetre.Thread")  # Mock threads so they don't actually start
     @patch("fenetre.fenetre.GoProUtilityThread")  # Mock GoPro threads
+    @patch("fenetre.fenetre._GOPRO_BLE_AVAILABLE", True)
     @patch("fenetre.fenetre.server_run")  # Mock server_run
     @patch("fenetre.fenetre.stop_http_server")
     def test_load_and_apply_configuration_initial_load(
