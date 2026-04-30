@@ -24,10 +24,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+    "black",
+    "pytest",
+]
 gopro = [
     "bleak",
     "beautifulsoup4",
     "netifaces",
+]
+picamera2 = [
+    "picamera2",
 ]
 pyexiv2 = [
     "pyexiv2",

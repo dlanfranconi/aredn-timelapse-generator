@@ -34,15 +34,46 @@ This is mostly written in Python and it's been tested on Linux but it could run 
     ```
 
 3.  **Install the package and its dependencies:**
-    The project uses `pyproject.toml` to manage dependencies. Installing in editable mode (`-e`) is recommended for development. This command will install the `fenetre` package and all required libraries from PyPI.
+    The project uses `pyproject.toml` to manage dependencies. Installing in editable mode (`-e`) is recommended for development. This command installs the `fenetre` package and the base runtime dependencies from PyPI.
     ```bash
     pip install -e .
     ```
-    If you plan to control GoPro cameras over Bluetooth, install the optional GoPro extra:
+
+    Optional dependencies are exposed as package extras. Install only the extras you need for the machine you are setting up:
+
+    - `dev`: local development tools, including `pytest` and `black`.
+    - `gopro`: Bluetooth and network helpers for GoPro cameras.
+    - `picamera2`: Raspberry Pi camera support through `picamera2`.
+    - `pyexiv2`: optional EXIF support through `pyexiv2`.
+
+    For a development machine, install the dev extra:
     ```bash
-    pip install -e .[gopro]
+    pip install -e '.[dev]'
     ```
 
+    If you plan to control GoPro cameras over Bluetooth, install the GoPro extra:
+    ```bash
+    pip install -e '.[gopro]'
+    ```
+
+    If you plan to capture from a Raspberry Pi camera with `capture_method: picamera2`, install the Picamera2 extra:
+    ```bash
+    pip install -e '.[picamera2]'
+    ```
+
+    On Raspberry Pi OS, `picamera2` and `libcamera` are often best installed from Debian packages instead of PyPI. In that case, install the OS packages, create the virtual environment with `--system-site-packages`, and keep the Python install as the base package:
+    ```bash
+    sudo apt-get install python3-picamera2
+    python3 -m venv --system-site-packages venv
+    pip install -e .
+    ```
+
+    Extras can be combined in one install command:
+    ```bash
+    pip install -e '.[dev,gopro,picamera2,pyexiv2]'
+    ```
+
+    Production deployments should usually install only the base package unless a specific camera or workflow requires an extra. The base install does not install Raspberry Pi camera libraries.
 
 ## Usage
 

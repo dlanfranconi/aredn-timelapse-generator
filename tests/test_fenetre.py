@@ -400,6 +400,20 @@ class TestFenetre(unittest.TestCase):
             {"ae_enable": False, "exposure_time": 3000000, "analogue_gain": 2.0},
         )
 
+    def test_picamera2_exposure_metering_percentile_tracks_bright_pixels(self):
+        image = Image.new("L", (64, 64), color=0)
+        for x in range(58, 64):
+            for y in range(64):
+                image.putpixel((x, y), 255)
+
+        capture = Picamera2Capture.__new__(Picamera2Capture)
+        capture.closed = True
+        capture.exposure_control = {"metering_area": None, "metering_percentile": 50}
+        self.assertEqual(capture._measure_luma(image), 0.0)
+
+        capture.exposure_control["metering_percentile"] = 95
+        self.assertEqual(capture._measure_luma(image), 1.0)
+
     def test_get_ssim_for_area_clamps_crop_to_image_size(self):
         image1 = Image.new("RGB", (1921, 1440), color="black")
         image2 = Image.new("RGB", (1921, 1440), color="black")

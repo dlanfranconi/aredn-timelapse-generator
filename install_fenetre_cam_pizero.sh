@@ -17,6 +17,7 @@ SERVICE_NAME="${SERVICE_NAME:-fenetre.service}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-fenetre-cam}"
 DISABLE_NGINX_DEFAULT="${DISABLE_NGINX_DEFAULT:-1}"
 LOCAL_CONFIG="${LOCAL_CONFIG:-config.smaller.local.yaml}"
+INSTALL_MOZJPEG_OPTIMIZATION="${INSTALL_MOZJPEG_OPTIMIZATION:-0}"
 
 PYTHON_PACKAGES=(
   python3-pytz
@@ -42,13 +43,15 @@ SYSTEM_PACKAGES=(
   ffmpeg
   vim
   nginx
+  prometheus-node-exporter
   rpicam-apps
   git
 )
 
-PIP_PACKAGES=(
-  mozjpeg-lossless-optimization
-)
+PIP_PACKAGES=()
+if [[ "${INSTALL_MOZJPEG_OPTIMIZATION}" == "1" ]]; then
+  PIP_PACKAGES+=(mozjpeg-lossless-optimization)
+fi
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -178,7 +181,9 @@ install_package() {
     sudo -u "${APP_USER}" python3 -m venv --system-site-packages "${VENV_DIR}"
   fi
 
-  sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install "${PIP_PACKAGES[@]}"
+  if (( ${#PIP_PACKAGES[@]} > 0 )); then
+    sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install "${PIP_PACKAGES[@]}"
+  fi
   sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --no-deps -e "${APP_DIR}"
 }
 

@@ -15,7 +15,6 @@ from logging.handlers import RotatingFileHandler
 from threading import Thread
 from typing import Callable, Dict, List, Optional, Tuple
 
-import mozjpeg_lossless_optimization
 import pytz
 import requests
 from absl import app, flags
@@ -60,7 +59,6 @@ from fenetre.camera_utils import (
 )
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
-from fenetre.picamera import Picamera2Capture
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.timelapse import (
     add_to_timelapse_queue,
@@ -92,6 +90,11 @@ import numpy as np
 from waitress import serve as waitress_serve
 
 logger = logging.getLogger(__name__)
+
+try:
+    import mozjpeg_lossless_optimization
+except ModuleNotFoundError:
+    mozjpeg_lossless_optimization = None
 
 # Define flags at module level
 if "config" not in flags.FLAGS:
@@ -133,6 +136,13 @@ def configure_mqtt_manager(global_cfg: Dict) -> None:
 def configure_profiler(global_cfg: Dict) -> None:
     profiler.configure(global_cfg.get("profiler", {}))
     profiler.start()
+
+
+def derive_global_config(global_cfg: Dict) -> Dict:
+    """Add derived runtime paths that are not stored in the YAML config."""
+    global_cfg = dict(global_cfg)
+    global_cfg["pic_dir"] = os.path.join(global_cfg.get("work_dir", "."), "photos")
+    return global_cfg
 
 
 def run_serialized_background_job(job_name: str, func: Callable, *args, **kwargs):
@@ -274,6 +284,11 @@ def write_pic_to_disk(
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"Saving picture {pic_path}")
         if optimize is True:
+            if mozjpeg_lossless_optimization is None:
+                raise RuntimeError(
+                    "mozjpeg optimization was requested, but "
+                    "mozjpeg-lossless-optimization is not installed."
+                )
             jpeg_io = BytesIO()
             pic.convert("RGB").save(jpeg_io, format="JPEG", quality=90, exif=exif_data)
             jpeg_io.seek(0)
@@ -478,6 +493,8 @@ def snap(camera_name, camera_config: Dict):
             return Image.open(BytesIO(jpeg_bytes))
 
         if camera_config.get("capture_method") == "picamera2":
+            from fenetre.picamera import Picamera2Capture
+
             if picamera2_capture is None:
                 picamera2_capture = Picamera2Capture(
                     camera_config,
@@ -1125,12 +1142,9 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
 
     if initial_load:
         server_config = new_server_config
-        global_config = new_global_config
+        global_config = derive_global_config(new_global_config)
         admin_server_config = new_admin_server_config
         timelapse_config = new_timelapse_config
-        global_config["pic_dir"] = os.path.join(
-            global_config.get("work_dir", "."), "photos"
-        )
         setup_logging(
             global_config.get("log_dir"),
             global_config.get("logging_level"),
@@ -1181,7 +1195,7 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
         ):
             stop_http_server()
         server_config = new_server_config
-        global_config = new_global_config
+        global_config = derive_global_config(new_global_config)
         admin_server_config = new_admin_server_config
         timelapse_config = new_timelapse_config
         configure_profiler(global_config)
@@ -1494,6 +1508,9 @@ def frequent_timelapse_loop():
             continue
         timelapse_settings_tuple = frequent_timelapse_q.popleft()
         pic_dir, timelapse_settings = timelapse_settings_tuple
+        if not os.path.isdir(pic_dir):
+            logger.info("Skipping frequent timelapse for missing dir: %s", pic_dir)
+            continue
         try:
             output_format = timelapse_settings.get("output_format", "file")
             timelapse_args = {

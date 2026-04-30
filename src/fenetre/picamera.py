@@ -18,6 +18,7 @@ DEFAULT_EXPOSURE_CONTROL = {
     "min_adjustment_factor": 0.8,
     "max_adjustment_factor": 1.25,
     "metering_area": None,
+    "metering_percentile": 50,
     "day": {
         "enabled": True,
         "min_exposure_time": 100,
@@ -288,11 +289,15 @@ class Picamera2Capture:
             thumbnail = pic.resize((64, 64), box=crop_box, reducing_gap=3.0).convert(
                 "L"
             )
-        midpoint = thumbnail.width * thumbnail.height // 2
+        pixel_count = thumbnail.width * thumbnail.height
+        percentile = max(
+            0.0, min(100.0, float(self.exposure_control.get("metering_percentile", 50)))
+        )
+        threshold = int(pixel_count * percentile / 100.0)
         seen = 0
         for luma, count in enumerate(thumbnail.histogram()):
             seen += count
-            if seen > midpoint:
+            if seen > threshold:
                 return luma / 255.0
         return 0.0
 

@@ -237,7 +237,7 @@ main() {
 
   log "Optimization complete"
   echo "fenetre.service was not started or disabled by this script."
-  echo "Boot config changes require a reboot before they fully take effect."
+  echo "Reboot this host after optimization; boot config changes require it before they fully take effect."
 }
 
 main "$@"

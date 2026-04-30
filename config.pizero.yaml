@@ -15,7 +15,10 @@ cameras:
       adjustment_strength: 0.35
       min_adjustment_factor: 0.15
       max_adjustment_factor: 3.0
-      metering_area: 0.00,0.00,1.00,1.00
+      # Camera exposure is measured before the 180-degree postprocessing rotation.
+      # This corresponds to the upper-left sky area in the saved image.
+      metering_area: 0.66,0.65,1.00,1.00
+      metering_percentile: 95
       day:
         enabled: true
         min_exposure_time: 100
@@ -71,7 +74,7 @@ global:
   timezone: America/Los_Angeles
   serialize_background_jobs: auto
   work_dir: /srv/fenetre/data
-  deployement_name: zerohq.fenetre.cam
+  deployment_name: zerohq.fenetre.cam
   profiler:
     enabled: false
     sample_interval_s: 0.25
