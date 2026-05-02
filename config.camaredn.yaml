@@ -1,0 +1,69 @@
+admin_server:
+  enabled: true
+  listen: 0.0.0.0:5804 [::]:5804
+cameras:
+  k6pvj-sweeney-ridge:
+    lat: 37.60898
+    lon: -122.45759
+    sky_area: 400,0,1920,250
+    ssim_area: 400,0,1920,250
+    ssim_setpoint: 0.85
+    url: http://uvc-g3-flex-4a6d.local.mesh/snap.jpeg
+  kj6weg-fishcam:
+    lat: 37.86519
+    lon: -122.22125
+    sky_area: 1200,0,1920,300
+    snap_interval_s: 60
+    url: http://kj6weg-fishcam.local.mesh/snap.jpeg
+  kn6plv-cam1:
+    lat: 37.888
+    lon: -122.268
+    sky_area: 400,0,1400,400
+    ssim_area: 400,0,1400,400
+    ssim_setpoint: 0.82
+    url: http://kn6plv-cam1.local.mesh/snap.jpeg
+  orca-cam:
+    lat: 37.86478
+    lon: -122.21996
+    sky_area: 550,30,1450,180
+    snap_interval_s: 90
+    url: http://orca-cam.local.mesh/snap.jpeg
+  w6ei-fs8:
+    lat: 37.3664
+    lon: -122.1738
+    sky_area: 0,60,1280,300
+    ssim_area: 0,60,1280,300
+    ssim_setpoint: 0.88
+    url: http://w6ei-fs8-camera.local.mesh/axis-cgi/jpg/image.cgi?camera=1&width=1280
+  wa6kqb-4cam-a:
+    lat: 37.9578
+    lon: -122.31138
+    sky_area: 0,0,1280,300
+    ssim_area: 0,0,1280,600
+    ssim_setpoint: 0.9
+    url: http://4cam-a.local.mesh/jpg/image.jpg
+global:
+  log_dir: /srv/camaredn/logs
+  storage_management:
+    check_interval_s: 300
+    dry_run: false
+    enabled: true
+    work_dir_max_size_GB: 200
+  sunrise_sunset_interval_s: 10
+  timezone: America/Los_Angeles
+  tmp_dir: /dev/shm/camaredn
+  user_agent: camaredn.local.mesh (+https://camaredn.isitfoggy.com; admin@isitfoggy.com)
+  work_dir: /srv/camaredn/data
+  ui:
+    landing_page: map
+http_server:
+  enabled: true
+  listen: 0.0.0.0:5802
+timelapse:
+  frequent_timelapse:
+    enabled: true
+    ffmpeg_2pass: false
+    ffmpeg_options: -c:v libx264 -preset veryfast -crf 23 -movflags +faststart
+    file_extension: mp4
+    output_format: hls
+    interval_s: 1200

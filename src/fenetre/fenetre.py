@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import http.server
 import logging
+import mimetypes
 import os
 import shutil
 import signal
@@ -72,6 +73,9 @@ from fenetre.ui_utils import copy_public_html_files
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.mqtt import MQTTManager
 from fenetre import profiler
+
+mimetypes.add_type("application/vnd.apple.mpegurl", ".m3u8")
+mimetypes.add_type("video/mp2t", ".ts")
 
 _GOPRO_BLE_AVAILABLE = True
 try:
