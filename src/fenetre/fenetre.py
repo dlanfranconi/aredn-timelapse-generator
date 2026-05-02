@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import http.server
 import logging
 import mimetypes
@@ -1568,6 +1569,52 @@ def frequent_timelapse_loop():
         time.sleep(5)
 
 
+def cleanup_frequent_timelapse_artifacts(
+    day_dir: str, frequent_timelapse_config: Dict, daily_timelapse_config: Dict
+) -> List[str]:
+    if not frequent_timelapse_config:
+        return []
+
+    base_name = os.path.basename(os.path.normpath(day_dir))
+    deleted_paths = []
+
+    def remove_file(path):
+        if os.path.exists(path):
+            os.remove(path)
+            deleted_paths.append(path)
+            logger.info("Deleted frequent timelapse artifact: %s", path)
+
+    if frequent_timelapse_config.get("output_format") == "hls":
+        remove_file(os.path.join(day_dir, f"{base_name}.m3u8"))
+        remove_file(os.path.join(day_dir, f".{base_name}.hls-manifest.json"))
+        for segment_path in glob.glob(os.path.join(day_dir, "segment-*.ts")):
+            remove_file(segment_path)
+
+        legacy_segment_dir = os.path.join(day_dir, f"{base_name}.segments")
+        if os.path.isdir(legacy_segment_dir):
+            shutil.rmtree(legacy_segment_dir)
+            deleted_paths.append(legacy_segment_dir)
+            logger.info(
+                "Deleted frequent timelapse artifact directory: %s",
+                legacy_segment_dir,
+            )
+        return deleted_paths
+
+    frequent_timelapse_file_extension = frequent_timelapse_config.get(
+        "file_extension", "mp4"
+    )
+    if frequent_timelapse_file_extension != daily_timelapse_config.get(
+        "file_extension", "webm"
+    ):
+        remove_file(
+            os.path.join(
+                day_dir,
+                f"{base_name}.{frequent_timelapse_file_extension}",
+            )
+        )
+    return deleted_paths
+
+
 def timelapse_loop():
     """
     This is a loop to create the high quality daily timelapse. Typically these run at 60 fps, use v9 CPU encoding with a slow preset and 2 pass.
@@ -1608,29 +1655,11 @@ def timelapse_loop():
                     metric_timelapses_created_total.labels(
                         camera_name=camera_name, type="daily"
                     ).inc()
-                    # Now we can delete the frequent timelapse file if it exists
-                    frequent_timelapse_config = timelapse_config.get(
-                        "frequent_timelapse", {}
+                    cleanup_frequent_timelapse_artifacts(
+                        dir_to_process,
+                        timelapse_config.get("frequent_timelapse", {}),
+                        timelapse_config.get("daily_timelapse", {}),
                     )
-                    daily_cfg = timelapse_config.get("daily_timelapse", {})
-                    if frequent_timelapse_config:
-                        frequent_timelapse_file_extention = (
-                            frequent_timelapse_config.get("file_extension", "mp4")
-                        )
-                        if frequent_timelapse_file_extention != daily_cfg.get(
-                            "file_extension", "webm"
-                        ):
-                            frequent_timelapse_filepath = os.path.join(
-                                dir_to_process,
-                                os.path.basename(dir_to_process)
-                                + "."
-                                + frequent_timelapse_file_extention,
-                            )
-                            if os.path.exists(frequent_timelapse_filepath):
-                                os.remove(frequent_timelapse_filepath)
-                                logger.info(
-                                    f"Deleted frequent timelapse file: {frequent_timelapse_filepath}"
-                                )
                     remove_from_timelapse_queue(
                         dir_to_process, timelapse_queue_file, timelapse_queue_lock
                     )

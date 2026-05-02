@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 from PIL import Image
@@ -5,52 +7,54 @@ from io import BytesIO
 import sys
 from types import SimpleNamespace
 
-from fenetre.fenetre import get_pic_from_url, get_ssim_for_area
+from fenetre.fenetre import (
+    cleanup_frequent_timelapse_artifacts,
+    get_pic_from_url,
+    get_ssim_for_area,
+)
 from fenetre.picamera import Picamera2Capture
 
 
 class TestFenetre(unittest.TestCase):
-    @patch('fenetre.fenetre.requests.get')
-    @patch('fenetre.fenetre.time.time', return_value=1234567890)
+    @patch("fenetre.fenetre.requests.get")
+    @patch("fenetre.fenetre.time.time", return_value=1234567890)
     def test_get_pic_from_url_cache_bust(self, mock_time, mock_requests_get):
         # Mock the response from requests.get
         mock_response = MagicMock()
         mock_response.status_code = 200
         # Create a dummy image for the content
-        dummy_image = Image.new('RGB', (100, 100), color = 'red')
+        dummy_image = Image.new("RGB", (100, 100), color="red")
         byte_arr = BytesIO()
-        dummy_image.save(byte_arr, format='JPEG')
+        dummy_image.save(byte_arr, format="JPEG")
         mock_response.content = byte_arr.getvalue()
         mock_requests_get.return_value = mock_response
 
         # Test case 1: cache_bust enabled, no existing query params
-        camera_config_1 = {'cache_bust': True}
+        camera_config_1 = {"cache_bust": True}
         url_1 = "http://example.com/image.jpg"
         get_pic_from_url(url_1, 10, camera_config=camera_config_1, global_config={})
         mock_requests_get.assert_called_with(
             "http://example.com/image.jpg?_=1234567890",
             timeout=10,
-            headers={'Accept': 'image/*,*'}
+            headers={"Accept": "image/*,*"},
         )
 
         # Test case 2: cache_bust enabled, with existing query params
-        camera_config_2 = {'cache_bust': True}
+        camera_config_2 = {"cache_bust": True}
         url_2 = "http://example.com/image.jpg?param=value"
         get_pic_from_url(url_2, 10, camera_config=camera_config_2, global_config={})
         mock_requests_get.assert_called_with(
             "http://example.com/image.jpg?param=value&_=1234567890",
             timeout=10,
-            headers={'Accept': 'image/*,*'}
+            headers={"Accept": "image/*,*"},
         )
 
         # Test case 3: cache_bust disabled
-        camera_config_3 = {'cache_bust': False}
+        camera_config_3 = {"cache_bust": False}
         url_3 = "http://example.com/image.jpg"
         get_pic_from_url(url_3, 10, camera_config=camera_config_3, global_config={})
         mock_requests_get.assert_called_with(
-            "http://example.com/image.jpg",
-            timeout=10,
-            headers={'Accept': 'image/*,*'}
+            "http://example.com/image.jpg", timeout=10, headers={"Accept": "image/*,*"}
         )
 
         # Test case 4: cache_bust option not present
@@ -58,9 +62,7 @@ class TestFenetre(unittest.TestCase):
         url_4 = "http://example.com/image.jpg"
         get_pic_from_url(url_4, 10, camera_config=camera_config_4, global_config={})
         mock_requests_get.assert_called_with(
-            "http://example.com/image.jpg",
-            timeout=10,
-            headers={'Accept': 'image/*,*'}
+            "http://example.com/image.jpg", timeout=10, headers={"Accept": "image/*,*"}
         )
 
     def test_picamera2_capture_applies_base_and_mode_controls(self):
@@ -422,5 +424,84 @@ class TestFenetre(unittest.TestCase):
 
         self.assertEqual(ssim, 1.0)
 
-if __name__ == '__main__':
+    def test_cleanup_frequent_timelapse_artifacts_removes_hls_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            day_dir = os.path.join(tmp_dir, "2026-05-02")
+            os.makedirs(day_dir)
+            legacy_segment_dir = os.path.join(day_dir, "2026-05-02.segments")
+            os.makedirs(legacy_segment_dir)
+
+            hls_paths = [
+                os.path.join(day_dir, "2026-05-02.m3u8"),
+                os.path.join(day_dir, ".2026-05-02.hls-manifest.json"),
+                os.path.join(day_dir, "segment-000000.ts"),
+                os.path.join(day_dir, "segment-000002.ts"),
+                os.path.join(legacy_segment_dir, "segment-legacy.ts"),
+            ]
+            preserved_paths = [
+                os.path.join(day_dir, "2026-05-02.webm"),
+                os.path.join(day_dir, "2026-05-02T10-00-00PDT.jpg"),
+            ]
+            for path in hls_paths + preserved_paths:
+                with open(path, "w") as f:
+                    f.write("test")
+
+            deleted_paths = cleanup_frequent_timelapse_artifacts(
+                day_dir,
+                {"output_format": "hls", "file_extension": "mp4"},
+                {"file_extension": "webm"},
+            )
+
+            self.assertFalse(os.path.exists(os.path.join(day_dir, "2026-05-02.m3u8")))
+            self.assertFalse(
+                os.path.exists(os.path.join(day_dir, ".2026-05-02.hls-manifest.json"))
+            )
+            self.assertFalse(os.path.exists(os.path.join(day_dir, "segment-000000.ts")))
+            self.assertFalse(os.path.exists(os.path.join(day_dir, "segment-000002.ts")))
+            self.assertFalse(os.path.exists(legacy_segment_dir))
+            for path in preserved_paths:
+                self.assertTrue(os.path.exists(path))
+            self.assertEqual(len(deleted_paths), 5)
+
+    def test_cleanup_frequent_timelapse_artifacts_removes_file_output(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            day_dir = os.path.join(tmp_dir, "2026-05-02")
+            os.makedirs(day_dir)
+            frequent_path = os.path.join(day_dir, "2026-05-02.mp4")
+            daily_path = os.path.join(day_dir, "2026-05-02.webm")
+            for path in [frequent_path, daily_path]:
+                with open(path, "w") as f:
+                    f.write("test")
+
+            deleted_paths = cleanup_frequent_timelapse_artifacts(
+                day_dir,
+                {"output_format": "file", "file_extension": "mp4"},
+                {"file_extension": "webm"},
+            )
+
+            self.assertFalse(os.path.exists(frequent_path))
+            self.assertTrue(os.path.exists(daily_path))
+            self.assertEqual(deleted_paths, [frequent_path])
+
+    def test_cleanup_frequent_timelapse_artifacts_preserves_matching_file_extension(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            day_dir = os.path.join(tmp_dir, "2026-05-02")
+            os.makedirs(day_dir)
+            shared_path = os.path.join(day_dir, "2026-05-02.mp4")
+            with open(shared_path, "w") as f:
+                f.write("test")
+
+            deleted_paths = cleanup_frequent_timelapse_artifacts(
+                day_dir,
+                {"output_format": "file", "file_extension": "mp4"},
+                {"file_extension": "mp4"},
+            )
+
+            self.assertTrue(os.path.exists(shared_path))
+            self.assertEqual(deleted_paths, [])
+
+
+if __name__ == "__main__":
     unittest.main()

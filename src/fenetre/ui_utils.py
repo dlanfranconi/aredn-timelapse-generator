@@ -14,6 +14,9 @@ def generate_index_html(work_dir: str, global_config: dict):
     ui_config = global_config.get("ui", {})
     landing_page = ui_config.get("landing_page", "list")  # default to list
 
+    if landing_page == "map":
+        landing_page = "list"
+
     dest_path = os.path.join(work_dir, "index.html")
 
     if landing_page == "fullscreen":
