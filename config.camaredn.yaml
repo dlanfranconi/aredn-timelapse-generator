@@ -55,7 +55,8 @@ global:
   user_agent: camaredn.local.mesh (+https://camaredn.isitfoggy.com; admin@isitfoggy.com)
   work_dir: /srv/camaredn/data
   ui:
-    landing_page: map
+    landing_page: list
+    show_map_by_default: true
 http_server:
   enabled: true
   listen: 0.0.0.0:5802
