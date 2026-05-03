@@ -190,6 +190,106 @@ When using hardware encoding, set `ffmpeg_options` in the relevant timelapse con
 
 Raspberry Pi camera deployments are better served by the systemd approach above because `picamera2`, `libcamera`, and device permissions are closely tied to Raspberry Pi OS.
 
+## Recommended video encoding options
+
+Timelapse encoding is controlled per deployment in `config.yaml` under `timelapse.daily_timelapse.ffmpeg_options` and `timelapse.frequent_timelapse.ffmpeg_options`.
+
+The frequent timelapse usually benefits most from hardware encoding because it runs repeatedly and is normally viewed as HLS. The daily timelapse can use slower CPU encoding if quality or compression matters more than encode time.
+
+Good default CPU options:
+
+```yaml
+timelapse:
+  frequent_timelapse:
+    ffmpeg_2pass: false
+    ffmpeg_options: -c:v libx264 -preset veryfast -crf 23 -movflags +faststart
+    file_extension: mp4
+    output_format: hls
+```
+
+Recommended Intel VAAPI options:
+
+```yaml
+timelapse:
+  frequent_timelapse:
+    ffmpeg_2pass: false
+    ffmpeg_options: -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v h264_vaapi -qp 24 -movflags +faststart
+    file_extension: mp4
+    output_format: hls
+```
+
+The service user must be able to open the render device. For a systemd deployment, add a drop-in like this:
+
+```ini
+[Service]
+SupplementaryGroups=render video
+```
+
+Then reload and restart the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart fenetre.service
+```
+
+For Docker deployments, pass the render device through to the container:
+
+```bash
+docker run --device /dev/dri:/dev/dri ...
+```
+
+or in compose:
+
+```yaml
+services:
+  fenetre:
+    devices:
+      - /dev/dri:/dev/dri
+```
+
+Useful host checks:
+
+```bash
+ffmpeg -hide_banner -encoders | grep -E 'h264_vaapi|hevc_vaapi|h264_qsv|h264_v4l2m2m|libx264'
+ls -l /dev/dri
+```
+
+Validate VAAPI before enabling it in a production config:
+
+```bash
+ffmpeg -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=640x360:rate=30 \
+  -frames:v 30 \
+  -vaapi_device /dev/dri/renderD128 \
+  -vf format=nv12,hwupload \
+  -c:v h264_vaapi -qp 24 \
+  -f mp4 -y /tmp/fenetre-vaapi-test.mp4
+```
+
+If that command fails with a render-device permission error, fix the service user or container device access. If it fails with a VAAPI device or driver error, use CPU `libx264` until the host graphics driver stack is fixed.
+
+Quick Sync (`h264_qsv`) can be faster on some Intel systems, but it is more sensitive to driver and ffmpeg build details. Prefer VAAPI on Linux unless QSV has been tested on the exact host:
+
+```yaml
+ffmpeg_options: -c:v h264_qsv -global_quality 24 -look_ahead 0 -movflags +faststart
+```
+
+Raspberry Pi deployments can use the V4L2 mem2mem encoder when available:
+
+```yaml
+ffmpeg_options: -c:v h264_v4l2m2m -b:v 5M
+```
+
+For high-quality daily archives, VP9 CPU encoding is still reasonable when encode time is acceptable:
+
+```yaml
+timelapse:
+  daily_timelapse:
+    ffmpeg_2pass: true
+    ffmpeg_options: -c:v libvpx-vp9 -b:v 7M
+    file_extension: webm
+```
+
 ### GoPro
 
 On the first run:
