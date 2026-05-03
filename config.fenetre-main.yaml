@@ -1,0 +1,29 @@
+admin_server:
+  enabled: false
+global:
+  logging_level: INFO
+  logging_levels:
+  storage_management:
+    check_interval_s: 300
+    dry_run: false
+    enabled: true
+    work_dir_max_size_GB: 30
+  timezone: America/Los_Angeles
+  deployment_name: fenetre.cam
+  user_agent: "Your friendly neighbor at sfbay.fenetre.cam"
+  ui:
+    landing_page: list
+    show_main_website_icon: true
+    show_map_by_default: true
+    show_github_icon: true
+    linked_deployments: 
+      - base_url: https://isitfoggy.com
+      - base_url: https://camaredn.fenetre.cam
+      - base_url: https://sfbay.fenetre.cam
+      - base_url: https://360view.club
+    map_privacy_radius_m: 1000 # 1km circle shown instead of a pin; set to 0 to disable
+    map_privacy_jitter_m: 500 # optional center jitter in meters (clamped to the radius)
+  work_dir: /srv/fenetre-main/data
+http_server:
+  enabled: true
+  listen: 0.0.0.0:8887
