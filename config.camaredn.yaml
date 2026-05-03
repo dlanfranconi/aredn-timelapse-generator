@@ -2,19 +2,19 @@ admin_server:
   enabled: true
   listen: 0.0.0.0:5804 [::]:5804
 cameras:
-  k6pvj-sweeney-ridge:
-    lat: 37.60898
-    lon: -122.45759
-    sky_area: 400,0,1920,250
-    ssim_area: 400,0,1920,250
-    ssim_setpoint: 0.85
-    url: http://uvc-g3-flex-4a6d.local.mesh/snap.jpeg
-  kj6weg-fishcam:
-    lat: 37.86519
-    lon: -122.22125
-    sky_area: 1200,0,1920,300
-    snap_interval_s: 60
-    url: http://kj6weg-fishcam.local.mesh/snap.jpeg
+  #  k6pvj-sweeney-ridge:
+  #    lat: 37.60898
+  #    lon: -122.45759
+  #    sky_area: 400,0,1920,250
+  #    ssim_area: 400,0,1920,250
+  #    ssim_setpoint: 0.85
+  #    url: http://uvc-g3-flex-4a6d.local.mesh/snap.jpeg
+  #  kj6weg-fishcam:
+  #    lat: 37.86519
+  #    lon: -122.22125
+  #    sky_area: 1200,0,1920,300
+  #    snap_interval_s: 60
+  #    url: http://kj6weg-fishcam.local.mesh/snap.jpeg
   kn6plv-cam1:
     lat: 37.888
     lon: -122.268
@@ -71,7 +71,7 @@ timelapse:
   frequent_timelapse:
     enabled: true
     ffmpeg_2pass: false
-    ffmpeg_options: -c:v libx264 -preset veryfast -crf 23 -movflags +faststart
+    ffmpeg_options: -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v h264_vaapi -qp 24 -movflags +faststart
     file_extension: mp4
     output_format: hls
     interval_s: 1200
