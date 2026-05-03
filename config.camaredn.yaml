@@ -35,6 +35,13 @@ cameras:
     ssim_area: 0,60,1280,300
     ssim_setpoint: 0.88
     url: http://w6ei-fs8-camera.local.mesh/axis-cgi/jpg/image.cgi?camera=1&width=1280
+  w6ei-stanford-hill-cam:
+    lat: 37.40421
+    lon: -122.16731
+    sky_area: 0,60,1920,300
+    ssim_area: 0,60,1920,300
+    ssim_setpoint: 0.88
+    url: http://w6ei-stanford-hill-cam.local.mesh/jpg/image.jpg
   wa6kqb-4cam-a:
     lat: 37.9578
     lon: -122.31138
