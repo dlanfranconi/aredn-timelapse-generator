@@ -100,6 +100,27 @@ class GetDayNightFromExifTests(unittest.TestCase):
             "If you specify day settings, you must also specify night settings."
         )
 
+    def test_switches_to_night_from_astro_when_too_bright(self):
+        config = {
+            **self.base_config,
+            "astro_settings": {
+                "trigger_exposure_composite_value": 2000,
+                "max_brightness": 200,
+            },
+        }
+        exif_dict = {"iso": 400, "exposure_time": 10}  # composite = 4000 (still astro)
+
+        with patch("fenetre.camera_utils.Image.open") as mock_open:
+            with patch("fenetre.camera_utils.ImageStat.Stat") as mock_stat:
+                mock_img = mock_open.return_value.__enter__.return_value
+                mock_stat.return_value.mean = [250]  # Too bright
+
+                result = get_day_night_from_exif(
+                    exif_dict, config, "astro", image_path="fake.jpg"
+                )
+
+        self.assertEqual(result, "night")
+
 
 if __name__ == "__main__":
     unittest.main()

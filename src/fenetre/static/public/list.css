@@ -199,8 +199,11 @@ body.dark-mode .camera-item {
     padding: 10px;
 }
 .camera-header img {
-    width: 120px;
-    height: 67.5px;
+    width: 15vw;
+    min-width: 100px;
+    max-width: 300px;
+    aspect-ratio: 16 / 9;
+    height: auto;
     object-fit: cover;
     border-radius: 4px;
     margin-right: 15px; /* Add spacing between thumbnail and title */
@@ -216,8 +219,16 @@ body.dark-mode .camera-item {
     color: #666;
     transition: color 0.3s ease;
 }
+.camera-metadata {
+    font-size: 0.85em;
+    color: #888;
+    margin-top: 2px;
+}
 body.dark-mode .last-picture-time {
     color: #aaa;
+}
+body.dark-mode .camera-metadata {
+    color: #999;
 }
 .status {
     width: 15px;
@@ -317,7 +328,7 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
 }
 
 @media (max-width: 600px) {
-    .camera-header img { width: 80px; height: 45px; }
+    .camera-header img { width: 100px; }
     .camera-details .links a {
         display: block;
     }

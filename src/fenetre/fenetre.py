@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import glob
 import http.server
 import logging
+import mimetypes
 import os
 import shutil
 import signal
@@ -11,10 +13,10 @@ import sys
 from collections import deque
 from datetime import datetime, timedelta
 from functools import partial
+from logging.handlers import RotatingFileHandler
 from threading import Thread
 from typing import Callable, Dict, List, Optional, Tuple
 
-import mozjpeg_lossless_optimization
 import pytz
 import requests
 from absl import app, flags
@@ -55,12 +57,14 @@ from fenetre.archive import (
 )
 from fenetre.camera_utils import (
     get_day_night_from_exif,
+    format_shutter_speed,
 )
 from fenetre.config import config_load
-from fenetre.daylight import run_end_of_day
+from fenetre.daylight import observe_daylight_frame, run_end_of_day
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.timelapse import (
     add_to_timelapse_queue,
+    create_incremental_hls_timelapse,
     create_timelapse,
     get_next_from_timelapse_queue,
     get_queue_size_and_set_metric,
@@ -69,12 +73,16 @@ from fenetre.timelapse import (
 from fenetre.ui_utils import copy_public_html_files
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.mqtt import MQTTManager
+from fenetre import profiler
+
+mimetypes.add_type("application/vnd.apple.mpegurl", ".m3u8")
+mimetypes.add_type("video/mp2t", ".ts")
 
 _GOPRO_BLE_AVAILABLE = True
 try:
     from fenetre.gopro_utility import GoProUtilityThread, format_gopro_sd_card
 except ModuleNotFoundError as e:
-    if e.name and e.name.startswith("bleak"):
+    if e.name and (e.name.startswith("bleak") or e.name == "netifaces"):
         GoProUtilityThread = None  # type: ignore[assignment]
         format_gopro_sd_card = None  # type: ignore[assignment]
         _GOPRO_BLE_AVAILABLE = False
@@ -86,8 +94,12 @@ import json
 import numpy as np
 from waitress import serve as waitress_serve
 
-
 logger = logging.getLogger(__name__)
+
+try:
+    import mozjpeg_lossless_optimization
+except ModuleNotFoundError:
+    mozjpeg_lossless_optimization = None
 
 # Define flags at module level
 if "config" not in flags.FLAGS:
@@ -110,6 +122,7 @@ admin_server_instance_global = None
 exit_event = threading.Event()
 timelapse_queue_file = None
 timelapse_queue_lock = threading.Lock()
+background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
 
 
@@ -123,6 +136,31 @@ def configure_mqtt_manager(global_cfg: Dict) -> None:
     if mqtt_cfg.get("enabled"):
         deployment_name = global_cfg.get("deployment_name", "fenetre.cam")
         mqtt_manager = MQTTManager(deployment_name, mqtt_cfg)
+
+
+def configure_profiler(global_cfg: Dict) -> None:
+    profiler.configure(global_cfg.get("profiler", {}))
+    profiler.start()
+
+
+def derive_global_config(global_cfg: Dict) -> Dict:
+    """Add derived runtime paths that are not stored in the YAML config."""
+    global_cfg = dict(global_cfg)
+    global_cfg["pic_dir"] = os.path.join(global_cfg.get("work_dir", "."), "photos")
+    return global_cfg
+
+
+def run_serialized_background_job(job_name: str, func: Callable, *args, **kwargs):
+    """Run a heavy background task without overlapping other heavy background tasks."""
+    serialize_background_jobs = global_config.get("serialize_background_jobs", "auto")
+    if serialize_background_jobs == "auto":
+        serialize_background_jobs = (os.cpu_count() or 1) <= 1
+    if not serialize_background_jobs:
+        return func(*args, **kwargs)
+    logger.info(f"Waiting for background job slot: {job_name}")
+    with background_job_lock:
+        logger.info(f"Starting serialized background job: {job_name}")
+        return func(*args, **kwargs)
 
 
 def interruptible_sleep(
@@ -245,29 +283,36 @@ def get_pic_dir_and_filename(camera_name: str) -> Tuple[str, str]:
 def write_pic_to_disk(
     pic: Image.Image, pic_path: str, optimize: bool = False, exif_data: bytes = b""
 ):
-    os.makedirs(os.path.dirname(pic_path), exist_ok=True)
-    os.chmod(os.path.dirname(pic_path), 33277)  # rwxrwxr-x
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Saving picture {pic_path}")
-    if optimize is True:
-        jpeg_io = BytesIO()
-        pic.convert("RGB").save(jpeg_io, format="JPEG", quality=90, exif=exif_data)
-        jpeg_io.seek(0)
-        jpeg_bytes = jpeg_io.read()
-        optimized_jpeg_bytes = mozjpeg_lossless_optimization.optimize(jpeg_bytes)
-        with open(pic_path, "wb") as output_file:
-            output_file.write(optimized_jpeg_bytes)
-    else:
-        pic.convert("RGB").save(pic_path, exif=exif_data)
+    with profiler.timed("picture.write_to_disk"):
+        os.makedirs(os.path.dirname(pic_path), exist_ok=True)
+        os.chmod(os.path.dirname(pic_path), 33277)  # rwxrwxr-x
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Saving picture {pic_path}")
+        if optimize is True:
+            if mozjpeg_lossless_optimization is None:
+                raise RuntimeError(
+                    "mozjpeg optimization was requested, but "
+                    "mozjpeg-lossless-optimization is not installed."
+                )
+            jpeg_io = BytesIO()
+            pic.convert("RGB").save(jpeg_io, format="JPEG", quality=90, exif=exif_data)
+            jpeg_io.seek(0)
+            jpeg_bytes = jpeg_io.read()
+            optimized_jpeg_bytes = mozjpeg_lossless_optimization.optimize(jpeg_bytes)
+            with open(pic_path, "wb") as output_file:
+                output_file.write(optimized_jpeg_bytes)
+        else:
+            pic.convert("RGB").save(pic_path, exif=exif_data)
 
 
 def update_latest_link(pic_path: str):
-    cam_dir = os.path.join(os.path.dirname(pic_path), os.pardir)
-    tmp_link = os.path.join(cam_dir, "new.jpg")
-    latest_link = os.path.join(cam_dir, "latest.jpg")
-    relative_path = os.path.relpath(pic_path, cam_dir)
-    os.symlink(relative_path, tmp_link)
-    os.rename(tmp_link, latest_link)
+    with profiler.timed("picture.update_latest_link"):
+        cam_dir = os.path.join(os.path.dirname(pic_path), os.pardir)
+        tmp_link = os.path.join(cam_dir, "new.jpg")
+        latest_link = os.path.join(cam_dir, "latest.jpg")
+        relative_path = os.path.relpath(pic_path, cam_dir)
+        os.symlink(relative_path, tmp_link)
+        os.rename(tmp_link, latest_link)
 
 
 def get_pic_from_local_command(
@@ -300,42 +345,6 @@ def get_pic_from_local_command(
             cmd.split(" "), stdout=subprocess.PIPE, stderr=None, timeout=timeout_s
         )
     return Image.open(BytesIO(s.stdout))
-
-
-def get_pic_from_picamera2(camera_config: Dict) -> Image.Image:
-    """Captures a picture from a Raspberry Pi camera using the picamera2 library."""
-    from libcamera import controls
-    from picamera2 import Picamera2
-
-    picam2 = Picamera2()
-
-    config = picam2.create_still_configuration()
-
-    # Apply tuning file if specified
-    if camera_config.get("tuning_file"):
-        tuning = Picamera2.load_tuning_file(camera_config["tuning_file"])
-        picam2.configure(config, tuning=tuning)
-    else:
-        picam2.configure(config)
-
-    # Set controls
-    if camera_config.get("exposure_time"):
-        picam2.set_controls({"ExposureTime": camera_config["exposure_time"]})
-    if camera_config.get("analogue_gain"):
-        picam2.set_controls({"AnalogueGain": camera_config["analogue_gain"]})
-    if camera_config.get("denoise_mode"):
-        picam2.set_controls(
-            {"NoiseReductionMode": controls.draft.NoiseReductionModeEnum.HighQuality}
-        )
-
-    picam2.start()
-    time.sleep(1)
-
-    # Capture to a memory buffer
-    buffer = picam2.capture_file("-")
-    picam2.stop()
-
-    return Image.open(BytesIO(buffer))
 
 
 def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
@@ -384,6 +393,30 @@ def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
 
 
 def snap(camera_name, camera_config: Dict):
+    picamera2_capture = None
+    picamera2_initial_exposure_state = None
+
+    def load_picamera2_exposure_state() -> Optional[Dict]:
+        metadata_path = os.path.join(
+            global_config["work_dir"], "photos", camera_name, "metadata.json"
+        )
+        try:
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+        except FileNotFoundError:
+            return None
+        except Exception:
+            logger.warning(
+                "%s: Failed to read previous metadata for exposure recovery.",
+                camera_name,
+                exc_info=True,
+            )
+            return None
+        exposure_state = metadata.get("picamera2_exposure_control")
+        if isinstance(exposure_state, dict):
+            return exposure_state
+        return None
+
     def clear_camera_gauges():
         for mode in ("unknown", "day", "night", "astro"):
             try:
@@ -416,9 +449,12 @@ def snap(camera_name, camera_config: Dict):
     camera_online_metric.set(0.0)
     if mqtt_manager:
         mqtt_manager.publish_camera_state(camera_name, False)
+    if camera_config.get("capture_method") == "picamera2":
+        picamera2_initial_exposure_state = load_picamera2_exposure_state()
 
     # This is the capture function which is the only place in this snap thread where we have image source type specific info and logic.
     def capture(mode: str) -> Image.Image:
+        nonlocal picamera2_capture, picamera2_initial_exposure_state
 
         logger.info("%s: Fetching new picture.", camera_name)
 
@@ -461,9 +497,16 @@ def snap(camera_name, camera_config: Dict):
                 raise
             return Image.open(BytesIO(jpeg_bytes))
 
-        # capture_method: picamera2 is still to be implemented
         if camera_config.get("capture_method") == "picamera2":
-            return get_pic_from_picamera2(camera_config)
+            from fenetre.picamera import Picamera2Capture
+
+            if picamera2_capture is None:
+                picamera2_capture = Picamera2Capture(
+                    camera_config,
+                    initial_exposure_state=picamera2_initial_exposure_state,
+                )
+                picamera2_initial_exposure_state = None
+            return picamera2_capture.capture(mode)
         return None
 
     # Here we take the very first picture, we will only save it when we start the main loop. I don't remember why I implemented the loop that way but it made sense at the time.
@@ -471,7 +514,8 @@ def snap(camera_name, camera_config: Dict):
     previous_pic_fullpath = os.path.join(previous_pic_dir, previous_pic_filename)
     previous_mode = "unknown"
     try:
-        previous_pic = capture(mode=previous_mode)
+        with profiler.timed(f"camera.{camera_name}.capture"):
+            previous_pic = capture(mode=previous_mode)
     except Exception as e:
         error_msg = f"Failed to capture initial image for {camera_name}: {e}"
         logger.error(error_msg, exc_info=True)
@@ -479,11 +523,19 @@ def snap(camera_name, camera_config: Dict):
         raise
     previous_exif_bytes = previous_pic.info.get("exif") or b""
     if len(camera_config.get("postprocessing", [])) > 0:
-        previous_pic = postprocess(
+        with profiler.timed(f"camera.{camera_name}.postprocess"):
+            previous_pic = postprocess(
+                previous_pic,
+                camera_config.get("postprocessing", []),
+                global_config,
+                camera_config,
+            )
+    with profiler.timed(f"camera.{camera_name}.daylight_observe"):
+        observe_daylight_frame(
+            camera_name,
+            previous_pic_fullpath,
             previous_pic,
-            camera_config.get("postprocessing", []),
-            global_config,
-            camera_config,
+            camera_config.get("sky_area"),
         )
     fixed_snap_interval = camera_config.get("snap_interval_s", None)
     if camera_name not in sleep_intervals:
@@ -505,13 +557,15 @@ def snap(camera_name, camera_config: Dict):
         # Read EXIF data that will be used for metrics
         from .postprocess import get_exif_dict
 
-        previous_exif = get_exif_dict(previous_pic_fullpath)
+        with profiler.timed(f"camera.{camera_name}.exif_read"):
+            previous_exif = get_exif_dict(previous_pic_fullpath)
 
         # Gather and publish metrics after we have succesfully written the picture on disk
         # TODO: We should only do that if the admin server is enabled.
         if camera_config.get("gather_metrics", True):
             try:
-                publish_metrics_from_exif_dict(previous_exif, camera_name)
+                with profiler.timed(f"camera.{camera_name}.publish_exif_metrics"):
+                    publish_metrics_from_exif_dict(previous_exif, camera_name)
             except Exception as e:
                 logger.error(
                     f"Error gathering metrics for {previous_pic_fullpath}: {e}"
@@ -531,14 +585,21 @@ def snap(camera_name, camera_config: Dict):
                 previous_pic_fullpath,
                 os.path.join(previous_pic_fullpath, os.path.pardir, os.path.pardir),
             ),
+            "iso": previous_exif.get("iso"),
+            "shutter_speed": format_shutter_speed(previous_exif.get("exposure_time")),
         }
+        if picamera2_capture is not None:
+            exposure_state = picamera2_capture.get_exposure_control_state()
+            if exposure_state.get("modes"):
+                metadata["picamera2_exposure_control"] = exposure_state
         metadata_path = os.path.join(previous_pic_dir, os.path.pardir, "metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=4)
-            logger.debug(f"{camera_name}: Updated metadata file {metadata_path}")
+        with profiler.timed(f"camera.{camera_name}.metadata_write"):
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=4)
+                logger.debug(f"{camera_name}: Updated metadata file {metadata_path}")
 
         current_mode = get_day_night_from_exif(
-            previous_exif, camera_config, previous_mode
+            previous_exif, camera_config, previous_mode, previous_pic_fullpath
         )
         if camera_config.get("gather_metrics", True):
             update_camera_mode_metric(camera_name, previous_mode)
@@ -583,7 +644,8 @@ def snap(camera_name, camera_config: Dict):
             )
 
         try:
-            new_pic = capture(current_mode)
+            with profiler.timed(f"camera.{camera_name}.capture"):
+                new_pic = capture(current_mode)
         except Exception as e:
             error_msg = f"Could not fetch picture for {camera_name}: {e}"
             logger.warning(error_msg)
@@ -595,17 +657,26 @@ def snap(camera_name, camera_config: Dict):
             raise ValueError
         new_exif_bytes = new_pic.info.get("exif") or b""
         if len(camera_config.get("postprocessing", [])) > 0:
-            new_pic = postprocess(
+            with profiler.timed(f"camera.{camera_name}.postprocess"):
+                new_pic = postprocess(
+                    new_pic,
+                    camera_config.get("postprocessing", []),
+                    global_config,
+                    camera_config,
+                )
+        with profiler.timed(f"camera.{camera_name}.daylight_observe"):
+            observe_daylight_frame(
+                camera_name,
+                new_pic_fullpath,
                 new_pic,
-                camera_config.get("postprocessing", []),
-                global_config,
-                camera_config,
+                camera_config.get("sky_area"),
             )
         # SSIM logic
         if not (sunrise_sunset or fixed_snap_interval):
-            ssim = get_ssim_for_area(
-                previous_pic, new_pic, camera_config.get("ssim_area", None)
-            )
+            with profiler.timed(f"camera.{camera_name}.ssim"):
+                ssim = get_ssim_for_area(
+                    previous_pic, new_pic, camera_config.get("ssim_area", None)
+                )
             ssim_setpoint = camera_config.get("ssim_setpoint", 0.85)
             if ssim < ssim_setpoint:
                 sleep_intervals[camera_name] = sleep_intervals[camera_name] * 0.9
@@ -663,6 +734,22 @@ def get_ssim_for_area(
                 int(crop_points_list[2]),
                 int(crop_points_list[3]),
             )
+
+        img_width, img_height = image1.size
+        x1, y1, x2, y2 = crop_points
+        crop_points = (
+            max(0, min(img_width, x1)),
+            max(0, min(img_height, y1)),
+            max(0, min(img_width, x2)),
+            max(0, min(img_height, y2)),
+        )
+        if crop_points[2] <= crop_points[0] or crop_points[3] <= crop_points[1]:
+            logger.warning(
+                "Invalid SSIM crop area %s for image size %s; skipping SSIM crop.",
+                area,
+                image1.size,
+            )
+            return 1.0
 
         logger.debug(f"SSIM crop points: {crop_points}")
         target_image1 = image1.resize((50, 50), box=crop_points)
@@ -980,21 +1067,17 @@ def main(argv):
     archive_thread_global.start()
     logger.info(f"Starting thread {archive_thread_global.name}")
 
-    logger.info("Frequent timelapse thread will start in 10s...")
-    interruptible_sleep(10, exit_event)
-    frequent_timelapse_loop_thread_global = Thread(
-        target=frequent_timelapse_loop, daemon=True, name="frequent_timelapse_loop"
-    )
-    frequent_timelapse_loop_thread_global.start()
-    logger.info(f"Starting thread {frequent_timelapse_loop_thread_global.name}")
-
-    logger.info("Timelapse thread will start in 10s...")
-    interruptible_sleep(10, exit_event)
-    timelapse_thread_global = Thread(
-        target=timelapse_loop, daemon=True, name="timelapse_loop"
-    )
-    timelapse_thread_global.start()
-    logger.info(f"Starting thread {timelapse_thread_global.name}")
+    daily_cfg = timelapse_config.get("daily_timelapse")
+    if daily_cfg and daily_cfg.get("enabled", True):
+        logger.info("Timelapse thread will start in 10s...")
+        interruptible_sleep(10, exit_event)
+        timelapse_thread_global = Thread(
+            target=timelapse_loop, daemon=True, name="timelapse_loop"
+        )
+        timelapse_thread_global.start()
+        logger.info(f"Starting thread {timelapse_thread_global.name}")
+    else:
+        logger.warning("Daily timelapse is disabled.")
 
     logger.info("Daylight thread will start in 10s...")
     interruptible_sleep(10, exit_event)
@@ -1004,7 +1087,15 @@ def main(argv):
     daylight_thread_global.start()
     logger.info(f"Starting thread {daylight_thread_global.name}")
 
-    if timelapse_config.get("frequent_timelapse"):
+    frequent_cfg = timelapse_config.get("frequent_timelapse")
+    if frequent_cfg and frequent_cfg.get("enabled", True):
+        logger.info("Frequent timelapse thread will start in 10s...")
+        interruptible_sleep(10, exit_event)
+        frequent_timelapse_loop_thread_global = Thread(
+            target=frequent_timelapse_loop, daemon=True, name="frequent_timelapse_loop"
+        )
+        frequent_timelapse_loop_thread_global.start()
+        logger.info(f"Starting thread {frequent_timelapse_loop_thread_global.name}")
         frequent_timelapse_scheduler_thread_global = Thread(
             target=frequent_timelapse_scheduler_loop,
             daemon=True,
@@ -1015,7 +1106,7 @@ def main(argv):
             f"Starting thread {frequent_timelapse_scheduler_thread_global.name}"
         )
     else:
-        logger.info("Frequent timelapse scheduler is disabled.")
+        logger.warning("Frequent timelapse scheduler is disabled.")
 
     try:
         while not exit_event.is_set():
@@ -1056,12 +1147,9 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
 
     if initial_load:
         server_config = new_server_config
-        global_config = new_global_config
+        global_config = derive_global_config(new_global_config)
         admin_server_config = new_admin_server_config
         timelapse_config = new_timelapse_config
-        global_config["pic_dir"] = os.path.join(
-            global_config.get("work_dir", "."), "photos"
-        )
         setup_logging(
             global_config.get("log_dir"),
             global_config.get("logging_level"),
@@ -1069,6 +1157,7 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
             log_backup_count=global_config.get("log_backup_count", 5),
         )
         apply_module_levels(global_config.get("logging_levels", {}))
+        configure_profiler(global_config)
         configure_mqtt_manager(global_config)
 
         try:
@@ -1111,9 +1200,10 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
         ):
             stop_http_server()
         server_config = new_server_config
-        global_config = new_global_config
+        global_config = derive_global_config(new_global_config)
         admin_server_config = new_admin_server_config
         timelapse_config = new_timelapse_config
+        configure_profiler(global_config)
         configure_mqtt_manager(global_config)
 
     # Update cameras_config and manage camera threads
@@ -1241,7 +1331,7 @@ def manage_camera_threads():
                         timezone=global_config.get("timezone"),
                         gopro_model=gopro_model,
                         gopro_usb=cam_conf.get("gopro_usb"),
-                        iface=iface
+                        iface=iface,
                     )
 
                     # The GoProUtilityThread is only for Hero 11 (OpenGoPro) models
@@ -1356,6 +1446,8 @@ def shutdown_application():
         mqtt_manager.stop()
         mqtt_manager = None
 
+    profiler.stop()
+
     # Stop Timelapse and Daylight threads
     global timelapse_thread_global, daylight_thread_global
     if timelapse_thread_global and timelapse_thread_global.is_alive():
@@ -1384,15 +1476,19 @@ def frequent_timelapse_scheduler_loop():
     """
     This is a loop that schedules timelapse creation for the current day periodically.
     """
-    interval = timelapse_config.get("frequent_timelapse").get("interval_s", 1200)
     while not exit_event.is_set():
+        frequent_cfg = timelapse_config.get("frequent_timelapse")
+        if not frequent_cfg or not frequent_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
+        interval = frequent_cfg.get("interval_s", 1200)
         for camera_name in cameras_config:
             try:
                 logger.info(f"Time to update the frequent timelapse for {camera_name}.")
                 pic_dir, _ = get_pic_dir_and_filename(camera_name)
                 timelapse_settings_tuple = (
                     pic_dir,
-                    timelapse_config.get("frequent_timelapse"),
+                    frequent_cfg,
                 )
                 frequent_timelapse_q.append(timelapse_settings_tuple)
             except Exception as e:
@@ -1408,29 +1504,50 @@ def frequent_timelapse_scheduler_loop():
 
 def frequent_timelapse_loop():
     while not exit_event.is_set():
+        frequent_cfg = timelapse_config.get("frequent_timelapse")
+        if not frequent_cfg or not frequent_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
         if len(frequent_timelapse_q) == 0:
             time.sleep(5)
             continue
         timelapse_settings_tuple = frequent_timelapse_q.popleft()
         pic_dir, timelapse_settings = timelapse_settings_tuple
+        if not os.path.isdir(pic_dir):
+            logger.info("Skipping frequent timelapse for missing dir: %s", pic_dir)
+            continue
         try:
+            output_format = timelapse_settings.get("output_format", "file")
             timelapse_args = {
                 "dir": pic_dir,
-                "overwrite": True,
-                "two_pass": timelapse_settings.get("ffmpeg_2pass", False),
                 "log_dir": global_config.get("log_dir"),
                 "ffmpeg_options": timelapse_settings.get("ffmpeg_options", ""),
                 "log_max_bytes": global_config.get("log_max_bytes", 10000000),
                 "log_backup_count": global_config.get("log_backup_count", 5),
             }
-            if timelapse_settings.get("file_extension"):
-                timelapse_args["file_extension"] = timelapse_settings.get(
-                    "file_extension"
-                )
             if timelapse_settings.get("framerate"):
                 timelapse_args["framerate"] = timelapse_settings.get("framerate")
 
-            result = create_timelapse(**timelapse_args)
+            if output_format == "hls":
+                result = run_serialized_background_job(
+                    f"frequent_timelapse_hls:{pic_dir}",
+                    create_incremental_hls_timelapse,
+                    **timelapse_args,
+                )
+            else:
+                timelapse_args["overwrite"] = True
+                timelapse_args["two_pass"] = timelapse_settings.get(
+                    "ffmpeg_2pass", False
+                )
+                if timelapse_settings.get("file_extension"):
+                    timelapse_args["file_extension"] = timelapse_settings.get(
+                        "file_extension"
+                    )
+                result = run_serialized_background_job(
+                    f"frequent_timelapse:{pic_dir}",
+                    create_timelapse,
+                    **timelapse_args,
+                )
             if result:
                 camera_name = os.path.basename(
                     os.path.dirname(os.path.normpath(pic_dir))
@@ -1452,20 +1569,71 @@ def frequent_timelapse_loop():
         time.sleep(5)
 
 
+def cleanup_frequent_timelapse_artifacts(
+    day_dir: str, frequent_timelapse_config: Dict, daily_timelapse_config: Dict
+) -> List[str]:
+    if not frequent_timelapse_config:
+        return []
+
+    base_name = os.path.basename(os.path.normpath(day_dir))
+    deleted_paths = []
+
+    def remove_file(path):
+        if os.path.exists(path):
+            os.remove(path)
+            deleted_paths.append(path)
+            logger.info("Deleted frequent timelapse artifact: %s", path)
+
+    if frequent_timelapse_config.get("output_format") == "hls":
+        remove_file(os.path.join(day_dir, f"{base_name}.m3u8"))
+        remove_file(os.path.join(day_dir, f".{base_name}.hls-manifest.json"))
+        for segment_path in glob.glob(os.path.join(day_dir, "segment-*.ts")):
+            remove_file(segment_path)
+
+        legacy_segment_dir = os.path.join(day_dir, f"{base_name}.segments")
+        if os.path.isdir(legacy_segment_dir):
+            shutil.rmtree(legacy_segment_dir)
+            deleted_paths.append(legacy_segment_dir)
+            logger.info(
+                "Deleted frequent timelapse artifact directory: %s",
+                legacy_segment_dir,
+            )
+        return deleted_paths
+
+    frequent_timelapse_file_extension = frequent_timelapse_config.get(
+        "file_extension", "mp4"
+    )
+    if frequent_timelapse_file_extension != daily_timelapse_config.get(
+        "file_extension", "webm"
+    ):
+        remove_file(
+            os.path.join(
+                day_dir,
+                f"{base_name}.{frequent_timelapse_file_extension}",
+            )
+        )
+    return deleted_paths
+
+
 def timelapse_loop():
     """
     This is a loop to create the high quality daily timelapse. Typically these run at 60 fps, use v9 CPU encoding with a slow preset and 2 pass.
     This prevent overloading the system by creating new daily timelapses for all the cameras at the same time, this is a blocking thread to create them one at a time. Each timelapse can take several hours.
     """
     while not exit_event.is_set():
+        daily_cfg = timelapse_config.get("daily_timelapse")
+        if not daily_cfg or not daily_cfg.get("enabled", True):
+            interruptible_sleep(5, exit_event)
+            continue
         dir_to_process = get_next_from_timelapse_queue(
             timelapse_queue_file, timelapse_queue_lock
         )
 
         if dir_to_process:
             try:
-                daily_cfg = timelapse_config.get("daily_timelapse", {}) or {}
-                result = create_timelapse(
+                result = run_serialized_background_job(
+                    f"daily_timelapse:{dir_to_process}",
+                    create_timelapse,
                     dir=dir_to_process,
                     overwrite=True,
                     two_pass=daily_cfg.get("ffmpeg_2pass", True),
@@ -1487,29 +1655,11 @@ def timelapse_loop():
                     metric_timelapses_created_total.labels(
                         camera_name=camera_name, type="daily"
                     ).inc()
-                    # Now we can delete the frequent timelapse file if it exists
-                    frequent_timelapse_config = timelapse_config.get(
-                        "frequent_timelapse", {}
+                    cleanup_frequent_timelapse_artifacts(
+                        dir_to_process,
+                        timelapse_config.get("frequent_timelapse", {}),
+                        timelapse_config.get("daily_timelapse", {}),
                     )
-                    daily_cfg = timelapse_config.get("daily_timelapse", {})
-                    if frequent_timelapse_config:
-                        frequent_timelapse_file_extention = (
-                            frequent_timelapse_config.get("file_extension", "mp4")
-                        )
-                        if frequent_timelapse_file_extention != daily_cfg.get(
-                            "file_extension", "webm"
-                        ):
-                            frequent_timelapse_filepath = os.path.join(
-                                dir_to_process,
-                                os.path.basename(dir_to_process)
-                                + "."
-                                + frequent_timelapse_file_extention,
-                            )
-                            if os.path.exists(frequent_timelapse_filepath):
-                                os.remove(frequent_timelapse_filepath)
-                                logger.info(
-                                    f"Deleted frequent timelapse file: {frequent_timelapse_filepath}"
-                                )
                     remove_from_timelapse_queue(
                         dir_to_process, timelapse_queue_file, timelapse_queue_lock
                     )
@@ -1540,10 +1690,18 @@ def daylight_loop():
                 logger.info(
                     f"Running daylight in {daily_pic_dir} with sky_area {sky_area}"
                 )
-                run_end_of_day(camera_name, daily_pic_dir, sky_area)
-                add_to_timelapse_queue(
-                    daily_pic_dir, timelapse_queue_file, timelapse_queue_lock
+                run_serialized_background_job(
+                    f"daylight:{daily_pic_dir}",
+                    run_end_of_day,
+                    camera_name,
+                    daily_pic_dir,
+                    sky_area,
                 )
+                daily_cfg = timelapse_config.get("daily_timelapse")
+                if daily_cfg and daily_cfg.get("enabled", True):
+                    add_to_timelapse_queue(
+                        daily_pic_dir, timelapse_queue_file, timelapse_queue_lock
+                    )
                 archive_q.append(daily_pic_dir)
             except Exception as e:
                 logger.warning(f"Could not process daylight for {daily_pic_dir}: {e}")

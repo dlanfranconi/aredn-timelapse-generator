@@ -1,9 +1,9 @@
-import os
-import platform
-
-
 def is_raspberry_pi():
-    """
-    Checks if the current platform is a Raspberry Pi.
-    """
-    return platform.machine() in ("armv7l", "aarch64")
+    try:
+        with open('/sys/firmware/devicetree/base/model', 'r') as f:
+            return "Raspberry Pi" in f.read()
+    except FileNotFoundError:
+        return False
+
+        
+    return False

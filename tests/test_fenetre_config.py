@@ -144,6 +144,90 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertTrue(admin_server_conf["enabled"])
         self.assertEqual(admin_server_conf["listen"], "0.0.0.0:8889 [::]:8889")
 
+    def test_config_load_missing_timelapse_section(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertEqual(timelapse_conf, {})
+
+    def test_config_load_picamera2_controls(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "picam": {
+                    "capture_method": "picamera2",
+                    "main_size": [4056, 3040],
+                    "buffer_count": 1,
+                    "startup_warmup_s": 0,
+                    "control_warmup_s": 0,
+                    "exposure_value": 1.5,
+                    "denoise_mode": "HighQuality",
+                    "controls": {"AwbEnable": True},
+                    "exposure_control": {
+                        "enabled": True,
+                        "day": {
+                            "min_exposure_time": 100,
+                            "max_exposure_time": 20000,
+                        },
+                    },
+                    "night_settings": {
+                        "ae_enable": False,
+                        "exposure_time": 1000000,
+                        "analogue_gain": 2.0,
+                    },
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        picam = cameras_conf["picam"]
+        self.assertEqual(picam["capture_method"], "picamera2")
+        self.assertEqual(picam["main_size"], [4056, 3040])
+        self.assertEqual(picam["buffer_count"], 1)
+        self.assertEqual(picam["exposure_value"], 1.5)
+        self.assertEqual(picam["denoise_mode"], "HighQuality")
+        self.assertEqual(picam["controls"], {"AwbEnable": True})
+        self.assertEqual(picam["exposure_control"]["day"]["max_exposure_time"], 20000)
+        self.assertEqual(picam["night_settings"]["exposure_time"], 1000000)
+        self.assertEqual(picam["night_settings"]["analogue_gain"], 2.0)
+        self.assertFalse(picam["night_settings"]["ae_enable"])
+
+    def test_config_load_daily_timelapse_only(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+            "timelapse": {"daily_timelapse": {}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertIn("daily_timelapse", timelapse_conf)
+        self.assertNotIn("frequent_timelapse", timelapse_conf)
+        self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
+
+    def test_config_load_daily_and_frequent_timelapse(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {"cam1": {"url": "http://cam1"}},
+            "timelapse": {"daily_timelapse": {}, "frequent_timelapse": {}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, _, _, timelapse_conf = config_load(config_path)
+
+        self.assertIn("daily_timelapse", timelapse_conf)
+        self.assertIn("frequent_timelapse", timelapse_conf)
+        self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
+        self.assertTrue(timelapse_conf["frequent_timelapse"]["enabled"])
+
     @patch("fenetre.config.logger")
     def test_config_load_file_not_found(self, mock_config_logging):
         with self.assertRaises(FileNotFoundError):
@@ -162,6 +246,7 @@ class FenetreConfigTestCase(unittest.TestCase):
     @patch("fenetre.fenetre.update_cameras_metadata")
     @patch("fenetre.fenetre.Thread")  # Mock threads so they don't actually start
     @patch("fenetre.fenetre.GoProUtilityThread")  # Mock GoPro threads
+    @patch("fenetre.fenetre._GOPRO_BLE_AVAILABLE", True)
     @patch("fenetre.fenetre.server_run")  # Mock server_run
     @patch("fenetre.fenetre.stop_http_server")
     def test_load_and_apply_configuration_initial_load(

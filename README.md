@@ -34,15 +34,46 @@ This is mostly written in Python and it's been tested on Linux but it could run 
     ```
 
 3.  **Install the package and its dependencies:**
-    The project uses `pyproject.toml` to manage dependencies. Installing in editable mode (`-e`) is recommended for development. This command will install the `fenetre` package and all required libraries from PyPI.
+    The project uses `pyproject.toml` to manage dependencies. Installing in editable mode (`-e`) is recommended for development. This command installs the `fenetre` package and the base runtime dependencies from PyPI.
     ```bash
     pip install -e .
     ```
-    If you plan to control GoPro cameras over Bluetooth, install the optional GoPro extra:
+
+    Optional dependencies are exposed as package extras. Install only the extras you need for the machine you are setting up:
+
+    - `dev`: local development tools, including `pytest` and `black`.
+    - `gopro`: Bluetooth and network helpers for GoPro cameras.
+    - `picamera2`: Raspberry Pi camera support through `picamera2`.
+    - `pyexiv2`: optional EXIF support through `pyexiv2`.
+
+    For a development machine, install the dev extra:
     ```bash
-    pip install -e .[gopro]
+    pip install -e '.[dev]'
     ```
 
+    If you plan to control GoPro cameras over Bluetooth, install the GoPro extra:
+    ```bash
+    pip install -e '.[gopro]'
+    ```
+
+    If you plan to capture from a Raspberry Pi camera with `capture_method: picamera2`, install the Picamera2 extra:
+    ```bash
+    pip install -e '.[picamera2]'
+    ```
+
+    On Raspberry Pi OS, `picamera2` and `libcamera` are often best installed from Debian packages instead of PyPI. In that case, install the OS packages, create the virtual environment with `--system-site-packages`, and keep the Python install as the base package:
+    ```bash
+    sudo apt-get install python3-picamera2
+    python3 -m venv --system-site-packages venv
+    pip install -e .
+    ```
+
+    Extras can be combined in one install command:
+    ```bash
+    pip install -e '.[dev,gopro,picamera2,pyexiv2]'
+    ```
+
+    Production deployments should usually install only the base package unless a specific camera or workflow requires an extra. The base install does not install Raspberry Pi camera libraries.
 
 ## Usage
 
@@ -63,6 +94,101 @@ You must provide the path to a configuration file using the `--config` flag. A s
     ```
 
 The application will start, and based on your configuration, it will begin capturing images.
+
+## Running with systemd
+
+For a long-running deployment, create one systemd service per config file. The service should run the `fenetre` executable from the virtual environment, set the repository as the working directory, and pass the deployment-specific config with `--config`.
+
+Example service for `config.fenetre-main.yaml`:
+
+```ini
+[Unit]
+Description=fenetre.cam main capture service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mathieu
+Group=mathieu
+WorkingDirectory=/home/mathieu/fenetre-playground/fenetre.cam
+ExecStart=/home/mathieu/fenetre-playground/venv/bin/fenetre --config=/home/mathieu/fenetre-playground/fenetre.cam/config.fenetre-main.yaml
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=45
+Environment=TZ=America/Los_Angeles
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Install it as a system service:
+
+```bash
+sudo install -m 0644 fenetre-main.service /etc/systemd/system/fenetre-main.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now fenetre-main.service
+```
+
+Check that it started correctly:
+
+```bash
+systemctl status fenetre-main.service --no-pager
+journalctl -u fenetre-main.service -n 80 --no-pager
+```
+
+To run multiple deployments on the same machine, repeat the same pattern with a unique service name and config path for each deployment. For example:
+
+```text
+fenetre-sfbay.service     -> config.sfbay.yaml
+fenetre-camaredn.service  -> config.camaredn.yaml
+fenetre-main.service      -> config.fenetre-main.yaml
+```
+
+Make sure each config uses distinct ports and work directories before enabling multiple services.
+
+## Running with Docker on Intel
+
+The included `Dockerfile` builds an Ubuntu 26.04 image with Python, ffmpeg, and Intel VA-API runtime libraries. This is intended for non-Raspberry Pi deployments where Docker is useful and the host has Intel graphics exposed through `/dev/dri`.
+
+Build the image:
+
+```bash
+docker build --network=host -t fenetre:intel-vaapi .
+```
+
+Run it with the host render devices, config file, and data directories mounted:
+
+```bash
+docker run --rm \
+  --name fenetre \
+  --device /dev/dri:/dev/dri \
+  -p 8888:8888 \
+  -p 8889:8889 \
+  -v "$PWD/config.yaml:/srv/fenetre/config.yaml:ro" \
+  -v /srv/fenetre/data:/srv/fenetre/data \
+  -v /srv/fenetre/logs:/srv/fenetre/logs \
+  fenetre:intel-vaapi
+```
+
+Or use compose:
+
+```bash
+docker compose up --build
+```
+
+Useful checks inside the built image:
+
+```bash
+docker run --rm --device /dev/dri:/dev/dri --entrypoint vainfo fenetre:intel-vaapi
+docker run --rm --entrypoint ffmpeg fenetre:intel-vaapi -hide_banner -encoders | grep -E 'vaapi|qsv'
+```
+
+When using hardware encoding, set `ffmpeg_options` in the relevant timelapse config to an encoder available on the host, such as `h264_vaapi`, `hevc_vaapi`, or a supported `*_qsv` encoder. The container provides the userspace libraries, but the host kernel driver and `/dev/dri` devices still determine what actually works.
+
+Raspberry Pi camera deployments are better served by the systemd approach above because `picamera2`, `libcamera`, and device permissions are closely tied to Raspberry Pi OS.
 
 ### GoPro
 

@@ -265,6 +265,14 @@ function formatDate(date) {
     return `${year}-${month}-${day}`;
 }
 
+function buildTimelapsePlayerUrl(src, title) {
+    const params = new URLSearchParams({
+        src,
+        title,
+    });
+    return `timelapse.html?${params.toString()}`;
+}
+
 function createCameraListItem(camera) {
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
@@ -277,6 +285,7 @@ function createCameraListItem(camera) {
             <div class="camera-info">
                 <div class="camera-name">${camera.title}</div>
                 <div class="last-picture-time">Loading...</div>
+                <div class="camera-metadata"></div>
             </div>
             <div class="status"></div>
         </div>
@@ -482,6 +491,7 @@ function updateCamera(camera, cameraData) {
 
     const thumbImg = listItem.querySelector('.camera-header img');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
+    const cameraMetadata = listItem.querySelector('.camera-metadata');
     const status = listItem.querySelector('.status');
     const detailsImg = listItem.querySelector('.camera-details img');
     const fullscreenImageLink = listItem.querySelector('.fullscreen-image-link');
@@ -512,6 +522,12 @@ function updateCamera(camera, cameraData) {
             filenameLink.textContent = "Download: " + filename;
             filenameLink.href = fullImageUrl;
 
+            if (metadata.iso || metadata.shutter_speed) {
+                cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
+            } else {
+                cameraMetadata.textContent = '';
+            }
+
             const imageDate = parseTimestampFromFilename(filename);
             if (imageDate) {
                 lastPictureTime.textContent = `Last picture: ${imageDate.toLocaleString()}`;
@@ -539,7 +555,15 @@ function updateCamera(camera, cameraData) {
             const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
             const minutesElapsed = (today - startOfDay) / 60000;
             const cacheBuster = Math.floor(minutesElapsed / 20);
-            linkTimelapseToday.href = `${photo_dir}/${todayStr}/${todayStr}.${frequentTimelapseExtension}?v=${cacheBuster}`;
+            const frequentTimelapseUrl = `${photo_dir}/${todayStr}/${todayStr}.${frequentTimelapseExtension}?v=${cacheBuster}`;
+            if (frequentTimelapseExtension === 'm3u8') {
+                linkTimelapseToday.href = buildTimelapsePlayerUrl(
+                    frequentTimelapseUrl,
+                    `${camera.title} ${todayStr} Frequent Timelapse`
+                );
+            } else {
+                linkTimelapseToday.href = frequentTimelapseUrl;
+            }
             linkTimelapseToday.textContent = `Today's Timelapse`;
 
             linkTimelapse.href = `${photo_dir}/${yesterdayStr}/${yesterdayStr}.${timelapseExtension}`;

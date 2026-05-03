@@ -118,6 +118,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "ui",
         "deployment_name",
         "mqtt",
+        "profiler",
+        "serialize_background_jobs",
     }
     _warn_unknown_keys("global", cfg, allowed)
 
@@ -197,6 +199,28 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default=5,
         min_value=0,
     )
+    serialize_background_jobs = cfg.get("serialize_background_jobs")
+    if isinstance(serialize_background_jobs, bool):
+        out["serialize_background_jobs"] = serialize_background_jobs
+    elif serialize_background_jobs is None:
+        out["serialize_background_jobs"] = "auto"
+    elif isinstance(serialize_background_jobs, str):
+        if serialize_background_jobs not in {"auto", "true", "false"}:
+            errors.append(
+                "global.serialize_background_jobs: expected bool or one of ['auto', 'true', 'false']"
+            )
+            out["serialize_background_jobs"] = "auto"
+        elif serialize_background_jobs == "true":
+            out["serialize_background_jobs"] = True
+        elif serialize_background_jobs == "false":
+            out["serialize_background_jobs"] = False
+        else:
+            out["serialize_background_jobs"] = "auto"
+    else:
+        errors.append(
+            "global.serialize_background_jobs: expected bool or one of ['auto', 'true', 'false']"
+        )
+        out["serialize_background_jobs"] = "auto"
 
     out["deployment_name"] = _str(
         cfg.get("deployment_name"),
@@ -365,6 +389,52 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default="homeassistant",
     )
     out["mqtt"] = mqtt_out
+
+    profiler_cfg = _dict(cfg.get("profiler"), "global.profiler", errors)
+    profiler_out = {}
+    _warn_unknown_keys(
+        "global.profiler",
+        profiler_cfg,
+        {
+            "enabled",
+            "sample_interval_s",
+            "report_interval_s",
+            "max_stack_depth",
+            "max_entries",
+        },
+    )
+    profiler_out["enabled"] = _bool(
+        profiler_cfg.get("enabled"), "global.profiler.enabled", errors, default=False
+    )
+    profiler_out["sample_interval_s"] = _float(
+        profiler_cfg.get("sample_interval_s"),
+        "global.profiler.sample_interval_s",
+        errors,
+        default=0.25,
+        min_value=0.01,
+    )
+    profiler_out["report_interval_s"] = _float(
+        profiler_cfg.get("report_interval_s"),
+        "global.profiler.report_interval_s",
+        errors,
+        default=60.0,
+        min_value=1.0,
+    )
+    profiler_out["max_stack_depth"] = _int(
+        profiler_cfg.get("max_stack_depth"),
+        "global.profiler.max_stack_depth",
+        errors,
+        default=8,
+        min_value=1,
+    )
+    profiler_out["max_entries"] = _int(
+        profiler_cfg.get("max_entries"),
+        "global.profiler.max_entries",
+        errors,
+        default=10,
+        min_value=1,
+    )
+    out["profiler"] = profiler_out
     return out
 
 
@@ -411,8 +481,10 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
     _warn_unknown_keys("timelapse", cfg, allowed)
     out: Dict = {}
 
-    ft = _dict(cfg.get("frequent_timelapse"), "timelapse.frequent_timelapse", errors)
-    if ft is not None:
+    if "frequent_timelapse" in cfg:
+        ft = _dict(
+            cfg.get("frequent_timelapse"), "timelapse.frequent_timelapse", errors
+        )
         ft_out = {}
         ft_out["enabled"] = _bool(
             ft.get("enabled"),
@@ -431,16 +503,37 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             "timelapse.frequent_timelapse.ffmpeg_options",
             errors,
         )
+        ft_out["output_format"] = _str(
+            ft.get("output_format"),
+            "timelapse.frequent_timelapse.output_format",
+            errors,
+            default="file",
+            choices={"file", "hls"},
+        )
         ft_out["file_extension"] = _str(
             ft.get("file_extension"),
             "timelapse.frequent_timelapse.file_extension",
             errors,
             default="mp4",
         )
+        ft_out["framerate"] = _int(
+            ft.get("framerate"),
+            "timelapse.frequent_timelapse.framerate",
+            errors,
+            default=30,
+            min_value=1,
+        )
+        ft_out["interval_s"] = _int(
+            ft.get("interval_s"),
+            "timelapse.frequent_timelapse.interval_s",
+            errors,
+            default=1200,
+            min_value=1,
+        )
         out["frequent_timelapse"] = ft_out
 
-    dt = _dict(cfg.get("daily_timelapse"), "timelapse.daily_timelapse", errors)
-    if dt is not None:
+    if "daily_timelapse" in cfg:
+        dt = _dict(cfg.get("daily_timelapse"), "timelapse.daily_timelapse", errors)
         dt_out = {}
         dt_out["enabled"] = _bool(
             dt.get("enabled"), "timelapse.daily_timelapse.enabled", errors, default=True
@@ -494,6 +587,15 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
                 min_value=0.0,
             )
 
+        if "max_brightness" in settings_block:
+            block_out["max_brightness"] = _int(
+                settings_block.get("max_brightness"),
+                f"{path_prefix}.max_brightness",
+                errors,
+                min_value=0,
+                max_value=255,
+            )
+
         if "urlpaths_commands" in settings_block:
             if isinstance(settings_block["urlpaths_commands"], list):
                 block_out["urlpaths_commands"] = settings_block["urlpaths_commands"]
@@ -501,6 +603,49 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
                 errors.append(
                     f"{path_prefix}.urlpaths_commands: expected a list of strings"
                 )
+
+        if "controls" in settings_block:
+            if isinstance(settings_block["controls"], dict):
+                block_out["controls"] = settings_block["controls"]
+            else:
+                errors.append(f"{path_prefix}.controls: expected mapping")
+
+        if "exposure_time" in settings_block:
+            block_out["exposure_time"] = _int(
+                settings_block.get("exposure_time"),
+                f"{path_prefix}.exposure_time",
+                errors,
+                min_value=1,
+            )
+
+        if "analogue_gain" in settings_block:
+            block_out["analogue_gain"] = _float(
+                settings_block.get("analogue_gain"),
+                f"{path_prefix}.analogue_gain",
+                errors,
+                min_value=0.0,
+            )
+
+        if "exposure_value" in settings_block:
+            block_out["exposure_value"] = _float(
+                settings_block.get("exposure_value"),
+                f"{path_prefix}.exposure_value",
+                errors,
+            )
+
+        if "denoise_mode" in settings_block:
+            block_out["denoise_mode"] = _str(
+                settings_block.get("denoise_mode"),
+                f"{path_prefix}.denoise_mode",
+                errors,
+            )
+
+        if "ae_enable" in settings_block:
+            block_out["ae_enable"] = _bool(
+                settings_block.get("ae_enable"),
+                f"{path_prefix}.ae_enable",
+                errors,
+            )
 
         return block_out
 
@@ -714,14 +859,22 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "tuning_file",
             "exposure_time",
             "analogue_gain",
+            "exposure_value",
             "denoise_mode",
+            "ae_enable",
+            "controls",
+            "exposure_control",
+            "main_size",
+            "buffer_count",
+            "startup_warmup_s",
+            "control_warmup_s",
             "gopro_ble_identifier",
             "bluetooth_adapter",
             "gopro_utility_poll_interval_s",
             "bluetooth_retry_delay_s",
             "gopro_usb",
             "name",
-            "iface"
+            "iface",
         ):
             if k in cam:
                 cam_out[k] = cam[k]

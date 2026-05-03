@@ -140,7 +140,11 @@ def build_cameras_metadata(
 
     updated_cameras_metadata["global"] = {
         "timelapse_file_extension": daily_cfg.get("file_extension", "webm"),
-        "frequent_timelapse_file_extension": freq_cfg.get("file_extension", "mp4"),
+        "frequent_timelapse_file_extension": (
+            "m3u8"
+            if freq_cfg.get("output_format") == "hls"
+            else freq_cfg.get("file_extension", "mp4")
+        ),
         "deployment_name": (global_config or {}).get("deployment_name"),
         "ui": ui_public,
     }

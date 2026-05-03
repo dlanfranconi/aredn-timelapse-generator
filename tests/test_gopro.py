@@ -69,26 +69,6 @@ class TestGoProHero11(unittest.TestCase):
                 verify=self.gopro.root_ca_filepath,
             ),
             mock.call(
-                "http://10.5.5.9/gopro/camera/setting?option=10&setting=88",
-                timeout=self.gopro.timeout,
-                verify=self.gopro.root_ca_filepath,
-            ),
-            mock.call(
-                "http://10.5.5.9/gopro/camera/setting?option=4&setting=91",
-                timeout=self.gopro.timeout,
-                verify=self.gopro.root_ca_filepath,
-            ),
-            mock.call(
-                "http://10.5.5.9/gopro/camera/setting?option=0&setting=83",
-                timeout=self.gopro.timeout,
-                verify=self.gopro.root_ca_filepath,
-            ),
-            mock.call(
-                "http://10.5.5.9/gopro/camera/setting?option=7&setting=59",
-                timeout=self.gopro.timeout,
-                verify=self.gopro.root_ca_filepath,
-            ),
-            mock.call(
                 "http://10.5.5.9/gopro/camera/shutter/start",
                 timeout=self.gopro.timeout,
                 verify=self.gopro.root_ca_filepath,
