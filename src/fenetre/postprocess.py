@@ -7,12 +7,18 @@ from typing import Dict, Optional, Tuple, Union
 
 import cairosvg
 import numpy as np
-import pyexiv2
+import piexif
 import pytz  # To get timezone from global_config easily
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from skimage import exposure
 
 from .sun_path_svg import create_sun_path_svg, overlay_time_bar
+from fenetre import profiler
+
+try:
+    import pyexiv2
+except ImportError:
+    pyexiv2 = None
 
 logger = logging.getLogger(__name__)
 
@@ -394,24 +400,50 @@ def postprocess(
         camera_config = {}
 
     # Correct orientation based on EXIF data before any processing
-    pic = ImageOps.exif_transpose(pic)
+    with profiler.timed("postprocess.exif_transpose"):
+        pic = ImageOps.exif_transpose(pic)
 
-    for step in postprocessing_steps:
+    step_index = 0
+    while step_index < len(postprocessing_steps):
+        step = postprocessing_steps[step_index]
+        next_step = (
+            postprocessing_steps[step_index + 1]
+            if step_index + 1 < len(postprocessing_steps)
+            else None
+        )
+        if (
+            step["type"] == "rotate"
+            and int(step.get("angle", 0)) % 360 == 180
+            and next_step
+            and next_step["type"] == "resize"
+        ):
+            logger.debug("Applying resize before 180-degree rotate")
+            with profiler.timed("postprocess.resize"):
+                pic = resize(pic, next_step.get("width"), next_step.get("height"))
+            with profiler.timed("postprocess.rotate"):
+                pic = rotate(pic, step["angle"])
+            step_index += 2
+            continue
+
         if step["type"] == "crop":
             logger.debug(f"Cropping image to area: {step['area']}")
-            pic = crop(pic, step["area"])
+            with profiler.timed("postprocess.crop"):
+                pic = crop(pic, step["area"])
         elif step["type"] == "resize":
             logger.debug(
                 f"Resizing image to width: {step.get('width')}, height: {step.get('height')}"
             )
-            pic = resize(pic, step.get("width"), step.get("height"))
+            with profiler.timed("postprocess.resize"):
+                pic = resize(pic, step.get("width"), step.get("height"))
         elif step["type"] == "rotate":
             if "angle" in step:
                 logger.debug(f"Rotating image by {step['angle']} degrees")
-                pic = rotate(pic, step["angle"])
+                with profiler.timed("postprocess.rotate"):
+                    pic = rotate(pic, step["angle"])
         elif step["type"] == "awb":
             logger.debug("Applying auto white balance to image")
-            pic = auto_white_balance(pic)
+            with profiler.timed("postprocess.awb"):
+                pic = auto_white_balance(pic)
         elif step["type"] == "timestamp":
             if step.get("enabled", False):
                 logger.debug(
@@ -424,20 +456,21 @@ def postprocess(
                     f"background_padding={step.get('background_padding', 2)}, "
                     f"custom_text={step.get('custom_text', None)}"
                 )
-                pic = add_timestamp(
-                    pic,
-                    text_format=step.get("format", "%Y-%m-%d %H:%M:%S %Z"),
-                    position=step.get("position", "bottom_right"),
-                    size=step.get("size", 24),
-                    color=step.get("color", "white"),
-                    font_path=step.get(
-                        "font_path"
-                    ),  # Allow custom font path from config
-                    background_color=step.get("background_color", None),
-                    background_padding=step.get("background_padding", 2),
-                    custom_text=step.get("custom_text", None),
-                    timezone=global_config.get("timezone", "UTC"),
-                )
+                with profiler.timed("postprocess.timestamp"):
+                    pic = add_timestamp(
+                        pic,
+                        text_format=step.get("format", "%Y-%m-%d %H:%M:%S %Z"),
+                        position=step.get("position", "bottom_right"),
+                        size=step.get("size", 24),
+                        color=step.get("color", "white"),
+                        font_path=step.get(
+                            "font_path"
+                        ),  # Allow custom font path from config
+                        background_color=step.get("background_color", None),
+                        background_padding=step.get("background_padding", 2),
+                        custom_text=step.get("custom_text", None),
+                        timezone=global_config.get("timezone", "UTC"),
+                    )
         elif step["type"] == "text":
             if step.get("enabled", False) and step.get("text_content"):
                 logger.debug(
@@ -450,16 +483,17 @@ def postprocess(
                     f"background_color={step.get('background_color', None)}, "
                     f"background_padding={step.get('background_padding', 2)}"
                 )
-                pic = _add_text_overlay(
-                    pic=pic,
-                    text_to_draw=step.get("text_content"),
-                    position=step.get("position", "bottom_right"),
-                    size=step.get("size", 24),
-                    color=step.get("color", "white"),
-                    font_path=step.get("font_path", None),
-                    background_color=step.get("background_color", None),
-                    background_padding=step.get("background_padding", 2),
-                )
+                with profiler.timed("postprocess.text"):
+                    pic = _add_text_overlay(
+                        pic=pic,
+                        text_to_draw=step.get("text_content"),
+                        position=step.get("position", "bottom_right"),
+                        size=step.get("size", 24),
+                        color=step.get("color", "white"),
+                        font_path=step.get("font_path", None),
+                        background_color=step.get("background_color", None),
+                        background_padding=step.get("background_padding", 2),
+                    )
             elif not step.get("text_content") and step.get("enabled", False):
                 logger.warning(
                     "Generic text step is enabled but no 'text_content' was provided."
@@ -467,7 +501,10 @@ def postprocess(
         elif step["type"] == "sun_path":
             if step.get("enabled", False):
                 logger.debug("Adding sun path overlay")
-                pic = _add_sun_path_overlay(pic, global_config, camera_config, step)
+                with profiler.timed("postprocess.sun_path"):
+                    pic = _add_sun_path_overlay(pic, global_config, camera_config, step)
+
+        step_index += 1
 
     return pic
 
@@ -491,6 +528,8 @@ def rotate(pic: Image.Image, angle: int) -> Image.Image:
     """
     Rotates an image by a specified angle.
     """
+    if angle % 360 == 180:
+        return pic.transpose(Image.Transpose.ROTATE_180)
     return pic.rotate(angle, expand=True)
 
 
@@ -510,6 +549,8 @@ def resize(
     if height is None and width is not None:
         aspect_ratio = pic.height / pic.width
         height = int(width * aspect_ratio)
+    if pic.size == (width, height):
+        return pic
     return pic.resize(size=(width, height), reducing_gap=3.0)  # type: ignore
 
 
@@ -535,48 +576,102 @@ def get_exif_dict(
     image_source: Union[bytes, bytearray, memoryview, str, os.PathLike],
 ) -> Dict:
     """
-    Reads metadata from image bytes or a filesystem path using pyexiv2 and returns a dictionary.
+    Reads metadata from image bytes or a filesystem path and returns a dictionary.
+
+    Prefer pyexiv2 when the expected API is available, but fall back to piexif for
+    platforms where the Debian pyexiv2 package exposes a different interface.
     """
-    exif_values = {}
-    try:
+    def normalize_numeric(value, default=None):
+        if value is None:
+            return default
+        try:
+            if isinstance(value, tuple) and len(value) == 2:
+                num, den = value
+                if den == 0:
+                    return default
+                return float(num) / float(den)
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="ignore")
+            if isinstance(value, str) and "/" in value:
+                num, den = value.split("/", 1)
+                den_f = float(den)
+                if den_f == 0:
+                    return default
+                return float(num) / den_f
+            return float(value)
+        except (ValueError, TypeError, ZeroDivisionError):
+            return default
+
+    def parse_pyexiv2_exif(exif: Dict) -> Dict:
+        return {
+            "iso": normalize_numeric(exif.get("Exif.Photo.ISOSpeedRatings")),
+            "focal_length": normalize_numeric(exif.get("Exif.Photo.FocalLength")),
+            "aperture": normalize_numeric(exif.get("Exif.Photo.FNumber")),
+            "exposure_time": normalize_numeric(exif.get("Exif.Photo.ExposureTime")),
+            "white_balance": normalize_numeric(exif.get("Exif.Photo.WhiteBalance")),
+            "width": normalize_numeric(exif.get("Exif.Image.ImageWidth"))
+            or normalize_numeric(exif.get("Exif.Photo.PixelXDimension")),
+            "height": normalize_numeric(exif.get("Exif.Image.ImageLength"))
+            or normalize_numeric(exif.get("Exif.Photo.PixelYDimension")),
+        }
+
+    def parse_piexif_exif(exif_dict: Dict, image_size: Optional[Tuple[int, int]]) -> Dict:
+        zeroth = exif_dict.get("0th", {})
+        exif = exif_dict.get("Exif", {})
+        width = normalize_numeric(zeroth.get(piexif.ImageIFD.ImageWidth))
+        height = normalize_numeric(zeroth.get(piexif.ImageIFD.ImageLength))
+        if width is None:
+            width = normalize_numeric(exif.get(piexif.ExifIFD.PixelXDimension))
+        if height is None:
+            height = normalize_numeric(exif.get(piexif.ExifIFD.PixelYDimension))
+        if image_size:
+            width = width or float(image_size[0])
+            height = height or float(image_size[1])
+        return {
+            "iso": normalize_numeric(exif.get(piexif.ExifIFD.ISOSpeedRatings)),
+            "focal_length": normalize_numeric(exif.get(piexif.ExifIFD.FocalLength)),
+            "aperture": normalize_numeric(exif.get(piexif.ExifIFD.FNumber)),
+            "exposure_time": normalize_numeric(exif.get(piexif.ExifIFD.ExposureTime)),
+            "white_balance": normalize_numeric(exif.get(piexif.ExifIFD.WhiteBalance)),
+            "width": width,
+            "height": height,
+        }
+
+    def load_with_piexif() -> Dict:
         if isinstance(image_source, (str, os.PathLike)):
-            with pyexiv2.Image(str(Path(image_source))) as img:
-                exif = img.read_exif()
+            source = str(Path(image_source))
+            exif_dict = piexif.load(source)
+            with Image.open(source) as img:
+                image_size = img.size
         elif isinstance(image_source, (bytes, bytearray, memoryview)):
-            with pyexiv2.ImageData(bytes(image_source)) as img:
-                exif = img.read_exif()
+            source = bytes(image_source)
+            exif_dict = piexif.load(source)
+            with Image.open(io.BytesIO(source)) as img:
+                image_size = img.size
         else:
             raise TypeError(f"Unsupported image source type: {type(image_source)}")
+        return parse_piexif_exif(exif_dict, image_size)
 
-        def get_value(key, default=None):
-            v = exif.get(key)
-            if v is None:
-                return default
-            try:
-                if isinstance(v, str) and "/" in v:
-                    num, den = v.split("/")
-                    return float(num) / float(den)
-                return float(v)
-            except (ValueError, TypeError):
-                return default
+    if not isinstance(image_source, (str, os.PathLike, bytes, bytearray, memoryview)):
+        raise TypeError(f"Unsupported image source type: {type(image_source)}")
 
-        exif_values["iso"] = get_value("Exif.Photo.ISOSpeedRatings")
-        exif_values["focal_length"] = get_value("Exif.Photo.FocalLength")
-        exif_values["aperture"] = get_value("Exif.Photo.FNumber")
-        exif_values["exposure_time"] = get_value("Exif.Photo.ExposureTime")
-        exif_values["white_balance"] = get_value("Exif.Photo.WhiteBalance")
-        exif_values["width"] = get_value("Exif.Image.ImageWidth") or get_value(
-            "Exif.Photo.PixelXDimension"
-        )
-        exif_values["height"] = get_value("Exif.Image.ImageLength") or get_value(
-            "Exif.Photo.PixelYDimension"
-        )
+    if pyexiv2 is not None and hasattr(pyexiv2, "Image") and hasattr(pyexiv2, "ImageData"):
+        try:
+            if isinstance(image_source, (str, os.PathLike)):
+                with pyexiv2.Image(str(Path(image_source))) as img:
+                    return parse_pyexiv2_exif(img.read_exif())
+            with pyexiv2.ImageData(bytes(image_source)) as img:
+                return parse_pyexiv2_exif(img.read_exif())
+        except Exception as e:
+            logger.warning(
+                "pyexiv2 metadata read failed, falling back to piexif: %s", e
+            )
 
+    try:
+        return load_with_piexif()
     except Exception as e:
-        logger.error(f"Error reading metadata with pyexiv2: {e}")
+        logger.error(f"Error reading metadata from image: {e}")
         raise
-
-    return exif_values
 
 
 def publish_metrics_from_exif_dict(exif_dict: Dict, camera_name: str):

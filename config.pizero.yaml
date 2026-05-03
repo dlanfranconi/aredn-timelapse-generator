@@ -1,0 +1,102 @@
+cameras:
+  picam-hq-6mm:
+    capture_method: picamera2
+    main_size: [1920, 1440]
+    denoise_mode: HighQuality
+    day_settings:
+      trigger_exposure_composite_value: 1.8
+    night_settings:
+      trigger_exposure_composite_value: 1.99
+    exposure_control:
+      enabled: true
+      default_mode: day
+      target_luma: 0.45
+      deadband: 0.10
+      adjustment_strength: 0.35
+      min_adjustment_factor: 0.15
+      max_adjustment_factor: 3.0
+      # Camera exposure is measured before the 180-degree postprocessing rotation.
+      # This corresponds to the upper-left sky area in the saved image.
+      metering_area: 0.66,0.65,1.00,1.00
+      metering_percentile: 95
+      day:
+        enabled: true
+        min_exposure_time: 100
+        max_exposure_time: 1000000
+        min_analogue_gain: 1.0
+        max_analogue_gain: 2.0
+        start_exposure_time: 1000
+        start_analogue_gain: 1.0
+      night:
+        enabled: true
+        min_exposure_time: 1000
+        max_exposure_time: 20000000
+        min_analogue_gain: 2.0
+        max_analogue_gain: 4.0
+        start_exposure_time: 1000000
+        start_analogue_gain: 2.0
+    lat: 37.6
+    lon: -122.4
+    sunrise_sunset:
+      enabled: True
+    postprocessing:
+      - type: rotate
+        angle: 180
+      - type: resize
+        height: 1440
+      - background_color: rgba(255, 255, 255, 0.3)
+        enabled: true
+        major_bar_color: grey
+        major_bar_width: 4
+        minor_bar_color: '#333333'
+        minor_bar_width: 2
+        overlay_bar_color: rgba(255, 0, 0, 0.5)
+        overlay_bar_width: 4
+        overlay_border_color: white
+        overlay_border_width: 3
+        overlay_rect_height_ratio: 1
+        overlay_rect_width: 15
+        overlay_width: 1000
+        padding: 5
+        position: bottom_center
+        sun_arc_color: rgba(255, 125, 0, 0.65)
+        type: sun_path
+      - type: timestamp
+        enabled: true
+        size: 24
+        color: white
+        background_color: "(100, 100, 100)"
+    sky_area: 0,0,2560,500
+    ssim_area: 0,0,2560,500
+    ssim_setpoint: 0.9
+    redirect_stderr: true
+global:
+  timezone: America/Los_Angeles
+  serialize_background_jobs: auto
+  work_dir: /srv/fenetre/data
+  deployment_name: zerohq.fenetre.cam
+  profiler:
+    enabled: false
+    sample_interval_s: 0.25
+    report_interval_s: 60
+    max_stack_depth: 8
+    max_entries: 10
+  storage_management:
+    enabled: true
+    check_interval_s: 600
+    work_dir_max_size_GB: 16
+http_server:
+  enabled: false #We have nignx
+admin_server:
+  enabled: true #Useful for metrics
+
+timelapse:
+  frequent_timelapse:
+    enabled: true
+    output_format: hls
+    interval_s: 1800
+    file_extension: mp4
+    framerate: 30
+  daily_timelapse:
+    file_extension: mp4
+    framerate: 30

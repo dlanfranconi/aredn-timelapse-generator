@@ -8,8 +8,8 @@ import requests
 from fenetre.utils import GoProRequest
 from fenetre.gopro_state_map import GoProEnums
 
-
 logger = logging.getLogger(__name__)
+
 
 def GoPro(gopro_model="hero11", **kwargs):
     model = (gopro_model or "hero11").lower()
@@ -223,11 +223,10 @@ class _GoProModernBase:
             else:
                 logger.error("GoPro did not become ready in 30 seconds.")
 
-
     def update_state(self):
         url = f"{self.scheme}://{self.ip_address}/gopro/camera/state"
         try:
-            response = self._make_gopro_request(url_path='/gopro/camera/state')
+            response = self._make_gopro_request(url_path="/gopro/camera/state")
             response.raise_for_status()
             self.state = response.json()
         except requests.RequestException as e:
@@ -258,14 +257,21 @@ class _GoProModernBase:
         raise NotImplementedError
 
     def _make_gopro_request(
-        self,
-        url_path: str,
-        expected_response_code: int = 200,
-        max_retries=5, backoff=1
+        self, url_path: str, expected_response_code: int = 200, max_retries=5, backoff=1
     ):
         """Helper function to make HTTP requests to GoPro with common parameters."""
-        r = GoProRequest(scheme=self.scheme, ip_address=self.ip_address, iface=self.iface, root_ca_filepath=self.root_ca_filepath)
-        return r.get(url_path=url_path, expected_response_code=expected_response_code, max_retries=max_retries, backoff=backoff)
+        r = GoProRequest(
+            scheme=self.scheme,
+            ip_address=self.ip_address,
+            iface=self.iface,
+            root_ca_filepath=self.root_ca_filepath,
+        )
+        return r.get(
+            url_path=url_path,
+            expected_response_code=expected_response_code,
+            max_retries=max_retries,
+            backoff=backoff,
+        )
 
     def _get_latest_file(self):
         media_list_url = f"/gopro/media/list"
@@ -375,6 +381,7 @@ class GoProHero6:
         gopro_usb=False,  # Not supported on Hero6
         root_ca=None,  # Not supported on Hero6
         camera_config={},
+        iface=None,
     ):
         self.ip_address = ip_address
         self.timeout = timeout
@@ -386,6 +393,7 @@ class GoProHero6:
         self.state = {}
         self.settings = GoProHero6Settings(self)
         self.camera_config = camera_config
+        self.iface = iface
 
     def apply_settings(
         self, settings: Optional[dict], camera_config: Optional[dict] = None
@@ -441,17 +449,17 @@ class GoProHero6:
         gopro_logger.debug(log_message)
 
     def _make_gopro_request(
-        self,
-        url_path: str,
-        expected_response_code: int = 200,
-        max_retries=5, backoff=1
+        self, url_path: str, expected_response_code: int = 200, max_retries=5, backoff=1
     ):
         """Helper function to make HTTP requests to GoPro with common parameters."""
-        r = GoProRequest(scheme=self.scheme, ip_address=self.ip_address, iface=self.iface)
+        r = GoProRequest(
+            scheme=self.scheme, ip_address=self.ip_address, iface=self.iface
+        )
         return r.get(url_path, expected_response_code, max_retries, backoff)
 
     def _get_latest_file(self):
-        resp = self._make_gopro_request('/gp/gpMediaList')
+        media_list_url = "/gp/gpMediaList"
+        resp = self._make_gopro_request("/gp/gpMediaList")
         self._log_request_response(media_list_url, resp)
         resp.raise_for_status()
         data = resp.json()
@@ -473,7 +481,7 @@ class GoProHero6:
 
     def update_state(self):
         try:
-            response = self._make_gopro_request('/status')
+            response = self._make_gopro_request("/status")
             response.raise_for_status()
             self.state = response.json()
         except requests.RequestException as e:
@@ -493,10 +501,6 @@ class GoProHero6:
 
     def capture_photo(self, output_file: Optional[str] = None) -> bytes:
         latest_dir_before, latest_file_before = self._get_latest_file()
-
-
-        # Enable USB mode
-        self.enable_usb_mode()
 
         # Trigger shutter
         self._make_gopro_request("/gp/gpControl/command/shutter?p=1")
@@ -523,7 +527,9 @@ class GoProHero6:
             time.sleep(0.5)
 
         photo_url = f"{self.scheme}://{self.ip_address}/videos/DCIM/{latest_dir_after}/{latest_file_after}"
-        photo_resp = self._make_gopro_request(f"/videos/DCIM/{latest_dir_after}/{latest_file_after}")
+        photo_resp = self._make_gopro_request(
+            f"/videos/DCIM/{latest_dir_after}/{latest_file_after}"
+        )
         photo_resp.raise_for_status()
 
         if output_file:

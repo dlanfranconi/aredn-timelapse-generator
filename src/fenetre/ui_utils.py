@@ -4,11 +4,18 @@ import os
 import shutil
 
 
+def make_public_file(path: str):
+    os.chmod(path, 0o664)
+
+
 def generate_index_html(work_dir: str, global_config: dict):
     """Generates the index.html file by copying the configured landing page."""
     logger = logging.getLogger(__name__)
     ui_config = global_config.get("ui", {})
     landing_page = ui_config.get("landing_page", "list")  # default to list
+
+    if landing_page == "map":
+        landing_page = "list"
 
     dest_path = os.path.join(work_dir, "index.html")
 
@@ -38,6 +45,7 @@ def generate_index_html(work_dir: str, global_config: dict):
 
             with open(dest_path, "w") as f:
                 f.write(content)
+            make_public_file(dest_path)
             logger.info(
                 f"Generated index.html from fullscreen.html for camera '{camera_name}'"
             )
@@ -56,8 +64,10 @@ def generate_index_html(work_dir: str, global_config: dict):
     try:
         if not os.path.exists(dest_path) or not filecmp.cmp(source_path, dest_path):
             shutil.copy(source_path, dest_path)
+            make_public_file(dest_path)
             logger.info(f"Copied {source_filename} to index.html in {work_dir}")
         else:
+            make_public_file(dest_path)
             logger.debug(
                 f"index.html is already a copy of {source_filename}, skipping copy."
             )
@@ -77,14 +87,17 @@ def copy_public_html_files(work_dir: str, global_config: dict):
         dest_path = os.path.join(work_dir, file)
         if not os.path.exists(dest_path) or not filecmp.cmp(source_path, dest_path):
             shutil.copy(source_path, dest_path)
+            make_public_file(dest_path)
             logger.info(f"Copied {file} to {work_dir}")
         else:
+            make_public_file(dest_path)
             logger.debug(f"{file} already exists and is identical, skipping copy.")
 
     # Create the lib directory if it does not exist.
     lib_dir = os.path.join(work_dir, "lib")
     if not os.path.exists(lib_dir):
         os.makedirs(lib_dir)
+    os.chmod(lib_dir, 0o775)
 
     source_lib_dir = os.path.join(current_dir, "lib")
     if os.path.exists(source_lib_dir):
@@ -97,8 +110,10 @@ def copy_public_html_files(work_dir: str, global_config: dict):
                     source_path, dest_path
                 ):
                     shutil.copy(source_path, dest_path)
+                    make_public_file(dest_path)
                     logger.info(f"Copied {file} to {lib_dir}")
                 else:
+                    make_public_file(dest_path)
                     logger.debug(
                         f"{file} already exists and is identical, skipping copy."
                     )

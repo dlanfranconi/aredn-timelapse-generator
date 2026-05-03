@@ -1,33 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
-import sys
-
-# Mock external dependencies before importing anything from fenetre
-sys.modules["pyexiv2"] = MagicMock()
-sys.modules["piexif"] = MagicMock()
-sys.modules["requests"] = MagicMock()
-sys.modules["requests.adapters"] = MagicMock()
-sys.modules["requests.sessions"] = MagicMock()
-sys.modules["urllib3"] = MagicMock()
-sys.modules["urllib3.poolmanager"] = MagicMock()
-sys.modules["cairosvg"] = MagicMock()
-sys.modules["numpy"] = MagicMock()
-sys.modules["pytz"] = MagicMock()
-sys.modules["skimage"] = MagicMock()
-sys.modules["skimage.exposure"] = MagicMock()
-sys.modules["astral"] = MagicMock()
-sys.modules["astral.sun"] = MagicMock()
-sys.modules["yaml"] = MagicMock()
-sys.modules["prometheus_client"] = MagicMock()
-sys.modules["flask"] = MagicMock()
-sys.modules["waitress"] = MagicMock()
-sys.modules["werkzeug"] = MagicMock()
-sys.modules["werkzeug.exceptions"] = MagicMock()
-sys.modules["mozjpeg_lossless_optimization"] = MagicMock()
-sys.modules["paho"] = MagicMock()
-sys.modules["paho.mqtt"] = MagicMock()
-sys.modules["paho.mqtt.client"] = MagicMock()
-sys.modules["netifaces"] = MagicMock()
+from unittest.mock import patch
 
 from fenetre.camera_utils import get_day_night_from_exif
 

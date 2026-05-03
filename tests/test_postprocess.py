@@ -619,6 +619,61 @@ class TestPostprocess(unittest.TestCase):
         mock_image_data_cls.assert_called_once_with(payload)
         self.assertEqual(result["iso"], 100.0)
 
+    @patch("fenetre.postprocess.Image.open")
+    @patch("fenetre.postprocess.piexif.load")
+    @patch("fenetre.postprocess.pyexiv2", None)
+    def test_get_exif_dict_from_path_falls_back_to_piexif(
+        self, mock_piexif_load, mock_image_open
+    ):
+        mock_piexif_load.return_value = {
+            "0th": {},
+            "Exif": {
+                34855: 200,
+                37386: (350, 10),
+                33437: (28, 10),
+                33434: (1, 50),
+                41987: 1,
+            },
+        }
+        mock_image = MagicMock()
+        mock_image.size = (4000, 3000)
+        mock_image_open.return_value.__enter__.return_value = mock_image
+
+        result = get_exif_dict("/tmp/fake.jpg")
+
+        mock_piexif_load.assert_called_once_with("/tmp/fake.jpg")
+        self.assertEqual(result["iso"], 200.0)
+        self.assertAlmostEqual(result["focal_length"], 35.0)
+        self.assertAlmostEqual(result["aperture"], 2.8)
+        self.assertAlmostEqual(result["exposure_time"], 1 / 50)
+        self.assertEqual(result["white_balance"], 1.0)
+        self.assertEqual(result["width"], 4000.0)
+        self.assertEqual(result["height"], 3000.0)
+
+    @patch("fenetre.postprocess.Image.open")
+    @patch("fenetre.postprocess.piexif.load")
+    @patch("fenetre.postprocess.pyexiv2")
+    def test_get_exif_dict_falls_back_when_pyexiv2_api_fails(
+        self, mock_pyexiv2, mock_piexif_load, mock_image_open
+    ):
+        mock_pyexiv2.Image.side_effect = AttributeError("missing API")
+        mock_pyexiv2.ImageData.side_effect = AttributeError("missing API")
+        mock_piexif_load.return_value = {
+            "0th": {},
+            "Exif": {
+                34855: 100,
+            },
+        }
+        mock_image = MagicMock()
+        mock_image.size = (1920, 1080)
+        mock_image_open.return_value.__enter__.return_value = mock_image
+
+        result = get_exif_dict("/tmp/fake.jpg")
+
+        self.assertEqual(result["iso"], 100.0)
+        self.assertEqual(result["width"], 1920.0)
+        self.assertEqual(result["height"], 1080.0)
+
     def test_get_exif_dict_unsupported_type(self):
         with self.assertRaises(TypeError):
             get_exif_dict(object())

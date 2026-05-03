@@ -1,41 +1,60 @@
-# Dockerfile
+FROM ubuntu:26.04 AS builder
 
-# Use an official Python 3.12 image as a base
-FROM ubuntu:latest
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/srv/fenetre/venv \
+    PATH=/srv/fenetre/venv/bin:$PATH
 
-# Install required system packages (ffmpeg)
 RUN apt-get update && \
-    apt-get install -y python3-venv ffmpeg
-
-# For Intel only
-RUN apt-get install -y intel-media-va-driver-non-free intel-opencl-icd libmfx1
-
-RUN apt-get clean && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        python3 \
+        python3-dev \
+        python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
 WORKDIR /srv/fenetre/app
-RUN mkdir -p src/fenetre
 
-# Install Python dependencies if necessary
-# Uncomment the following line if you need to install dependencies
-RUN python3 -m venv /srv/fenetre/venv
-COPY requirements.txt .
-RUN /srv/fenetre/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN python3 -m venv "$VIRTUAL_ENV"
 
-# Copy the local files into the container
-COPY src/fenetre /srv/fenetre/app/src/fenetre
-COPY pyproject.toml .
-RUN /srv/fenetre/venv/bin/pip install -e .
+COPY pyproject.toml README.md ./
+COPY src/fenetre ./src/fenetre
 
-# This has to match the host system
-RUN groupadd -g 109 render 
-# RUN usermod -aG render ubuntu
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -e '.[gopro]' && \
+    pip uninstall -y pip setuptools wheel && \
+    find "$VIRTUAL_ENV" -type d -name '__pycache__' -prune -exec rm -rf '{}' + && \
+    find "$VIRTUAL_ENV" -type f -name '*.py[co]' -delete
 
-VOLUME /srv/fenetre/config.yaml
-VOLUME /srv/fenetre/data
-VOLUME /srv/fenetre/logs
+FROM ubuntu:26.04
 
-# Set entrypoint to allow dynamic config.yaml file specification
-ENTRYPOINT ["/srv/fenetre/venv/bin/fenetre", "--config", "/srv/fenetre/config.yaml"]
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/srv/fenetre/venv \
+    PATH=/srv/fenetre/venv/bin:$PATH
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+        intel-media-va-driver \
+        libgl1 \
+        libglib2.0-0 \
+        libva-drm2 \
+        libva2 \
+        libvpl2 \
+        mesa-va-drivers \
+        python3 \
+        vainfo && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /srv/fenetre/venv /srv/fenetre/venv
+COPY --from=builder /srv/fenetre/app /srv/fenetre/app
+
+WORKDIR /srv/fenetre/app
+
+VOLUME ["/srv/fenetre/data", "/srv/fenetre/logs"]
+
+ENTRYPOINT ["fenetre"]
+CMD ["--config", "/srv/fenetre/config.yaml"]

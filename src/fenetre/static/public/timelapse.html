@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timelapse Player</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            min-height: 100%;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .player-shell {
+            width: min(96vw, 1200px);
+            padding: 16px;
+            box-sizing: border-box;
+        }
+
+        .title {
+            margin: 0 0 12px 0;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        video {
+            width: 100%;
+            max-height: calc(100vh - 120px);
+            background: #000;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: #c7c7c7;
+            font-size: 14px;
+        }
+
+        .status.error {
+            color: #ff8a8a;
+        }
+    </style>
+</head>
+<body>
+    <div class="player-shell">
+        <h1 class="title" id="title">Timelapse</h1>
+        <video id="video" controls autoplay playsinline muted></video>
+        <div class="status" id="status">Loading player…</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const src = params.get('src');
+        const title = params.get('title') || 'Timelapse';
+        const titleElement = document.getElementById('title');
+        const videoElement = document.getElementById('video');
+        const statusElement = document.getElementById('status');
+        let didSeekToStart = false;
+
+        titleElement.textContent = title;
+
+        function setStatus(message, isError = false) {
+            statusElement.textContent = message;
+            statusElement.classList.toggle('error', isError);
+        }
+
+        function seekToStartAndPlay() {
+            if (didSeekToStart) {
+                return;
+            }
+            didSeekToStart = true;
+            try {
+                videoElement.currentTime = 0;
+            } catch (error) {
+                console.warn('Could not seek to start immediately:', error);
+            }
+            videoElement.play().catch(() => {});
+        }
+
+        function buildSnapshotPlaylist(originalText, playlistUrl) {
+            const resolvedPlaylistUrl = new URL(playlistUrl, window.location.href);
+            const playlistBaseUrl = new URL('.', resolvedPlaylistUrl).href;
+            const lines = originalText.split(/\r?\n/);
+            const out = [];
+            let hasPlaylistType = false;
+            let hasEndList = false;
+
+            for (const line of lines) {
+                if (!line) {
+                    continue;
+                }
+                if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
+                    out.push('#EXT-X-PLAYLIST-TYPE:VOD');
+                    hasPlaylistType = true;
+                    continue;
+                }
+                if (line.startsWith('#EXT-X-ENDLIST')) {
+                    hasEndList = true;
+                    out.push(line);
+                    continue;
+                }
+                if (line.startsWith('#')) {
+                    out.push(line);
+                    continue;
+                }
+                out.push(new URL(line, playlistBaseUrl).href);
+            }
+
+            if (!hasPlaylistType) {
+                out.splice(3, 0, '#EXT-X-PLAYLIST-TYPE:VOD');
+            }
+            if (!hasEndList) {
+                out.push('#EXT-X-ENDLIST');
+            }
+            return out.join('\n') + '\n';
+        }
+
+        async function buildSnapshotPlaylistUrl(playlistUrl) {
+            const resolvedPlaylistUrl = new URL(playlistUrl, window.location.href);
+            const response = await fetch(resolvedPlaylistUrl, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`Failed to fetch playlist: HTTP ${response.status}`);
+            }
+            const originalText = await response.text();
+            const snapshotText = buildSnapshotPlaylist(
+                originalText,
+                resolvedPlaylistUrl.href
+            );
+            return URL.createObjectURL(
+                new Blob([snapshotText], { type: 'application/vnd.apple.mpegurl' })
+            );
+        }
+
+        async function initializePlayer() {
+            if (!src) {
+                setStatus('Missing video source.', true);
+                return;
+            }
+
+            let snapshotUrl;
+            try {
+                snapshotUrl = await buildSnapshotPlaylistUrl(src);
+            } catch (error) {
+                setStatus(`Could not build playback snapshot: ${error.message || error}`, true);
+                return;
+            }
+
+            if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                videoElement.src = snapshotUrl;
+                videoElement.addEventListener('loadedmetadata', seekToStartAndPlay, { once: true });
+                setStatus('Playing playlist snapshot with native HLS support.');
+                return;
+            }
+
+            if (window.Hls && window.Hls.isSupported()) {
+                const hls = new window.Hls({
+                    startPosition: 0,
+                });
+                hls.loadSource(snapshotUrl);
+                hls.attachMedia(videoElement);
+                hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                    setStatus('Playing playlist snapshot with hls.js.');
+                });
+                videoElement.addEventListener('loadedmetadata', seekToStartAndPlay, { once: true });
+                hls.on(window.Hls.Events.ERROR, (_, data) => {
+                    if (data && data.fatal) {
+                        setStatus(`Playback error: ${data.details || 'unknown error'}`, true);
+                    }
+                });
+                return;
+            }
+
+            setStatus('This browser does not support HLS playback.', true);
+        }
+
+        initializePlayer();
+    </script>
+</body>
+</html>

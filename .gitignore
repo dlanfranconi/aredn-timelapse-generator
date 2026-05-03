@@ -1,5 +1,6 @@
 data
 config.yaml
+.venv
 venv
 venv-*
 *.pyc

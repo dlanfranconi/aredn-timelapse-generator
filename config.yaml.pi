@@ -22,12 +22,25 @@ cameras:
     ssim_area: 0,0,2560,500
     ssim_setpoint: 0.89
   picam-hq-6mm:
-    local_command: libcamera-still -n --tuning-file /home/mathieu/fenetre.cam/imx477_long_exposure.json --exposure normal --framerate 0 --ev 1.5 -q 100 -o -
-    #    capture_method: picamera2
-    #    tuning_file: /home/mathieu/fenetre.cam/imx477_long_exposure.json
-    #    exposure_time: 1000000
-    #    analogue_gain: 1.0
-    #    denoise_mode: HighQuality
+    capture_method: picamera2
+    exposure_value: 1.5
+    denoise_mode: HighQuality
+    exposure_control:
+      enabled: true
+      default_mode: day
+      target_luma: 0.45
+      deadband: 0.08
+      min_adjustment_factor: 0.8
+      max_adjustment_factor: 1.25
+      metering_area: 0.05,0.05,0.95,0.85
+      day:
+        enabled: true
+        min_exposure_time: 100
+        max_exposure_time: 20000
+        min_analogue_gain: 1.0
+        max_analogue_gain: 4.0
+        start_exposure_time: 1000
+        start_analogue_gain: 1.0
     lat: 37.6
     lon: -122.4
     sunrise_sunset:
