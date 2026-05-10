@@ -75,6 +75,10 @@ global:
 http_server:
   enabled: true
   listen: 0.0.0.0:8888
+  cors_allow_origin: https://fenetre.cam
+  cors_allow_origins:
+    - https://fenetre.cam
+    - https://dev.fenetre.cam
 timelapse:
  daily_timelapse:
    enabled: true
