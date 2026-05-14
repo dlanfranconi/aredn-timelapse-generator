@@ -1,0 +1,22 @@
+services:
+  aredn-timelapse-generator:
+    image: ghcr.io/dlanfranconi/aredn-timelapse-generator:latest
+    container_name: aredn-timelapse-generator
+    restart: unless-stopped
+
+    ports:
+      - "8888:8888"
+      - "8889:8889"
+
+    environment:
+      TZ: America/Los_Angeles
+      FENETRE_PID_FILE: /tmp/fenetre.pid
+
+    volumes:
+      - /opt/aredn-timelapse/config/config.yaml:/srv/fenetre/config.yaml
+      - /opt/aredn-timelapse/data:/srv/fenetre/data
+      - /opt/aredn-timelapse/logs:/srv/fenetre/logs
+
+    # Uncomment for Intel QuickSync / VAAPI hardware encoding.
+    # devices:
+    #   - /dev/dri:/dev/dri
