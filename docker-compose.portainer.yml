@@ -1,0 +1,30 @@
+services:
+  aredn-timelapse-generator:
+    build: .
+    container_name: aredn-timelapse-generator
+    restart: unless-stopped
+
+    ports:
+      # Public/static camera website
+      - "8888:8888"
+      # Admin/configuration GUI
+      - "8889:8889"
+
+    environment:
+      TZ: America/Los_Angeles
+      FENETRE_PID_FILE: /tmp/fenetre.pid
+
+    volumes:
+      # Main runtime config. Copy config.aredn-example.yaml to ./config/config.yaml first.
+      - ./config/config.yaml:/srv/fenetre/config.yaml
+
+      # Persistent image/video database and generated web files.
+      - ./data:/srv/fenetre/data
+
+      # Persistent logs.
+      - ./logs:/srv/fenetre/logs
+
+    # Optional: enable this only if you want Intel VAAPI/QSV hardware encoding
+    # and the host has /dev/dri available.
+    # devices:
+    #   - /dev/dri:/dev/dri
