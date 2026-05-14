@@ -1,0 +1,102 @@
+global:
+  work_dir: /srv/fenetre/data
+  log_dir: /srv/fenetre/logs
+  timezone: America/Los_Angeles
+  logging_level: INFO
+
+  storage_management:
+    enabled: true
+    dry_run: false
+    check_interval_s: 300
+
+    # Global hard ceiling.
+    work_dir_max_size_GB: 50
+
+  ui:
+    landing_page: list
+    show_map_by_default: false
+
+http_server:
+  enabled: true
+  listen: 0.0.0.0:8888
+
+admin_server:
+  enabled: true
+  listen: 0.0.0.0:8889
+
+timelapse:
+  frequent_timelapse:
+    enabled: true
+    interval_s: 1200
+    framerate: 30
+    ffmpeg_2pass: true
+
+    # Low-bandwidth rolling timelapse.
+    # Target roughly 5-15MB.
+    ffmpeg_options: >-
+      -c:v libx264
+      -preset veryslow
+      -crf 36
+      -pix_fmt yuv420p
+      -movflags +faststart
+
+    file_extension: mp4
+
+  daily_timelapse:
+    enabled: true
+    framerate: 60
+    ffmpeg_2pass: true
+
+    # Daily archive timelapse.
+    # Target roughly 20-30MB.
+    ffmpeg_options: >-
+      -c:v libx264
+      -preset veryslow
+      -crf 31
+      -pix_fmt yuv420p
+      -movflags +faststart
+
+    file_extension: mp4
+
+cameras:
+  slo-mesh-demo:
+    description: Example Reolink/Sunba camera
+
+    # Replace with actual snapshot URL.
+    url: http://192.168.1.50/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=admin&password=PASSWORD
+
+    timeout_s: 15
+    cache_bust: true
+    gather_metrics: true
+    mozjpeg_optimize: true
+
+    # Activity detection area.
+    sky_area: 0,0,3840,1200
+
+    # SSIM motion analysis area.
+    ssim_area: 0,0,3840,2160
+    ssim_setpoint: 0.88
+
+    # Normal daytime interval.
+    snap_interval_s: 60
+
+    # Aggressive capture around sunrise/sunset.
+    sunrise_sunset:
+      enabled: true
+      interval_s: 10
+      sunrise_offset_start_minutes: 45
+      sunrise_offset_end_minutes: 45
+      sunset_offset_start_minutes: 45
+      sunset_offset_end_minutes: 45
+
+    # Camera location.
+    lat: 35.2828
+    lon: -120.6596
+
+    postprocessing:
+      - type: timestamp
+        enabled: true
+        position: bottom_right
+        size: 24
+        color: white
+        format: "%Y-%m-%d %H:%M:%S %Z"
