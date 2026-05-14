@@ -1,8 +1,10 @@
-import json  # For handling JSON input
+import json
 import os
+import re
 import signal
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 import requests
 import yaml
@@ -134,8 +136,126 @@ gopro_setting_gauge = Gauge(
     "gopro_setting", "GoPro Setting", ["camera_name", "setting_name"]
 )
 
-
 app = Flask(__name__)
+
+
+def _config_file_path():
+    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
+    if not config_file_path:
+        raise RuntimeError("FENETRE_CONFIG_FILE not set in app config.")
+    return config_file_path
+
+
+def _load_raw_config():
+    config_file_path = _config_file_path()
+    if not os.path.exists(config_file_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_file_path}")
+    with open(config_file_path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _backup_config(config_file_path: str) -> str | None:
+    if not os.path.exists(config_file_path):
+        return None
+    backup_path = f"{config_file_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    with open(config_file_path, "rb") as src, open(backup_path, "wb") as dst:
+        dst.write(src.read())
+    return backup_path
+
+
+def _atomic_write_yaml(config_file_path: str, config_data: dict) -> str | None:
+    backup_path = _backup_config(config_file_path)
+    tmp_path = f"{config_file_path}.tmp"
+    with open(tmp_path, "w") as f:
+        yaml.safe_dump(config_data, f, sort_keys=False, default_flow_style=False, indent=2)
+    os.replace(tmp_path, config_file_path)
+    return backup_path
+
+
+def _slugify_camera_name(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    if not value:
+        raise ValueError("Camera name cannot be empty.")
+    return value
+
+
+def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True):
+    request_url = url
+    if cache_bust:
+        separator = "&" if "?" in request_url else "?"
+        request_url = f"{request_url}{separator}_fenetre_test={int(datetime.utcnow().timestamp())}"
+
+    headers = {"Accept": "image/*,*/*;q=0.8", "User-Agent": "Fenetre Admin Snapshot Tester"}
+    response = requests.get(request_url, timeout=timeout_s, headers=headers)
+    response.raise_for_status()
+
+    image_bytes = response.content
+    image = Image.open(BytesIO(image_bytes))
+    image.verify()
+
+    reopened = Image.open(BytesIO(image_bytes))
+    return image_bytes, response.headers.get("content-type", "image/jpeg"), reopened.size
+
+
+def _build_camera_config(payload: dict) -> tuple[str, dict]:
+    name = _slugify_camera_name(payload.get("name"))
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise ValueError("Snapshot URL is required.")
+
+    camera = {
+        "url": url,
+        "description": payload.get("description") or name,
+        "timeout_s": int(payload.get("timeout_s") or 15),
+        "cache_bust": bool(payload.get("cache_bust", True)),
+        "gather_metrics": bool(payload.get("gather_metrics", True)),
+        "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),
+    }
+
+    if payload.get("disabled"):
+        camera["disabled"] = True
+
+    if payload.get("snap_interval_enabled"):
+        camera["snap_interval_s"] = int(payload.get("snap_interval_s") or 60)
+
+    if payload.get("ssim_enabled"):
+        camera["ssim_setpoint"] = float(payload.get("ssim_setpoint") or 0.85)
+        if payload.get("ssim_area"):
+            camera["ssim_area"] = payload.get("ssim_area")
+
+    if payload.get("sky_area_enabled") and payload.get("sky_area"):
+        camera["sky_area"] = payload.get("sky_area")
+
+    if payload.get("sunrise_sunset_enabled"):
+        camera["lat"] = float(payload.get("lat"))
+        camera["lon"] = float(payload.get("lon"))
+        camera["sunrise_sunset"] = {
+            "enabled": True,
+            "interval_s": int(payload.get("sunrise_sunset_interval_s") or 10),
+            "sunrise_offset_start_minutes": int(payload.get("sunrise_offset_start_minutes") or 45),
+            "sunrise_offset_end_minutes": int(payload.get("sunrise_offset_end_minutes") or 45),
+            "sunset_offset_start_minutes": int(payload.get("sunset_offset_start_minutes") or 45),
+            "sunset_offset_end_minutes": int(payload.get("sunset_offset_end_minutes") or 45),
+        }
+
+    postprocessing = []
+    if payload.get("timestamp_enabled"):
+        postprocessing.append(
+            {
+                "type": "timestamp",
+                "enabled": True,
+                "position": payload.get("timestamp_position") or "bottom_right",
+                "size": int(payload.get("timestamp_size") or 24),
+                "color": payload.get("timestamp_color") or "white",
+                "format": payload.get("timestamp_format") or "%Y-%m-%d %H:%M:%S %Z",
+            }
+        )
+    if postprocessing:
+        camera["postprocessing"] = postprocessing
+
+    return name, camera
 
 
 @app.route("/metrics")
@@ -145,28 +265,23 @@ def metrics():
 
 @app.route("/config", methods=["GET"])
 def get_config():
-    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if not config_file_path:
-        return jsonify({"error": "FENETRE_CONFIG_FILE not set in app config."}), 500
     try:
-        if not os.path.exists(config_file_path):
-            return (
-                jsonify({"error": f"Configuration file not found: {config_file_path}"}),
-                404,
-            )
-        with open(config_file_path, "r") as f:
-            config_data = yaml.safe_load(f)
-        return jsonify({"config": config_data}), 200
+        return jsonify({"config": _load_raw_config()}), 200
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
     except Exception as e:
         return jsonify({"error": f"Error reading configuration: {str(e)}"}), 500
 
 
 @app.route("/config", methods=["PUT"])
 def update_config():
-    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if not config_file_path:
-        return jsonify({"error": "FENETRE_CONFIG_FILE not set in app config."}), 500
+    """Full config replacement for the advanced editor.
+
+    This route now writes atomically and keeps a timestamped backup. The dedicated
+    camera-add flow below is preferred because it only mutates the cameras map.
+    """
     try:
+        config_file_path = _config_file_path()
         if not request.is_json:
             return jsonify({"error": "Request body must be JSON."}), 415
 
@@ -174,48 +289,21 @@ def update_config():
         if not new_config_json:
             return jsonify({"error": "Request body is empty or not valid JSON."}), 400
 
-        # If the whole config is nested under a "config" key, extract it.
         if "config" in new_config_json and len(new_config_json.keys()) == 1:
             new_config_json = new_config_json["config"]
 
         if not isinstance(new_config_json, dict):
-            return (
-                jsonify(
-                    {"error": "Root element of the configuration must be a dictionary."}
-                ),
-                400,
-            )
+            return jsonify({"error": "Root element of the configuration must be a dictionary."}), 400
 
-        # Convert JSON to YAML
-        try:
-            new_config_yaml = yaml.dump(
-                new_config_json, sort_keys=False, default_flow_style=False, indent=2
-            )
-        except yaml.YAMLError as e:
-            return jsonify({"error": f"Error converting JSON to YAML: {str(e)}"}), 500
-
-        with open(config_file_path, "w") as f:
-            f.write(new_config_yaml)
-
-        return (
-            jsonify(
-                {
-                    "message": "Configuration updated successfully (saved as YAML). Reload is required to apply changes."
-                }
-            ),
-            200,
-        )
+        backup_path = _atomic_write_yaml(config_file_path, new_config_json)
+        message = "Configuration updated successfully. Reload is required to apply changes."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return jsonify({"message": message}), 200
     except BadRequest:
-        return (
-            jsonify({"error": "Invalid JSON format in request body or empty body."}),
-            400,
-        )
+        return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
     except Exception as e:
-        print(f"Unexpected error in update_config: {e}")
         return jsonify({"error": f"Error processing configuration: {str(e)}"}), 500
-
-
-# --- UI Serving Routes ---
 
 
 @app.route("/")
@@ -223,293 +311,152 @@ def serve_ui_page():
     return send_from_directory("static/admin", "index.html")
 
 
+@app.route("/api/camera/test_snapshot", methods=["POST"])
+def test_snapshot_url():
+    try:
+        payload = request.get_json(force=True) or {}
+        url = (payload.get("url") or "").strip()
+        timeout_s = int(payload.get("timeout_s") or 15)
+        if not url:
+            return jsonify({"error": "Snapshot URL is required."}), 400
+        image_bytes, content_type, size = _fetch_snapshot_bytes(url, timeout_s=timeout_s)
+        return jsonify(
+            {
+                "ok": True,
+                "content_type": content_type,
+                "width": size[0],
+                "height": size[1],
+                "bytes": len(image_bytes),
+                "preview_data_url": "data:image/jpeg;base64," + __import__("base64").b64encode(image_bytes).decode("ascii"),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/camera/add", methods=["POST"])
+def add_camera():
+    try:
+        payload = request.get_json(force=True) or {}
+        config_file_path = _config_file_path()
+        config = _load_raw_config()
+        config.setdefault("cameras", {})
+        if not isinstance(config["cameras"], dict):
+            return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
+
+        name, camera = _build_camera_config(payload)
+        if name in config["cameras"]:
+            return jsonify({"error": f"Camera '{name}' already exists."}), 409
+
+        if payload.get("require_test", True):
+            _fetch_snapshot_bytes(camera["url"], timeout_s=camera.get("timeout_s", 15))
+
+        config["cameras"][name] = camera
+        backup_path = _atomic_write_yaml(config_file_path, config)
+        return jsonify(
+            {
+                "message": f"Camera '{name}' added. Reload the app to make it live.",
+                "camera_name": name,
+                "backup": os.path.basename(backup_path) if backup_path else None,
+            }
+        ), 200
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to add camera: {str(exc)}"}), 500
+
+
 @app.route("/api/sync_ui", methods=["POST"])
 def sync_ui():
-    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if not config_file_path:
-        return jsonify({"error": "FENETRE_CONFIG_FILE not set in app config."}), 500
     try:
-        with open(config_file_path, "r") as f:
-            config = yaml.safe_load(f)
+        config = _load_raw_config()
         work_dir = config.get("global", {}).get("work_dir")
         if not work_dir:
             return jsonify({"error": "work_dir not set in global config."}), 500
-
         copy_public_html_files(work_dir, config.get("global", {}))
         return jsonify({"message": "UI files synchronized successfully."}), 200
     except Exception as e:
         return jsonify({"error": f"Error synchronizing UI files: {str(e)}"}), 500
 
 
-# --- API Endpoints for Visual Config Tool ---
-
-
 @app.route("/api/camera/<string:camera_name>/capture_for_ui", methods=["POST"])
 def capture_for_ui(camera_name):
-    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if not config_file_path:
-        return jsonify({"error": "FENETRE_CONFIG_FILE not set in app config."}), 500
-
     try:
-        with open(config_file_path, "r") as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        return (
-            jsonify({"error": f"Configuration file {config_file_path} not found."}),
-            500,
-        )
-    except yaml.YAMLError:
-        return (
-            jsonify({"error": f"Error parsing configuration file {config_file_path}."}),
-            500,
-        )
-
-    if "cameras" not in config or camera_name not in config["cameras"]:
-        return (
-            jsonify({"error": f"Camera '{camera_name}' not found in configuration."}),
-            404,
-        )
-
-    camera_config = config["cameras"][camera_name]
-    url = camera_config.get("url")
-    gopro_ip = camera_config.get("gopro_ip")
-
-    if not url and not gopro_ip:
-        # For now, only support URL and GoPro cameras for this feature.
-        return (
-            jsonify(
-                {
-                    "error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured. Only URL/GoPro cameras are supported for UI capture."
-                }
-            ),
-            400,
-        )
-
-    try:
+        config = _load_raw_config()
+        if "cameras" not in config or camera_name not in config["cameras"]:
+            return jsonify({"error": f"Camera '{camera_name}' not found in configuration."}), 404
+        camera_config = config["cameras"][camera_name]
+        url = camera_config.get("url")
+        gopro_ip = camera_config.get("gopro_ip")
+        if not url and not gopro_ip:
+            return jsonify({"error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured."}), 400
         if url:
-            # Replicate parts of fenetre.py's get_pic_from_url logic
-            global_config = config.get("global", {})
-            ua = global_config.get("user_agent", "Fenetre Config UI/1.0")
-            headers = {"Accept": "image/*,*"}
-            if ua:
-                requests_version = requests.__version__
-                headers = {"User-Agent": f"{ua} v{requests_version}"}
-
-            timeout = camera_config.get("timeout_s", 20)
-
-            r = requests.get(url, timeout=timeout, headers=headers, stream=True)
-            r.raise_for_status()
-
-            # Determine content type
-            content_type = r.headers.get("content-type", "application/octet-stream")
-            if not content_type.startswith("image/"):
-                # Try to infer from URL if content-type is generic
-                if ".jpg" in url.lower() or ".jpeg" in url.lower():
-                    content_type = "image/jpeg"
-                elif ".png" in url.lower():
-                    content_type = "image/png"
-
-            img_bytes = BytesIO(r.content)
-            img_bytes.seek(0)
-
-            return send_file(img_bytes, mimetype=content_type)
-
-        elif gopro_ip:
-            gopro_model = camera_config.get("gopro_model") or "hero11"
-            if gopro_model == "open_gopro":
-                gopro_model = "hero11"
-            gopro = GoPro(
-                ip_address=gopro_ip,
-                gopro_model=gopro_model,
-            )
-            # This is a simplified capture, assuming the GoPro is ready.
-            # The main app's GoProUtilityThread handles GoPro state management
-            # which we don't replicate here for a simple capture.
-            jpeg_bytes = gopro.capture_photo()
-            if not jpeg_bytes:
-                return (
-                    jsonify(
-                        {
-                            "error": "Failed to capture photo from GoPro. It might be busy or off."
-                        }
-                    ),
-                    500,
-                )
-
-            img_bytes = BytesIO(jpeg_bytes)
-            img_bytes.seek(0)
-            return send_file(img_bytes, mimetype="image/jpeg")
-
+            image_bytes, content_type, _ = _fetch_snapshot_bytes(url, camera_config.get("timeout_s", 20), camera_config.get("cache_bust", False))
+            return send_file(BytesIO(image_bytes), mimetype=content_type)
+        gopro_model = camera_config.get("gopro_model") or "hero11"
+        if gopro_model == "open_gopro":
+            gopro_model = "hero11"
+        gopro = GoPro(ip_address=gopro_ip, gopro_model=gopro_model)
+        jpeg_bytes = gopro.capture_photo()
+        if not jpeg_bytes:
+            return jsonify({"error": "Failed to capture photo from GoPro."}), 500
+        return send_file(BytesIO(jpeg_bytes), mimetype="image/jpeg")
     except requests.exceptions.RequestException as e:
-        return (
-            jsonify(
-                {
-                    "error": f"Error fetching image for camera '{camera_name}' from {url}: {str(e)}"
-                }
-            ),
-            500,
-        )
+        return jsonify({"error": f"Error fetching image for camera '{camera_name}': {str(e)}"}), 500
     except Exception as e:
-        return (
-            jsonify(
-                {
-                    "error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"
-                }
-            ),
-            500,
-        )
+        return jsonify({"error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"}), 500
 
 
 @app.route("/api/camera/preview_crop", methods=["POST"])
 def preview_crop():
     if "image" not in request.files:
         return jsonify({"error": "No image file provided in the request."}), 400
-
     crop_data_str = request.form.get("crop_data")
     if not crop_data_str:
         return jsonify({"error": "No crop_data provided in the request form."}), 400
-
     try:
         crop_data = json.loads(crop_data_str)
-    except json.JSONDecodeError:
-        return jsonify({"error": "Invalid JSON in crop_data."}), 400
-
-    x = crop_data.get("x")
-    y = crop_data.get("y")
-    width = crop_data.get("width")
-    height = crop_data.get("height")
-
-    if None in [x, y, width, height]:
-        return (
-            jsonify(
-                {"error": "Missing one or more crop coordinates (x, y, width, height)."}
-            ),
-            400,
-        )
-
-    try:
-        x, y, width, height = int(x), int(y), int(width), int(height)
-    except ValueError:
-        return jsonify({"error": "Crop coordinates must be integers."}), 400
-
-    if width <= 0 or height <= 0:
-        return jsonify({"error": "Crop width and height must be positive."}), 400
-
-    file = request.files["image"]
-
-    try:
-        img = Image.open(file.stream)
+        x = int(crop_data.get("x"))
+        y = int(crop_data.get("y"))
+        width = int(crop_data.get("width"))
+        height = int(crop_data.get("height"))
+        if width <= 0 or height <= 0:
+            return jsonify({"error": "Crop width and height must be positive."}), 400
+        img = Image.open(request.files["image"].stream)
         img = ImageOps.exif_transpose(img)
-
-        # Crop box is (left, upper, right, lower)
-        crop_box = (x, y, x + width, y + height)
-
-        # Ensure crop box is within image bounds
         img_width, img_height = img.size
-        actual_crop_box = (
-            max(0, crop_box[0]),
-            max(0, crop_box[1]),
-            min(img_width, crop_box[2]),
-            min(img_height, crop_box[3]),
-        )
-
-        if (
-            actual_crop_box[0] >= actual_crop_box[2]
-            or actual_crop_box[1] >= actual_crop_box[3]
-        ):
-            return (
-                jsonify(
-                    {
-                        "error": "Crop area is outside image bounds or has zero/negative dimensions after clamping."
-                    }
-                ),
-                400,
-            )
-
-        cropped_img = img.crop(actual_crop_box)
-
+        crop_box = (max(0, x), max(0, y), min(img_width, x + width), min(img_height, y + height))
+        if crop_box[0] >= crop_box[2] or crop_box[1] >= crop_box[3]:
+            return jsonify({"error": "Crop area is outside image bounds."}), 400
+        cropped_img = img.crop(crop_box)
         img_io = BytesIO()
-        # Determine format; default to JPEG if not obvious, or preserve original if possible
-        img_format = img.format if img.format else "JPEG"
+        img_format = img.format or "JPEG"
         if img_format.upper() == "JPG":
-            img_format = "JPEG"  # Common alias
-
+            img_format = "JPEG"
         cropped_img.save(img_io, format=img_format)
         img_io.seek(0)
-
-        mimetype = f"image/{img_format.lower()}"
-        if img_format == "JPEG" and not mimetype.endswith("jpeg"):
-            mimetype = "image/jpeg"
-
-        return send_file(img_io, mimetype=mimetype)
-
-    except FileNotFoundError:
-        return jsonify({"error": "Image file somehow not found after upload."}), 500
-    except IOError:
-        return (
-            jsonify(
-                {
-                    "error": "Cannot process image file. It might be corrupted or not a supported format."
-                }
-            ),
-            400,
-        )
+        return send_file(img_io, mimetype="image/jpeg" if img_format == "JPEG" else f"image/{img_format.lower()}")
     except Exception as e:
-        print(f"Error in preview_crop: {e}")
         return jsonify({"error": f"Error during image processing: {str(e)}"}), 500
 
 
 @app.route("/config/reload", methods=["POST"])
 def reload_config():
-    """
-    Signals the main fenetre.py process to reload its configuration.
-    """
     fenetre_pid_file_path = app.config.get("FENETRE_PID_FILE_PATH")
     if not fenetre_pid_file_path:
         return jsonify({"error": "FENETRE_PID_FILE_PATH not set in app config."}), 500
-
     try:
-        if os.path.exists(fenetre_pid_file_path):
-            with open(fenetre_pid_file_path, "r") as f:
-                pid_str = f.read().strip()
-                if pid_str:
-                    pid = int(pid_str)
-                    # Send SIGHUP to the process to trigger a configuration reload.
-                    os.kill(pid, signal.SIGHUP)
-                    return (
-                        jsonify({"message": f"Reload signal sent to process {pid}."}),
-                        200,
-                    )
-                else:
-                    return jsonify({"error": "PID file is empty."}), 500
-        else:
-            return (
-                jsonify(
-                    {
-                        "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
-                    }
-                ),
-                404,
-            )
-
-    except FileNotFoundError:
-        return (
-            jsonify(
-                {
-                    "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
-                }
-            ),
-            404,
-        )
+        if not os.path.exists(fenetre_pid_file_path):
+            return jsonify({"error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."}), 404
+        with open(fenetre_pid_file_path, "r") as f:
+            pid_str = f.read().strip()
+        if not pid_str:
+            return jsonify({"error": "PID file is empty."}), 500
+        pid = int(pid_str)
+        os.kill(pid, signal.SIGHUP)
+        return jsonify({"message": f"Reload signal sent to process {pid}."}), 200
     except ProcessLookupError:
-        return (
-            jsonify(
-                {
-                    "error": f"Process with PID read from {fenetre_pid_file_path} not found. It might have exited."
-                }
-            ),
-            500,
-        )
+        return jsonify({"error": f"Process with PID read from {fenetre_pid_file_path} not found."}), 500
     except ValueError:
         return jsonify({"error": f"Invalid PID found in {fenetre_pid_file_path}."}), 500
     except Exception as e:
@@ -518,63 +465,26 @@ def reload_config():
 
 @app.route("/api/cameras_json/rebuild", methods=["POST"])
 def rebuild_cameras_json():
-    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if not config_file_path:
-        return jsonify({"error": "FENETRE_CONFIG_FILE not set in app config."}), 500
-
     try:
-        (
-            _,
-            cameras_config,
-            global_config,
-            _,
-            timelapse_config,
-        ) = config_load(config_file_path)
-    except FileNotFoundError:
-        return (
-            jsonify({"error": f"Configuration file {config_file_path} not found."}),
-            404,
-        )
-    except Exception as exc:
-        return (
-            jsonify({"error": f"Failed to load configuration: {str(exc)}"}),
-            500,
-        )
-
-    work_dir = global_config.get("work_dir")
-    if not work_dir:
-        return (
-            jsonify({"error": "work_dir not set in global configuration."}),
-            500,
-        )
-
-    cameras_json_path = os.path.join(work_dir, "cameras.json")
-    backup_path = None
-
-    try:
+        config_file_path = _config_file_path()
+        (_, cameras_config, global_config, _, timelapse_config) = config_load(config_file_path)
+        work_dir = global_config.get("work_dir")
+        if not work_dir:
+            return jsonify({"error": "work_dir not set in global configuration."}), 500
+        cameras_json_path = os.path.join(work_dir, "cameras.json")
+        backup_path = None
         if os.path.exists(cameras_json_path):
-            timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-            backup_path = f"{cameras_json_path}.bak.{timestamp}"
+            backup_path = f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
             os.replace(cameras_json_path, backup_path)
-
-        write_cameras_metadata(
-            cameras_config,
-            global_config,
-            timelapse_config,
-            cameras_json_path,
-        )
+        write_cameras_metadata(cameras_config, global_config, timelapse_config, cameras_json_path)
+        message = "cameras.json rebuilt successfully."
+        if backup_path:
+            message += f" Previous file saved as {os.path.basename(backup_path)}."
+        return jsonify({"message": message}), 200
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
     except Exception as exc:
-        return (
-            jsonify({"error": f"Failed to rebuild cameras.json: {str(exc)}"}),
-            500,
-        )
-
-    message = "cameras.json rebuilt successfully."
-    if backup_path:
-        message += f" Previous file saved as {os.path.basename(backup_path)}."
-
-    return jsonify({"message": message}), 200
+        return jsonify({"error": f"Failed to rebuild cameras.json: {str(exc)}"}), 500
 
 
-# The run_server() function and if __name__ == '__main__': block are removed.
-# fenetre.py will now manage the lifecycle of this Flask app.
+# fenetre.py manages the lifecycle of this Flask app.
