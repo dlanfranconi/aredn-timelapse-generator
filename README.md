@@ -14,7 +14,7 @@ Takes pictures periodically, build timelapses, archive the footage and share it 
 - Daylight browser to browser years of footage easily.
 - Produces a fully static website, easy to self-host and put behind Cloudflare.
 - Janky admin interface to help adjust picture settings
-- Premetheus exporter to collect metrics for monitoring
+- Premetheus exporter to collect metrics for monitoring 
 
 ## Installation
 
