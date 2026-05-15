@@ -41,7 +41,7 @@ pyexiv2 = [
 ]
 
 [project.scripts]
-fenetre = "fenetre.fenetre:run"
+fenetre = "fenetre.compat:run"
 daylight-tool = "fenetre.daylight_tool:run"
 timelapse-tool = "fenetre.timelapse_tool:run"
 
@@ -51,7 +51,7 @@ packages = ["fenetre"]
 
 [tool.flake8]
 max-line-length = 120
-ignore = "E501" # Example of ignoring other codes
+ignore = "E501"
 
 [tool.isort]
 profile = "black"
