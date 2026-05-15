@@ -572,11 +572,7 @@ function updateCamera(camera, cameraData) {
 
             linkHistory.href = `${photo_dir}/daylight.html`;
 
-            if (camera.original_url) {
-                originalUrlDiv.innerHTML = `Original URL: <a href="${camera.original_url}" target="_blank">${camera.original_url}</a>`;
-            } else {
-                originalUrlDiv.innerHTML = '';
-            }
+            originalUrlDiv.innerHTML = '';
         })
         .catch(error => {
             lastPictureTime.textContent = 'Error loading metadata';
@@ -594,7 +590,8 @@ function updateAllCameras() {
             return response.json();
         })
         .then(data => {
-            document.querySelector('#list-header h1').textContent = data.global.deployment_name + ' cameras';
+            const deploymentName = data.global.deployment_name === 'fenetre.cam' ? 'CQ805' : data.global.deployment_name;
+            document.querySelector('#list-header h1').textContent = deploymentName + ' Cameras';
 
             // --- Icon Links Logic ---
             const mainWebsiteLink = document.getElementById('main-website-link');
