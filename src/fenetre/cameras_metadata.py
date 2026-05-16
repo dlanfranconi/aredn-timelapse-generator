@@ -64,6 +64,13 @@ def _load_existing_cameras(json_filepath: str) -> list:
     return []
 
 
+def _camera_timelapse_enabled(cam_conf: Dict[str, Any]) -> bool:
+    timelapse_cfg = cam_conf.get("timelapse")
+    if isinstance(timelapse_cfg, dict):
+        return bool(timelapse_cfg.get("enabled", True))
+    return bool(cam_conf.get("timelapse_enabled", True))
+
+
 def build_cameras_metadata(
     cameras_configs: Dict[str, Dict[str, Any]],
     global_config: Dict[str, Any],
@@ -90,6 +97,7 @@ def build_cameras_metadata(
             "title": cam,
             "url": f"list.html?camera={cam}",
             "fullscreen_url": f"fullscreen.html?camera={cam}",
+            "timelapse_enabled": _camera_timelapse_enabled(cam_conf),
         }
 
         if cam_conf.get("source") == "external_website":
@@ -97,13 +105,9 @@ def build_cameras_metadata(
             metadata["url"] = cam_conf.get("url")
             metadata["thumbnail_url"] = cam_conf.get("thumbnail_url")
         else:
-            metadata["original_url"] = cam_conf.get("url") or cam_conf.get(
-                "local_command"
-            )
             metadata["dynamic_metadata"] = os.path.join("photos", cam, "metadata.json")
             metadata["image"] = os.path.join("photos", cam, "latest.jpg")
 
-        metadata["original_url"] = cam_conf.get("url") or cam_conf.get("local_command")
         metadata["description"] = cam_conf.get("description", "")
         metadata["snap_interval_s"] = cam_conf.get("snap_interval_s") or "dynamic"
         metadata["dynamic_metadata"] = os.path.join("photos", cam, "metadata.json")
