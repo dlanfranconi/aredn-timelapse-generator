@@ -189,6 +189,29 @@ function buildTimelapsePlayerUrl(src, title) {
     return `timelapse.html?${params.toString()}`;
 }
 
+async function fetchCameraTimelapses(cameraName) {
+    const response = await fetch(`/api/timelapses?camera=${encodeURIComponent(cameraName)}`);
+    if (!response.ok) {
+        throw new Error(`Failed to load timelapses for ${cameraName}: ${response.status}`);
+    }
+    return response.json();
+}
+
+function applyTimelapseLink(link, timelapse, title) {
+    if (!timelapse) {
+        link.style.display = 'none';
+        link.removeAttribute('href');
+        return;
+    }
+
+    if (timelapse.format === 'm3u8') {
+        link.href = buildTimelapsePlayerUrl(timelapse.url, title);
+    } else {
+        link.href = timelapse.url;
+    }
+    link.style.display = 'inline-block';
+}
+
 function createCameraListItem(camera) {
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
@@ -260,7 +283,7 @@ function updateCamera(camera, cameraData) {
 
     fetch(camera.dynamic_metadata)
         .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
-        .then(metadata => {
+        .then(async metadata => {
             const lastPictureUrl = metadata.last_picture_url;
             if (!lastPictureUrl) {
                 lastPictureTime.textContent = 'No picture available';
@@ -307,27 +330,25 @@ function updateCamera(camera, cameraData) {
                 linkTimelapseToday.style.display = 'none';
                 linkTimelapse.style.display = 'none';
             } else {
-                const timelapseExtension = cameraData.global.timelapse_file_extension || 'webm';
-                const frequentTimelapseExtension = cameraData.global.frequent_timelapse_file_extension || 'mp4';
+                const timelapseData = await fetchCameraTimelapses(camera.title);
+                const timelapses = timelapseData.timelapses || [];
+                const todayTimelapse = timelapses.find(item => (
+                    item.date === todayStr && (item.type === 'frequent' || item.type === 'timelapse')
+                ));
+                const yesterdayTimelapse = timelapses.find(item => (
+                    item.date === yesterdayStr && (item.type === 'daily' || item.type === 'timelapse')
+                ));
 
-                const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                const minutesElapsed = (today - startOfDay) / 60000;
-                const cacheBuster = Math.floor(minutesElapsed / 20);
-
-                const frequentTimelapseUrl = `${photo_dir}/${todayStr}/${todayStr}.${frequentTimelapseExtension}?v=${cacheBuster}`;
-
-                if (frequentTimelapseExtension === 'm3u8') {
-                    linkTimelapseToday.href = buildTimelapsePlayerUrl(
-                        frequentTimelapseUrl,
-                        `${camera.title} ${todayStr} Frequent Timelapse`
-                    );
-                } else {
-                    linkTimelapseToday.href = frequentTimelapseUrl;
-                }
-
-                linkTimelapseToday.style.display = 'inline-block';
-                linkTimelapse.href = `${photo_dir}/${yesterdayStr}/${yesterdayStr}.${timelapseExtension}`;
-                linkTimelapse.style.display = 'inline-block';
+                applyTimelapseLink(
+                    linkTimelapseToday,
+                    todayTimelapse,
+                    `${camera.title} ${todayStr} Frequent Timelapse`
+                );
+                applyTimelapseLink(
+                    linkTimelapse,
+                    yesterdayTimelapse,
+                    `${camera.title} ${yesterdayStr} Timelapse`
+                );
             }
         })
         .catch(error => {

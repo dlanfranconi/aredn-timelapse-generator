@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import glob
 import http.server
+import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -78,6 +80,9 @@ from fenetre import profiler
 
 mimetypes.add_type("application/vnd.apple.mpegurl", ".m3u8")
 mimetypes.add_type("video/mp2t", ".ts")
+
+TIMELAPSE_VIDEO_EXTENSIONS = {"mp4", "webm", "m3u8"}
+DATE_DIR_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _GOPRO_BLE_AVAILABLE = True
 try:
@@ -835,6 +840,67 @@ def _cors_allow_origin_for_request(request_origin, cors_config):
     return None
 
 
+def _classify_timelapse_file(
+    filename: str, daily_config: Dict, frequent_config: Dict
+) -> Optional[str]:
+    _, extension = os.path.splitext(filename)
+    extension = extension.lstrip(".").lower()
+    if extension not in TIMELAPSE_VIDEO_EXTENSIONS:
+        return None
+    if extension == "m3u8" and frequent_config.get("output_format") == "hls":
+        return "frequent"
+    if extension == (daily_config.get("file_extension") or "webm").lower():
+        return "daily"
+    if extension == (frequent_config.get("file_extension") or "mp4").lower():
+        return "frequent"
+    return "timelapse"
+
+
+def discover_camera_timelapses(
+    camera_name: str,
+    work_dir: str,
+    daily_config: Dict,
+    frequent_config: Dict,
+) -> List[Dict]:
+    if not camera_name or os.path.basename(camera_name) != camera_name:
+        return []
+
+    camera_dir = os.path.join(work_dir, "photos", camera_name)
+    if not os.path.isdir(camera_dir):
+        return []
+
+    results = []
+    for date_name in sorted(os.listdir(camera_dir), reverse=True):
+        if not DATE_DIR_PATTERN.match(date_name):
+            continue
+        day_dir = os.path.join(camera_dir, date_name)
+        if not os.path.isdir(day_dir):
+            continue
+        for filename in sorted(os.listdir(day_dir)):
+            base, extension = os.path.splitext(filename)
+            if base != date_name:
+                continue
+            timelapse_type = _classify_timelapse_file(
+                filename, daily_config, frequent_config
+            )
+            if not timelapse_type:
+                continue
+            filepath = os.path.join(day_dir, filename)
+            if not os.path.isfile(filepath) or os.path.getsize(filepath) <= 0:
+                continue
+            results.append(
+                {
+                    "date": date_name,
+                    "type": timelapse_type,
+                    "format": extension.lstrip(".").lower(),
+                    "url": f"/photos/{camera_name}/{date_name}/{filename}",
+                    "bytes": os.path.getsize(filepath),
+                    "mtime": int(os.path.getmtime(filepath)),
+                }
+            )
+    return results
+
+
 class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _cache_control_header(self):
         parsed = urlparse(self.path)
@@ -846,9 +912,63 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return "public, max-age=31536000, immutable"
         if basename in {"cameras.json", "metadata.json", "latest.jpg"}:
             return "no-cache, must-revalidate"
+        if path.endswith(".m3u8"):
+            return "no-cache, must-revalidate"
         if path.endswith((".html", ".htm")) or basename == "":
             return "no-cache, must-revalidate"
         return None
+
+    def _send_json(self, status_code, payload):
+        body = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_timelapses_api(self, parsed_url):
+        query = parse_qs(parsed_url.query)
+        camera_name = (query.get("camera") or [""])[0]
+        if not camera_name:
+            self._send_json(400, {"error": "camera query parameter is required"})
+            return
+        if camera_name not in cameras_config:
+            self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+            return
+        camera_cfg = cameras_config.get(camera_name, {})
+        camera_timelapse = camera_cfg.get("timelapse")
+        timelapse_enabled = camera_cfg.get("timelapse_enabled", True) is not False
+        if (
+            isinstance(camera_timelapse, dict)
+            and camera_timelapse.get("enabled") is False
+        ):
+            timelapse_enabled = False
+
+        if not timelapse_enabled:
+            timelapses = []
+        else:
+            timelapses = discover_camera_timelapses(
+                camera_name,
+                global_config.get("work_dir", "."),
+                timelapse_config.get("daily_timelapse", {}) or {},
+                timelapse_config.get("frequent_timelapse", {}) or {},
+            )
+        self._send_json(
+            200,
+            {
+                "camera": camera_name,
+                "timelapse_enabled": timelapse_enabled,
+                "timelapses": timelapses,
+            },
+        )
+
+    def do_GET(self):
+        parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/timelapses":
+            self._handle_timelapses_api(parsed_url)
+            return
+        super().do_GET()
 
     def end_headers(self):
         cache_control = self._cache_control_header()

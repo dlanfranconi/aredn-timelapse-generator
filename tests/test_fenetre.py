@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
     cleanup_frequent_timelapse_artifacts,
+    discover_camera_timelapses,
     get_pic_from_url,
     get_ssim_for_area,
     run_camera_unavailable_command,
@@ -28,6 +29,7 @@ class TestFenetre(unittest.TestCase):
             "/cameras.json",
             "/photos/cam1/metadata.json",
             "/photos/cam1/latest.jpg",
+            "/photos/cam1/2026-05-02/2026-05-02.m3u8",
             "/list.html",
             "/",
         ):
@@ -46,6 +48,43 @@ class TestFenetre(unittest.TestCase):
                     self._cache_control_for_path(path),
                     "public, max-age=31536000, immutable",
                 )
+
+    def test_discover_camera_timelapses_reports_existing_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            day_dir = os.path.join(tmpdir, "photos", "cam1", "2026-05-02")
+            os.makedirs(day_dir)
+            for filename in ("2026-05-02.m3u8", "2026-05-02.webm", "ignored.mp4"):
+                with open(os.path.join(day_dir, filename), "wb") as f:
+                    f.write(b"timelapse")
+
+            timelapses = discover_camera_timelapses(
+                "cam1",
+                tmpdir,
+                {"file_extension": "webm"},
+                {"output_format": "hls", "file_extension": "mp4"},
+            )
+
+            self.assertEqual(
+                [(item["date"], item["type"], item["format"]) for item in timelapses],
+                [
+                    ("2026-05-02", "frequent", "m3u8"),
+                    ("2026-05-02", "daily", "webm"),
+                ],
+            )
+            self.assertEqual(
+                [item["url"] for item in timelapses],
+                [
+                    "/photos/cam1/2026-05-02/2026-05-02.m3u8",
+                    "/photos/cam1/2026-05-02/2026-05-02.webm",
+                ],
+            )
+
+    def test_discover_camera_timelapses_ignores_unsafe_camera_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(
+                discover_camera_timelapses("../cam1", tmpdir, {}, {}),
+                [],
+            )
 
     @patch("fenetre.fenetre.subprocess.run")
     def test_run_camera_unavailable_command(self, mock_subprocess_run):
