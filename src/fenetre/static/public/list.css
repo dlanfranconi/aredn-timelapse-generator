@@ -321,11 +321,26 @@ body.dark-mode .camera-details .filename {
     border-radius: 4px;
     font-size: 0.9em;
 }
+.camera-details .links select {
+    display: inline-block;
+    background-color: #fff;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    color: #333;
+    font-size: 0.9em;
+    margin: 5px;
+    padding: 8px 12px;
+}
 .camera-details .links a:hover {
     background-color: #0056b3;
 }
 body.dark-mode .camera-details .links a {
     background-color: #0056b3;
+}
+body.dark-mode .camera-details .links select {
+    background-color: #1e1e1e;
+    border-color: #0056b3;
+    color: #e0e0e0;
 }
 body.dark-mode .camera-details .links a:hover {
     background-color: #003d80;
@@ -369,6 +384,10 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
     .camera-header img { width: 100px; }
     .camera-details .links a {
         display: block;
+    }
+    .camera-details .links select {
+        display: block;
+        width: 100%;
     }
     #list-header {
         flex-direction: column;

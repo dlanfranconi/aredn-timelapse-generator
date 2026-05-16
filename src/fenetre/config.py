@@ -8,6 +8,24 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SUN_PATH_POSTPROCESSING = {
+    "type": "sun_path",
+    "enabled": True,
+    "position": "top_center",
+    "padding": 20,
+    "overlay_width": 800,
+    "major_bar_width": 2,
+    "minor_bar_width": 1,
+    "overlay_bar_width": 4,
+    "overlay_rect_width": 4,
+}
+DEFAULT_FREQUENT_TIMELAPSE_FFMPEG_OPTIONS = (
+    "-c:v libx264 -preset veryfast -crf 30 -pix_fmt yuv420p"
+)
+DEFAULT_DAILY_TIMELAPSE_FFMPEG_OPTIONS = (
+    "-c:v libx264 -preset medium -crf 28 -pix_fmt yuv420p -movflags +faststart"
+)
+
 
 class ConfigError(Exception):
     pass
@@ -525,12 +543,13 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             ft.get("ffmpeg_options"),
             "timelapse.frequent_timelapse.ffmpeg_options",
             errors,
+            default=DEFAULT_FREQUENT_TIMELAPSE_FFMPEG_OPTIONS,
         )
         ft_out["output_format"] = _str(
             ft.get("output_format"),
             "timelapse.frequent_timelapse.output_format",
             errors,
-            default="file",
+            default="hls",
             choices={"file", "hls"},
         )
         ft_out["file_extension"] = _str(
@@ -581,7 +600,10 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             min_value=1,
         )
         dt_out["ffmpeg_options"] = _str(
-            dt.get("ffmpeg_options"), "timelapse.daily_timelapse.ffmpeg_options", errors
+            dt.get("ffmpeg_options"),
+            "timelapse.daily_timelapse.ffmpeg_options",
+            errors,
+            default=DEFAULT_DAILY_TIMELAPSE_FFMPEG_OPTIONS,
         )
         dt_out["ffmpeg_2pass"] = _bool(
             dt.get("ffmpeg_2pass"),
@@ -593,7 +615,7 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             dt.get("file_extension"),
             "timelapse.daily_timelapse.file_extension",
             errors,
-            default="webm",
+            default="mp4",
         )
         out["daily_timelapse"] = dt_out
 
@@ -931,6 +953,15 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 cam_out["postprocessing"] = cam.get("postprocessing")
             else:
                 errors.append(f"cameras.{name}.postprocessing: expected list")
+        else:
+            cam_out["postprocessing"] = []
+        if not any(
+            isinstance(step, dict) and step.get("type") == "sun_path"
+            for step in cam_out.get("postprocessing", [])
+        ):
+            cam_out.setdefault("postprocessing", []).append(
+                dict(DEFAULT_SUN_PATH_POSTPROCESSING)
+            )
 
         # Copy any known keys used elsewhere without deep validation to preserve behavior
         for k in (

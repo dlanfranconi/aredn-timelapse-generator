@@ -130,6 +130,10 @@ timelapse_queue_file = None
 timelapse_queue_lock = threading.Lock()
 background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
+daylight_q = deque()
+archive_q = deque()
+frequent_timelapse_q = deque()
+frequent_timelapse_scheduler_offset = 0
 
 
 def configure_mqtt_manager(global_cfg: Dict) -> None:
@@ -1254,10 +1258,11 @@ def main(argv):
 
     # These queues are global and should persist across reloads if fenetre.py itself isn't restarted.
     # If reload implies restarting these loops, then re-initialization might be needed in reload_configuration_logic
-    global daylight_q, archive_q, frequent_timelapse_q
+    global daylight_q, archive_q, frequent_timelapse_q, frequent_timelapse_scheduler_offset
     daylight_q = deque()
     archive_q = deque()
     frequent_timelapse_q = deque()
+    frequent_timelapse_scheduler_offset = 0
 
     # All threads are started here. We don't start all at the same time to prevent cluttering the stdout and hiding some potentially useful warnings.
     global timelapse_thread_global, daylight_thread_global, archive_thread_global, frequent_timelapse_loop_thread_global
@@ -1700,21 +1705,48 @@ def frequent_timelapse_scheduler_loop():
     """
     This is a loop that schedules timelapse creation for the current day periodically.
     """
+    global frequent_timelapse_scheduler_offset
     while not exit_event.is_set():
         frequent_cfg = timelapse_config.get("frequent_timelapse")
         if not frequent_cfg or not frequent_cfg.get("enabled", True):
             interruptible_sleep(5, exit_event)
             continue
         interval = frequent_cfg.get("interval_s", 1200)
-        for camera_name in cameras_config:
+        camera_names = list(cameras_config.keys())
+        if camera_names:
+            offset = frequent_timelapse_scheduler_offset % len(camera_names)
+            camera_names = camera_names[offset:] + camera_names[:offset]
+            frequent_timelapse_scheduler_offset += 1
+
+        queued_dirs = {item[0] for item in frequent_timelapse_q}
+        for camera_name in camera_names:
             try:
+                camera_cfg = cameras_config.get(camera_name, {})
+                camera_timelapse = camera_cfg.get("timelapse")
+                if camera_cfg.get("disabled", False):
+                    continue
+                if camera_cfg.get("timelapse_enabled") is False:
+                    continue
+                if (
+                    isinstance(camera_timelapse, dict)
+                    and camera_timelapse.get("enabled") is False
+                ):
+                    continue
+
                 logger.info(f"Time to update the frequent timelapse for {camera_name}.")
                 pic_dir, _ = get_pic_dir_and_filename(camera_name)
+                if pic_dir in queued_dirs:
+                    logger.info(
+                        "Frequent timelapse already queued for %s; skipping duplicate.",
+                        camera_name,
+                    )
+                    continue
                 timelapse_settings_tuple = (
                     pic_dir,
                     frequent_cfg,
                 )
                 frequent_timelapse_q.append(timelapse_settings_tuple)
+                queued_dirs.add(pic_dir)
             except Exception as e:
                 logger.warning(
                     f"Error in frequent timelapse scheduler loop for camera {camera_name}: {e}"

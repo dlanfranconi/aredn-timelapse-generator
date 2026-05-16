@@ -27,32 +27,31 @@ admin_server:
 timelapse:
   frequent_timelapse:
     enabled: true
-    interval_s: 1200
+    interval_s: 900
     framerate: 30
-    ffmpeg_2pass: true
+    ffmpeg_2pass: false
+    output_format: hls
+    hls_segment_type: mpegts
 
-    # Low-bandwidth rolling timelapse.
-    # Target roughly 5-15MB.
+    # CPU-only rolling timelapse. Keep this fast enough to update every interval.
     ffmpeg_options: >-
       -c:v libx264
-      -preset veryslow
-      -crf 36
+      -preset veryfast
+      -crf 30
       -pix_fmt yuv420p
-      -movflags +faststart
 
     file_extension: mp4
 
   daily_timelapse:
     enabled: true
-    framerate: 60
-    ffmpeg_2pass: true
+    framerate: 30
+    ffmpeg_2pass: false
 
-    # Daily archive timelapse.
-    # Target roughly 20-30MB.
+    # CPU-only daily archive timelapse. Increase preset quality only if runtime is acceptable.
     ffmpeg_options: >-
       -c:v libx264
-      -preset veryslow
-      -crf 31
+      -preset medium
+      -crf 28
       -pix_fmt yuv420p
       -movflags +faststart
 
@@ -100,3 +99,11 @@ cameras:
         size: 24
         color: white
         format: "%Y-%m-%d %H:%M:%S %Z"
+      - type: sun_path
+        enabled: true
+        major_bar_width: 2
+        minor_bar_width: 1
+        overlay_bar_width: 4
+        overlay_width: 800
+        padding: 20
+        position: top_center

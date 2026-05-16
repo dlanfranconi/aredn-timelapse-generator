@@ -263,6 +263,34 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(cameras_conf["nested"]["description"], "Nested camera")
         self.assertFalse(cameras_conf["nested"]["timelapse"]["enabled"])
 
+    def test_config_load_adds_default_sun_path_postprocessing(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1",
+                    "postprocessing": [
+                        {
+                            "type": "timestamp",
+                            "enabled": True,
+                        }
+                    ],
+                },
+                "cam2": {"url": "http://cam2"},
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        self.assertEqual(cameras_conf["cam1"]["postprocessing"][0]["type"], "timestamp")
+        cam1_sun_path = cameras_conf["cam1"]["postprocessing"][1]
+        self.assertEqual(cam1_sun_path["type"], "sun_path")
+        self.assertEqual(cam1_sun_path["position"], "top_center")
+        self.assertEqual(cam1_sun_path["overlay_width"], 800)
+        self.assertEqual(cam1_sun_path["overlay_bar_width"], 4)
+        self.assertEqual(cameras_conf["cam2"]["postprocessing"][0]["type"], "sun_path")
+
     def test_config_load_picamera2_controls(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

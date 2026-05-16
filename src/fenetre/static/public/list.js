@@ -212,6 +212,52 @@ function applyTimelapseLink(link, timelapse, title) {
     link.style.display = 'inline-block';
 }
 
+function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
+    const frequentTimelapseExtension = cameraData.global.frequent_timelapse_file_extension || 'mp4';
+    const photoDir = `/photos/${camera.title}`;
+    const startOfDay = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+    const minutesElapsed = (new Date() - startOfDay) / 60000;
+    const cacheBuster = Math.floor(minutesElapsed / 20);
+    const url = `${photoDir}/${dateString}/${dateString}.${frequentTimelapseExtension}?v=${cacheBuster}`;
+
+    if (frequentTimelapseExtension === 'm3u8') {
+        link.href = buildTimelapsePlayerUrl(
+            url,
+            `${camera.title} ${dateString} Frequent Timelapse`
+        );
+    } else {
+        link.href = url;
+    }
+    link.style.display = 'inline-block';
+}
+
+function populateTimelapseArchive(select, timelapses, todayStr) {
+    const archiveItems = timelapses.filter(item => item.date !== todayStr);
+    select.innerHTML = '';
+
+    if (archiveItems.length === 0) {
+        select.style.display = 'none';
+        return;
+    }
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Timelapse archive';
+    select.appendChild(placeholder);
+
+    archiveItems.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.url;
+        option.dataset.format = item.format;
+        option.dataset.date = item.date;
+        option.dataset.type = item.type;
+        option.textContent = `${item.date} ${item.type}`;
+        select.appendChild(option);
+    });
+
+    select.style.display = 'inline-block';
+}
+
 function createCameraListItem(camera) {
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
@@ -237,7 +283,7 @@ function createCameraListItem(camera) {
                 <a class="link-fullscreen" href="#" target="_blank">Fullscreen</a>
                 <a class="link-today" href="#" target="_blank">Today's Pictures</a>
                 <a class="link-timelapse-today" href="#" target="_blank">Today's Timelapse</a>
-                <a class="link-timelapse" href="#" target="_blank">Yesterday's Timelapse</a>
+                <select class="select-timelapse-archive" aria-label="Timelapse archive"></select>
                 <a class="link-history" href="#" target="_blank">History</a>
             </div>
         </div>
@@ -270,7 +316,7 @@ function updateCamera(camera, cameraData) {
     const linkFullscreen = listItem.querySelector('.link-fullscreen');
     const linkToday = listItem.querySelector('.link-today');
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
-    const linkTimelapse = listItem.querySelector('.link-timelapse');
+    const timelapseArchiveSelect = listItem.querySelector('.select-timelapse-archive');
     const linkHistory = listItem.querySelector('.link-history');
 
     if (camera.description) {
@@ -280,6 +326,18 @@ function updateCamera(camera, cameraData) {
         cameraDescription.textContent = '';
         cameraDescription.style.display = 'none';
     }
+    timelapseArchiveSelect.onchange = () => {
+        const selectedOption = timelapseArchiveSelect.selectedOptions[0];
+        if (!selectedOption || !selectedOption.value) {
+            return;
+        }
+        const title = `${camera.title} ${selectedOption.dataset.date} Timelapse`;
+        const destination = selectedOption.dataset.format === 'm3u8'
+            ? buildTimelapsePlayerUrl(selectedOption.value, title)
+            : selectedOption.value;
+        window.open(destination, '_blank');
+        timelapseArchiveSelect.value = '';
+    };
 
     fetch(camera.dynamic_metadata)
         .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
@@ -311,11 +369,8 @@ function updateCamera(camera, cameraData) {
             }
 
             const today = new Date();
-            const yesterday = new Date(today);
-            yesterday.setDate(today.getDate() - 1);
 
             const todayStr = formatDate(today);
-            const yesterdayStr = formatDate(yesterday);
             const photo_dir = `/photos/${camera.title}`;
 
             const fullscreenUrl = `fullscreen.html?camera=${encodeURIComponent(camera.title)}`;
@@ -328,27 +383,17 @@ function updateCamera(camera, cameraData) {
 
             if (!timelapseEnabled) {
                 linkTimelapseToday.style.display = 'none';
-                linkTimelapse.style.display = 'none';
+                timelapseArchiveSelect.style.display = 'none';
             } else {
-                const timelapseData = await fetchCameraTimelapses(camera.title);
-                const timelapses = timelapseData.timelapses || [];
-                const todayTimelapse = timelapses.find(item => (
-                    item.date === todayStr && (item.type === 'frequent' || item.type === 'timelapse')
-                ));
-                const yesterdayTimelapse = timelapses.find(item => (
-                    item.date === yesterdayStr && (item.type === 'daily' || item.type === 'timelapse')
-                ));
-
-                applyTimelapseLink(
-                    linkTimelapseToday,
-                    todayTimelapse,
-                    `${camera.title} ${todayStr} Frequent Timelapse`
-                );
-                applyTimelapseLink(
-                    linkTimelapse,
-                    yesterdayTimelapse,
-                    `${camera.title} ${yesterdayStr} Timelapse`
-                );
+                configureTodayTimelapseLink(linkTimelapseToday, camera, todayStr, cameraData);
+                try {
+                    const timelapseData = await fetchCameraTimelapses(camera.title);
+                    const timelapses = timelapseData.timelapses || [];
+                    populateTimelapseArchive(timelapseArchiveSelect, timelapses, todayStr);
+                } catch (error) {
+                    timelapseArchiveSelect.style.display = 'none';
+                    console.error(`Failed to load timelapse archive for ${camera.title}:`, error);
+                }
             }
         })
         .catch(error => {
