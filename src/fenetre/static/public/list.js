@@ -227,7 +227,6 @@ function closeMap() {
     mapToggleButton.classList.remove('map-open');
 }
 
-// --- Map Toggle Functionality ---
 mapToggleButton.addEventListener('click', () => {
     if (mapVisible) {
         closeMap();
@@ -294,7 +293,6 @@ function createCameraListItem(camera) {
                 <img src="" alt="Full image for ${camera.title}">
             </a>
             <a class="filename" href="#" download></a>
-            <div class="original-url"></div>
             <div class="links">
                 <a class="link-fullscreen" href="#" target="_blank">Fullscreen</a>
                 <a class="link-today" href="#" target="_blank">Today's Pictures</a>
@@ -315,7 +313,6 @@ function createCameraListItem(camera) {
             }
         });
 
-        // Also pan map if it's visible
         if (mapVisible) {
             focusCameraLayer(cameraMarkers[listItem.dataset.markerId]);
         }
@@ -473,22 +470,6 @@ function updateCamera(camera, cameraData) {
         cameraListElement.appendChild(listItem);
     }
 
-    if (camera.source === 'external_website') {
-        listItem.innerHTML = `
-            <div class="camera-header">
-                <a href="${camera.url}" target="_blank">
-                    <img src="${camera.thumbnail_url}" alt="${camera.title} thumbnail">
-                </a>
-                <div class="camera-info">
-                    <a href="${camera.url}" target="_blank">
-                        <div class="camera-name">${camera.title}</div>
-                    </a>
-                </div>
-            </div>
-        `;
-        return;
-    }
-
     const thumbImg = listItem.querySelector('.camera-header img');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
     const cameraMetadata = listItem.querySelector('.camera-metadata');
@@ -496,7 +477,6 @@ function updateCamera(camera, cameraData) {
     const detailsImg = listItem.querySelector('.camera-details img');
     const fullscreenImageLink = listItem.querySelector('.fullscreen-image-link');
     const filenameLink = listItem.querySelector('.camera-details .filename');
-    const originalUrlDiv = listItem.querySelector('.original-url');
     const linkFullscreen = listItem.querySelector('.link-fullscreen');
     const linkToday = listItem.querySelector('.link-today');
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
@@ -571,8 +551,6 @@ function updateCamera(camera, cameraData) {
             linkTimelapse.style.display = 'inline-block';
 
             linkHistory.href = `${photo_dir}/daylight.html`;
-
-            originalUrlDiv.innerHTML = '';
         })
         .catch(error => {
             lastPictureTime.textContent = 'Error loading metadata';
@@ -590,15 +568,13 @@ function updateAllCameras() {
             return response.json();
         })
         .then(data => {
-            const deploymentName = data.global.deployment_name === 'fenetre.cam' ? 'CQ805' : data.global.deployment_name;
+            const deploymentName = data.global.deployment_name === 'fenetre.cam' ? 'AREDN805' : data.global.deployment_name;
             document.querySelector('#list-header h1').textContent = deploymentName + ' Cameras';
 
-            // --- Icon Links Logic ---
             const mainWebsiteLink = document.getElementById('main-website-link');
             const githubLink = document.getElementById('github-link');
             const uiConfig = data.global.ui || {};
 
-            // Main Website Icon
             if (uiConfig.show_main_website_icon === false || !uiConfig.main_website_url) {
                 mainWebsiteLink.style.display = 'none';
             } else {
@@ -606,7 +582,6 @@ function updateAllCameras() {
                 mainWebsiteLink.href = uiConfig.main_website_url;
             }
 
-            // GitHub Icon
             if (uiConfig.show_github_icon) {
                 githubLink.style.display = 'flex';
             } else {
@@ -620,11 +595,9 @@ function updateAllCameras() {
             }
             refreshLinkedDeployments(uiConfig.linked_deployments || []);
             const cameras = data.cameras;
-            const existingTitles = new Set();
 
             cameras.forEach(camera => updateCamera(camera, data));
 
-            // Map marker logic
             markerCluster.clearLayers();
             circleLayerGroup.clearLayers();
             cameraMarkers = {};
@@ -645,7 +618,6 @@ function updateAllCameras() {
                 map.fitBounds(latestMarkerBounds, markerBoundsFitOptions);
             }
 
-            // Auto-expand camera from URL param
             if (!initialCameraExpanded && cameras.length > 0) {
                 const urlParams = new URLSearchParams(window.location.search);
                 const cameraNameToExpand = urlParams.get('camera');
@@ -655,10 +627,6 @@ function updateAllCameras() {
                         const details = listItem.querySelector('.camera-details');
                         details.classList.add('active');
                         listItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                        // Wait for CSS transition before checking other details
-                        setTimeout(() => {
-                        }, 500);
                         initialCameraExpanded = true;
                     }
                 }
@@ -671,4 +639,4 @@ function updateAllCameras() {
 }
 
 updateAllCameras();
-setInterval(updateAllCameras, 60000); // Refresh every 60 seconds
+setInterval(updateAllCameras, 60000);
