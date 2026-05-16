@@ -244,6 +244,11 @@ body.dark-mode .camera-item {
 .camera-name {
     font-weight: bold;
 }
+.camera-description {
+    color: #555;
+    font-size: 0.9em;
+    margin-top: 2px;
+}
 .last-picture-time {
     font-size: 0.9em;
     color: #666;
@@ -256,6 +261,9 @@ body.dark-mode .camera-item {
 }
 body.dark-mode .last-picture-time {
     color: #aaa;
+}
+body.dark-mode .camera-description {
+    color: #bbb;
 }
 body.dark-mode .camera-metadata {
     color: #999;

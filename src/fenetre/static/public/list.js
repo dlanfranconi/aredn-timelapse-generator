@@ -69,6 +69,12 @@ map.addLayer(circleLayerGroup);
 
 var cameraMarkers = {};
 
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
 function getLayerBounds(layer) {
     if (!layer) {
         return null;
@@ -149,7 +155,8 @@ function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
 }
 
 function createPopupContent(camera) {
-    return `<b>${camera.title}</b>`;
+    const description = camera.description ? `<br><span>${escapeHtml(camera.description)}</span>` : '';
+    return `<b>${escapeHtml(camera.title)}</b>${description}`;
 }
 
 function parseTimestampFromFilename(filename) {
@@ -192,6 +199,7 @@ function createCameraListItem(camera) {
             <img src="" alt="${camera.title} thumbnail">
             <div class="camera-info">
                 <div class="camera-name">${camera.title}</div>
+                <div class="camera-description"></div>
                 <div class="last-picture-time">Loading...</div>
                 <div class="camera-metadata"></div>
             </div>
@@ -229,6 +237,7 @@ function updateCamera(camera, cameraData) {
     }
 
     const thumbImg = listItem.querySelector('.camera-header img');
+    const cameraDescription = listItem.querySelector('.camera-description');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
     const cameraMetadata = listItem.querySelector('.camera-metadata');
     const status = listItem.querySelector('.status');
@@ -240,6 +249,14 @@ function updateCamera(camera, cameraData) {
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
     const linkTimelapse = listItem.querySelector('.link-timelapse');
     const linkHistory = listItem.querySelector('.link-history');
+
+    if (camera.description) {
+        cameraDescription.textContent = camera.description;
+        cameraDescription.style.display = 'block';
+    } else {
+        cameraDescription.textContent = '';
+        cameraDescription.style.display = 'none';
+    }
 
     fetch(camera.dynamic_metadata)
         .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
