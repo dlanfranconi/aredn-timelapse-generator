@@ -242,10 +242,13 @@ class FenetreConfigTestCase(unittest.TestCase):
             "cameras": {
                 "legacy": {
                     "url": "http://legacy",
+                    "description": "Legacy camera",
+                    "disabled": True,
                     "timelapse_enabled": False,
                 },
                 "nested": {
                     "url": "http://nested",
+                    "description": "Nested camera",
                     "timelapse": {"enabled": False},
                 },
             },
@@ -254,7 +257,10 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         _, cameras_conf, _, _, _ = config_load(config_path)
 
+        self.assertEqual(cameras_conf["legacy"]["description"], "Legacy camera")
+        self.assertTrue(cameras_conf["legacy"]["disabled"])
         self.assertFalse(cameras_conf["legacy"]["timelapse_enabled"])
+        self.assertEqual(cameras_conf["nested"]["description"], "Nested camera")
         self.assertFalse(cameras_conf["nested"]["timelapse"]["enabled"])
 
     def test_config_load_picamera2_controls(self):

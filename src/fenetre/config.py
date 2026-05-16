@@ -755,6 +755,15 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 capture_method, f"cameras.{name}.capture_method", errors
             )
 
+        if cam.get("description") is not None:
+            cam_out["description"] = _str(
+                cam.get("description"), f"cameras.{name}.description", errors
+            )
+        if cam.get("disabled") is not None:
+            cam_out["disabled"] = _bool(
+                cam.get("disabled"), f"cameras.{name}.disabled", errors
+            )
+
         cam_out["timeout_s"] = _int(
             cam.get("timeout_s"),
             f"cameras.{name}.timeout_s",
