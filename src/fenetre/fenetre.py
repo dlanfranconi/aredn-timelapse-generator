@@ -16,6 +16,7 @@ from functools import partial
 from logging.handlers import RotatingFileHandler
 from threading import Thread
 from typing import Callable, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import pytz
 import requests
@@ -835,7 +836,24 @@ def _cors_allow_origin_for_request(request_origin, cors_config):
 
 
 class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def _cache_control_header(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        basename = os.path.basename(path)
+        query = parse_qs(parsed.query)
+
+        if "v" in query:
+            return "public, max-age=31536000, immutable"
+        if basename in {"cameras.json", "metadata.json", "latest.jpg"}:
+            return "no-cache, must-revalidate"
+        if path.endswith((".html", ".htm")) or basename == "":
+            return "no-cache, must-revalidate"
+        return None
+
     def end_headers(self):
+        cache_control = self._cache_control_header()
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
         if server_config.get("allow_cors"):
             allow_origin = _cors_allow_origin_for_request(
                 self.headers.get("Origin"), server_config

@@ -8,6 +8,7 @@ import sys
 from types import SimpleNamespace
 
 from fenetre.fenetre import (
+    FenetreHTTPRequestHandler,
     cleanup_frequent_timelapse_artifacts,
     get_pic_from_url,
     get_ssim_for_area,
@@ -17,6 +18,35 @@ from fenetre.picamera import Picamera2Capture
 
 
 class TestFenetre(unittest.TestCase):
+    def _cache_control_for_path(self, path):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        handler.path = path
+        return handler._cache_control_header()
+
+    def test_http_cache_headers_for_frequently_changing_files(self):
+        for path in (
+            "/cameras.json",
+            "/photos/cam1/metadata.json",
+            "/photos/cam1/latest.jpg",
+            "/list.html",
+            "/",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self._cache_control_for_path(path), "no-cache, must-revalidate"
+                )
+
+    def test_http_cache_headers_for_versioned_assets(self):
+        for path in (
+            "/list.js?v=20260516-description",
+            "/list.css?v=20260516-description",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    self._cache_control_for_path(path),
+                    "public, max-age=31536000, immutable",
+                )
+
     @patch("fenetre.fenetre.subprocess.run")
     def test_run_camera_unavailable_command(self, mock_subprocess_run):
         mock_subprocess_run.return_value.returncode = 0
@@ -493,7 +523,9 @@ class TestFenetre(unittest.TestCase):
             )
             self.assertFalse(os.path.exists(os.path.join(day_dir, "segment-000000.ts")))
             self.assertFalse(os.path.exists(os.path.join(day_dir, "segment-000002.ts")))
-            self.assertFalse(os.path.exists(os.path.join(day_dir, "segment-000003.m4s")))
+            self.assertFalse(
+                os.path.exists(os.path.join(day_dir, "segment-000003.m4s"))
+            )
             self.assertFalse(os.path.exists(os.path.join(day_dir, "init.mp4")))
             self.assertFalse(os.path.exists(legacy_segment_dir))
             for path in preserved_paths:
