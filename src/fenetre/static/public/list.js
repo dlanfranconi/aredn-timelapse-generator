@@ -232,7 +232,9 @@ function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
 }
 
 function populateTimelapseArchive(select, timelapses, todayStr) {
-    const archiveItems = timelapses.filter(item => item.date !== todayStr);
+    const archiveItems = timelapses
+        .filter(item => item.date !== todayStr && item.format !== 'm3u8')
+        .filter(item => item.type === 'daily' || item.type === 'timelapse');
     select.innerHTML = '';
 
     if (archiveItems.length === 0) {
@@ -251,7 +253,7 @@ function populateTimelapseArchive(select, timelapses, todayStr) {
         option.dataset.format = item.format;
         option.dataset.date = item.date;
         option.dataset.type = item.type;
-        option.textContent = `${item.date} ${item.type}`;
+        option.textContent = item.date;
         select.appendChild(option);
     });
 

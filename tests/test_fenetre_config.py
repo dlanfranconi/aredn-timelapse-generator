@@ -363,6 +363,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertIn("frequent_timelapse", timelapse_conf)
         self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
         self.assertTrue(timelapse_conf["frequent_timelapse"]["enabled"])
+        self.assertEqual(timelapse_conf["frequent_timelapse"]["output_format"], "file")
         self.assertEqual(
             timelapse_conf["frequent_timelapse"]["hls_segment_type"], "mpegts"
         )

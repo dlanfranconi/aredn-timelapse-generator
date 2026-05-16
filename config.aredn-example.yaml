@@ -30,8 +30,7 @@ timelapse:
     interval_s: 900
     framerate: 30
     ffmpeg_2pass: false
-    output_format: hls
-    hls_segment_type: mpegts
+    output_format: file
 
     # CPU-only rolling timelapse. Keep this fast enough to update every interval.
     ffmpeg_options: >-

@@ -549,7 +549,7 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             ft.get("output_format"),
             "timelapse.frequent_timelapse.output_format",
             errors,
-            default="hls",
+            default="file",
             choices={"file", "hls"},
         )
         ft_out["file_extension"] = _str(

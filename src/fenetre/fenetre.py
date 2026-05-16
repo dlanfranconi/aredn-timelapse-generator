@@ -905,6 +905,22 @@ def discover_camera_timelapses(
     return results
 
 
+def is_camera_timelapse_enabled(camera_name: str) -> bool:
+    camera_cfg = cameras_config.get(camera_name, {})
+    if camera_cfg.get("disabled", False):
+        return False
+    if camera_cfg.get("timelapse_enabled") is False:
+        return False
+    camera_timelapse = camera_cfg.get("timelapse")
+    if isinstance(camera_timelapse, dict) and camera_timelapse.get("enabled") is False:
+        return False
+    return True
+
+
+def camera_name_from_day_dir(day_dir: str) -> str:
+    return os.path.basename(os.path.dirname(os.path.normpath(day_dir)))
+
+
 class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _cache_control_header(self):
         parsed = urlparse(self.path)
@@ -940,14 +956,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if camera_name not in cameras_config:
             self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
             return
-        camera_cfg = cameras_config.get(camera_name, {})
-        camera_timelapse = camera_cfg.get("timelapse")
-        timelapse_enabled = camera_cfg.get("timelapse_enabled", True) is not False
-        if (
-            isinstance(camera_timelapse, dict)
-            and camera_timelapse.get("enabled") is False
-        ):
-            timelapse_enabled = False
+        timelapse_enabled = is_camera_timelapse_enabled(camera_name)
 
         if not timelapse_enabled:
             timelapses = []
@@ -1721,16 +1730,7 @@ def frequent_timelapse_scheduler_loop():
         queued_dirs = {item[0] for item in frequent_timelapse_q}
         for camera_name in camera_names:
             try:
-                camera_cfg = cameras_config.get(camera_name, {})
-                camera_timelapse = camera_cfg.get("timelapse")
-                if camera_cfg.get("disabled", False):
-                    continue
-                if camera_cfg.get("timelapse_enabled") is False:
-                    continue
-                if (
-                    isinstance(camera_timelapse, dict)
-                    and camera_timelapse.get("enabled") is False
-                ):
+                if not is_camera_timelapse_enabled(camera_name):
                     continue
 
                 logger.info(f"Time to update the frequent timelapse for {camera_name}.")
@@ -1769,6 +1769,12 @@ def frequent_timelapse_loop():
             continue
         timelapse_settings_tuple = frequent_timelapse_q.popleft()
         pic_dir, timelapse_settings = timelapse_settings_tuple
+        camera_name = camera_name_from_day_dir(pic_dir)
+        if not is_camera_timelapse_enabled(camera_name):
+            logger.info(
+                "Skipping frequent timelapse for disabled camera %s.", camera_name
+            )
+            continue
         if not os.path.isdir(pic_dir):
             logger.info("Skipping frequent timelapse for missing dir: %s", pic_dir)
             continue
@@ -1813,9 +1819,6 @@ def frequent_timelapse_loop():
                     **timelapse_args,
                 )
             if result:
-                camera_name = os.path.basename(
-                    os.path.dirname(os.path.normpath(pic_dir))
-                )
                 metric_timelapses_created_total.labels(
                     camera_name=camera_name, type="frequent"
                 ).inc()
@@ -1896,6 +1899,18 @@ def timelapse_loop():
 
         if dir_to_process:
             try:
+                camera_name = camera_name_from_day_dir(dir_to_process)
+                if not is_camera_timelapse_enabled(camera_name):
+                    logger.info(
+                        "Removing queued daily timelapse for disabled camera %s: %s",
+                        camera_name,
+                        dir_to_process,
+                    )
+                    remove_from_timelapse_queue(
+                        dir_to_process, timelapse_queue_file, timelapse_queue_lock
+                    )
+                    time.sleep(1)
+                    continue
                 result = run_serialized_background_job(
                     f"daily_timelapse:{dir_to_process}",
                     create_timelapse,
@@ -1914,9 +1929,6 @@ def timelapse_loop():
                 )
                 logging.info(f"ffmpeg ran. Result is {result}")
                 if result:
-                    camera_name = os.path.basename(
-                        os.path.dirname(os.path.normpath(dir_to_process))
-                    )
                     metric_timelapses_created_total.labels(
                         camera_name=camera_name, type="daily"
                     ).inc()
@@ -1963,7 +1975,11 @@ def daylight_loop():
                     sky_area,
                 )
                 daily_cfg = timelapse_config.get("daily_timelapse")
-                if daily_cfg and daily_cfg.get("enabled", True):
+                if (
+                    daily_cfg
+                    and daily_cfg.get("enabled", True)
+                    and is_camera_timelapse_enabled(camera_name)
+                ):
                     add_to_timelapse_queue(
                         daily_pic_dir, timelapse_queue_file, timelapse_queue_lock
                     )
@@ -2124,7 +2140,7 @@ def archive_loop():
                         # TODO: Enable this after making the daylight an external file queue
                         create_daylight_bands=False,
                         daylight_bands_queue_file=None,
-                        create_timelapses=True,
+                        create_timelapses=is_camera_timelapse_enabled(camera_name),
                         timelapse_queue_file=timelapse_queue_file,
                         timelapse_queue_file_lock=timelapse_queue_lock,
                     )

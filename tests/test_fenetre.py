@@ -13,8 +13,10 @@ from fenetre.fenetre import (
     discover_camera_timelapses,
     get_pic_from_url,
     get_ssim_for_area,
+    is_camera_timelapse_enabled,
     run_camera_unavailable_command,
 )
+import fenetre.fenetre as fenetre_module
 from fenetre.picamera import Picamera2Capture
 
 
@@ -85,6 +87,33 @@ class TestFenetre(unittest.TestCase):
                 discover_camera_timelapses("../cam1", tmpdir, {}, {}),
                 [],
             )
+
+    def test_is_camera_timelapse_enabled_respects_disable_flags(self):
+        missing = object()
+        original_cameras_config = getattr(fenetre_module, "cameras_config", missing)
+        try:
+            fenetre_module.cameras_config = {
+                "enabled": {"url": "http://cam"},
+                "disabled_camera": {"url": "http://cam", "disabled": True},
+                "legacy_disabled": {
+                    "url": "http://cam",
+                    "timelapse_enabled": False,
+                },
+                "nested_disabled": {
+                    "url": "http://cam",
+                    "timelapse": {"enabled": False},
+                },
+            }
+
+            self.assertTrue(is_camera_timelapse_enabled("enabled"))
+            self.assertFalse(is_camera_timelapse_enabled("disabled_camera"))
+            self.assertFalse(is_camera_timelapse_enabled("legacy_disabled"))
+            self.assertFalse(is_camera_timelapse_enabled("nested_disabled"))
+        finally:
+            if original_cameras_config is missing:
+                delattr(fenetre_module, "cameras_config")
+            else:
+                fenetre_module.cameras_config = original_cameras_config
 
     @patch("fenetre.fenetre.subprocess.run")
     def test_run_camera_unavailable_command(self, mock_subprocess_run):
