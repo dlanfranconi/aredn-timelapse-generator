@@ -1,6 +1,6 @@
 services:
   aredn-timelapse-generator:
-    image: ghcr.io/dlanfranconi/aredn-timelapse-generator:latest
+    image: ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
     container_name: aredn-timelapse-generator
     restart: unless-stopped
 
@@ -13,9 +13,11 @@ services:
       FENETRE_PID_FILE: /tmp/fenetre.pid
 
     volumes:
-      - /opt/aredn-timelapse/config/config.yaml:/srv/fenetre/config.yaml
-      - /opt/aredn-timelapse/data:/srv/fenetre/data
-      - /opt/aredn-timelapse/logs:/srv/fenetre/logs
+      # Persistent runtime config on the host. The admin UI writes changes here.
+      - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
+      # Persistent generated public UI, photos, videos, metadata, and logs.
+      - /srv/fenetre/data:/srv/fenetre/data
+      - /srv/fenetre/logs:/srv/fenetre/logs
 
     # Uncomment for Intel QuickSync / VAAPI hardware encoding.
     # devices:

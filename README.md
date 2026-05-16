@@ -162,12 +162,15 @@ docker build --network=host -t fenetre:intel-vaapi .
 Run it with the host render devices, config file, and data directories mounted:
 
 ```bash
+sudo mkdir -p /srv/fenetre/data /srv/fenetre/logs
+sudo install -m 0664 config.aredn-example.yaml /srv/fenetre/config.yaml
+
 docker run --rm \
   --name fenetre \
   --device /dev/dri:/dev/dri \
   -p 8888:8888 \
   -p 8889:8889 \
-  -v "$PWD/config.yaml:/srv/fenetre/config.yaml:ro" \
+  -v /srv/fenetre/config.yaml:/srv/fenetre/config.yaml \
   -v /srv/fenetre/data:/srv/fenetre/data \
   -v /srv/fenetre/logs:/srv/fenetre/logs \
   fenetre:intel-vaapi
@@ -178,6 +181,24 @@ Or use compose:
 ```bash
 docker compose up --build
 ```
+
+For Portainer/GHCR deployments, keep runtime state on the host and only replace
+the container image. The WIP image is published as:
+
+```text
+ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
+```
+
+Use these persistent host paths:
+
+```text
+/srv/fenetre/config.yaml  -> /srv/fenetre/config.yaml
+/srv/fenetre/data         -> /srv/fenetre/data
+/srv/fenetre/logs         -> /srv/fenetre/logs
+```
+
+The config mount is intentionally read-write because the admin UI updates the
+YAML file and writes timestamped backups beside it.
 
 Useful checks inside the built image:
 

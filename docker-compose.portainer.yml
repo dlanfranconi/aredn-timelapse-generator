@@ -15,14 +15,14 @@ services:
       FENETRE_PID_FILE: /tmp/fenetre.pid
 
     volumes:
-      # Main runtime config. Copy config.aredn-example.yaml to ./config/config.yaml first.
-      - ./config/config.yaml:/srv/fenetre/config.yaml
+      # Persistent runtime config on the host. The admin UI writes changes here.
+      - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
 
-      # Persistent image/video database and generated web files.
-      - ./data:/srv/fenetre/data
+      # Persistent generated public UI, photos, videos, and metadata.
+      - /srv/fenetre/data:/srv/fenetre/data
 
       # Persistent logs.
-      - ./logs:/srv/fenetre/logs
+      - /srv/fenetre/logs:/srv/fenetre/logs
 
     # Optional: enable this only if you want Intel VAAPI/QSV hardware encoding
     # and the host has /dev/dri available.
