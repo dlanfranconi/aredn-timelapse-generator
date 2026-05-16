@@ -236,6 +236,27 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(timelapse_conf, {})
 
+    def test_config_load_preserves_camera_timelapse_flags(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "legacy": {
+                    "url": "http://legacy",
+                    "timelapse_enabled": False,
+                },
+                "nested": {
+                    "url": "http://nested",
+                    "timelapse": {"enabled": False},
+                },
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        self.assertFalse(cameras_conf["legacy"]["timelapse_enabled"])
+        self.assertFalse(cameras_conf["nested"]["timelapse"]["enabled"])
+
     def test_config_load_picamera2_controls(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

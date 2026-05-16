@@ -811,6 +811,25 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             s = _str(cam.get("sky_area"), f"cameras.{name}.sky_area", errors)
             cam_out["sky_area"] = s
 
+        if cam.get("timelapse_enabled") is not None:
+            cam_out["timelapse_enabled"] = _bool(
+                cam.get("timelapse_enabled"),
+                f"cameras.{name}.timelapse_enabled",
+                errors,
+            )
+        if cam.get("timelapse") is not None:
+            timelapse_cfg = _dict(
+                cam.get("timelapse"), f"cameras.{name}.timelapse", errors
+            )
+            timelapse_out = {}
+            if "enabled" in timelapse_cfg:
+                timelapse_out["enabled"] = _bool(
+                    timelapse_cfg.get("enabled"),
+                    f"cameras.{name}.timelapse.enabled",
+                    errors,
+                )
+            cam_out["timelapse"] = timelapse_out
+
         # Geo / sunrise-sunset (lat/lon only; hard break)
         if cam.get("latitude") is not None:
             errors.append(
