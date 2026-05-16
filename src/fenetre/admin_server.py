@@ -64,6 +64,38 @@ def _load_raw_config():
         return yaml.safe_load(f) or {}
 
 
+def _get_effective_config(raw_config: dict) -> dict:
+    """Return the actual Fenetre config mapping regardless of wrapper style.
+
+    Some user configs are stored as:
+
+        config:
+          global: ...
+          cameras: ...
+
+    while Fenetre's runtime config is the mapping containing global/cameras/etc.
+    Admin mutations must edit that effective mapping instead of accidentally creating
+    top-level siblings such as `cameras:` next to `config:`.
+    """
+    if isinstance(raw_config, dict) and isinstance(raw_config.get("config"), dict):
+        return raw_config["config"]
+    return raw_config
+
+
+def _merge_effective_config(raw_config: dict, effective_config: dict) -> dict:
+    """Put an edited effective config back into the original file shape."""
+    if isinstance(raw_config, dict) and isinstance(raw_config.get("config"), dict):
+        updated = dict(raw_config)
+        updated["config"] = effective_config
+        return updated
+    return effective_config
+
+
+def _load_effective_config_with_raw() -> tuple[dict, dict]:
+    raw_config = _load_raw_config()
+    return raw_config, _get_effective_config(raw_config)
+
+
 def _backup_config(config_file_path: str) -> str | None:
     if not os.path.exists(config_file_path):
         return None
@@ -183,7 +215,8 @@ def metrics():
 @app.route("/config", methods=["GET"])
 def get_config():
     try:
-        return jsonify({"config": _load_raw_config()}), 200
+        raw_config, effective_config = _load_effective_config_with_raw()
+        return jsonify({"config": effective_config}), 200
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as e:
@@ -203,7 +236,9 @@ def update_config():
             new_config_json = new_config_json["config"]
         if not isinstance(new_config_json, dict):
             return jsonify({"error": "Root element of the configuration must be a dictionary."}), 400
-        backup_path = _write_yaml_for_bind_mount(config_file_path, new_config_json)
+        raw_config = _load_raw_config()
+        config_to_write = _merge_effective_config(raw_config, new_config_json)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         message = "Configuration updated successfully. Reload is required to apply changes."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
@@ -245,7 +280,7 @@ def add_camera():
     try:
         payload = request.get_json(force=True) or {}
         config_file_path = _config_file_path()
-        config = _load_raw_config()
+        raw_config, config = _load_effective_config_with_raw()
         config.setdefault("cameras", {})
         if not isinstance(config["cameras"], dict):
             return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
@@ -253,9 +288,10 @@ def add_camera():
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
         if payload.get("require_test", True):
-            _fetch_snapshot_bytes(camera["url"], timeout_s=camera.get("timeout_s", 15))
+            _fetch_snapshot_bytes(camera["url"], timeout_s=camera.get("timeout_s", 15), cache_bust=camera.get("cache_bust", True))
         config["cameras"][name] = camera
-        backup_path = _write_yaml_for_bind_mount(config_file_path, config)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         return jsonify({"message": f"Camera '{name}' added. Reload the app to make it live.", "camera_name": name, "backup": os.path.basename(backup_path) if backup_path else None}), 200
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -270,7 +306,7 @@ def rename_camera():
         old_name = _slugify_camera_name(payload.get("old_name"))
         new_name = _slugify_camera_name(payload.get("new_name"))
         config_file_path = _config_file_path()
-        config = _load_raw_config()
+        raw_config, config = _load_effective_config_with_raw()
         cameras = config.setdefault("cameras", {})
         if old_name not in cameras:
             return jsonify({"error": f"Camera '{old_name}' was not found."}), 404
@@ -279,7 +315,8 @@ def rename_camera():
         cameras[new_name] = cameras.pop(old_name)
         if payload.get("description"):
             cameras[new_name]["description"] = payload.get("description")
-        backup_path = _write_yaml_for_bind_mount(config_file_path, config)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         return jsonify({"message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.", "backup": os.path.basename(backup_path) if backup_path else None}), 200
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -290,7 +327,7 @@ def rename_camera():
 @app.route("/api/sync_ui", methods=["POST"])
 def sync_ui():
     try:
-        config = _load_raw_config()
+        _, config = _load_effective_config_with_raw()
         work_dir = config.get("global", {}).get("work_dir")
         if not work_dir:
             return jsonify({"error": "work_dir not set in global config."}), 500
@@ -303,7 +340,7 @@ def sync_ui():
 @app.route("/api/camera/<string:camera_name>/capture_for_ui", methods=["POST"])
 def capture_for_ui(camera_name):
     try:
-        config = _load_raw_config()
+        _, config = _load_effective_config_with_raw()
         if "cameras" not in config or camera_name not in config["cameras"]:
             return jsonify({"error": f"Camera '{camera_name}' not found in configuration."}), 404
         camera_config = config["cameras"][camera_name]
