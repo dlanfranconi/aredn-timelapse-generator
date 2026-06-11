@@ -61,6 +61,7 @@ from fenetre.archive import (
 from fenetre.camera_utils import (
     get_day_night_from_exif,
     format_shutter_speed,
+    sanitize_url_for_logs,
 )
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
@@ -305,10 +306,12 @@ def get_pic_from_url(
         requests_version = requests.__version__
         headers = {"User-Agent": f"{ua} v{requests_version}"}
     r = requests.get(request_url, timeout=timeout, headers=headers)
+    safe_url = sanitize_url_for_logs(url)
+    safe_request_url = sanitize_url_for_logs(r.request.url)
 
     log_message = (
-        f"URL fetch for {url}:"
-        f"\n\tRequest URL: {r.request.url}"
+        f"URL fetch for {safe_url}:"
+        f"\n\tRequest URL: {safe_request_url}"
         f"\n\tRequest Headers: {r.request.headers}"
         f"\n\tResponse Status: {r.status_code}"
         f"\n\tResponse Headers: {r.headers}"
@@ -329,7 +332,7 @@ def get_pic_from_url(
     if r.status_code != 200:
         raise RuntimeError(
             f"HTTP Request Failed!\n"
-            f"URL: {request_url}\n"
+            f"URL: {sanitize_url_for_logs(request_url)}\n"
             f"Status Code: {r.status_code}\n"
             f"Request Headers: {r.request.headers}\n"
             f"Response Headers: {r.headers}\n"
@@ -457,6 +460,9 @@ def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
             sunset_start <= now <= sunset_end
         )
 
+    except ValueError as e:
+        logger.info(f"Sunrise/sunset unavailable for this date/location: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error calculating sunrise/sunset: {e}")
         return False
@@ -1921,6 +1927,16 @@ def timelapse_loop():
                     )
                     time.sleep(1)
                     continue
+                if not os.path.isdir(dir_to_process):
+                    logger.warning(
+                        "Removing queued daily timelapse for missing directory: %s",
+                        dir_to_process,
+                    )
+                    remove_from_timelapse_queue(
+                        dir_to_process, timelapse_queue_file, timelapse_queue_lock
+                    )
+                    time.sleep(1)
+                    continue
                 result = run_serialized_background_job(
                     f"daily_timelapse:{dir_to_process}",
                     create_timelapse,
@@ -2055,7 +2071,13 @@ def _prune_snapshots_keep_daily_timelapse(
             break
         if not _daily_timelapse_path(day_dir):
             continue
-        for pattern in ("*.jpg", "segment-*.*", "*.m3u8", "init.mp4", ".*.hls-manifest.json"):
+        for pattern in (
+            "*.jpg",
+            "segment-*.*",
+            "*.m3u8",
+            "init.mp4",
+            ".*.hls-manifest.json",
+        ):
             for path in sorted(glob.glob(os.path.join(day_dir, pattern))):
                 if current_size_bytes <= limit_bytes:
                     break
@@ -2203,14 +2225,26 @@ def disk_management_loop():
                             break
                         daily_path = _daily_timelapse_path(day_dir)
                         if daily_path:
-                            for pattern in ("*.jpg", "segment-*.*", "*.m3u8", "init.mp4", ".*.hls-manifest.json"):
-                                for path in sorted(glob.glob(os.path.join(day_dir, pattern))):
+                            for pattern in (
+                                "*.jpg",
+                                "segment-*.*",
+                                "*.m3u8",
+                                "init.mp4",
+                                ".*.hls-manifest.json",
+                            ):
+                                for path in sorted(
+                                    glob.glob(os.path.join(day_dir, pattern))
+                                ):
                                     if current_work_dir_size <= global_limit_bytes:
                                         break
-                                    current_work_dir_size -= _remove_file_for_storage(path, dry_run)
+                                    current_work_dir_size -= _remove_file_for_storage(
+                                        path, dry_run
+                                    )
                             if current_work_dir_size <= global_limit_bytes:
                                 break
-                            current_work_dir_size -= _remove_file_for_storage(daily_path, dry_run)
+                            current_work_dir_size -= _remove_file_for_storage(
+                                daily_path, dry_run
+                            )
                         else:
                             dir_to_delete_size = get_dir_size(day_dir)
                             if dry_run:

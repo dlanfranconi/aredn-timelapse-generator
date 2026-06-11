@@ -18,6 +18,7 @@ from fenetre.fenetre import (
     run_camera_unavailable_command,
 )
 import fenetre.fenetre as fenetre_module
+from fenetre.camera_utils import sanitize_url_for_logs
 from fenetre.picamera import Picamera2Capture
 
 
@@ -248,6 +249,24 @@ class TestFenetre(unittest.TestCase):
         mock_requests_get.assert_called_with(
             "http://example.com/image.jpg", timeout=10, headers={"Accept": "image/*,*"}
         )
+
+    def test_sanitize_url_for_logs_redacts_credentials(self):
+        url = (
+            "http://admin:secret@example.local/cgi-bin/api.cgi?"
+            "cmd=Snap&user=admin&password=p%40ss&token=abc123&channel=0"
+        )
+
+        redacted = sanitize_url_for_logs(url)
+
+        self.assertIn("REDACTED@example.local", redacted)
+        self.assertIn("cmd=Snap", redacted)
+        self.assertIn("channel=0", redacted)
+        self.assertIn("user=REDACTED", redacted)
+        self.assertIn("password=REDACTED", redacted)
+        self.assertIn("token=REDACTED", redacted)
+        self.assertNotIn("secret", redacted)
+        self.assertNotIn("p%40ss", redacted)
+        self.assertNotIn("abc123", redacted)
 
     def test_picamera2_capture_applies_base_and_mode_controls(self):
         instances = []

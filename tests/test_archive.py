@@ -5,9 +5,11 @@ import unittest
 from unittest.mock import patch
 import shutil
 
-from fenetre.archive import archive_daydir, list_unarchived_dirs, check_dir_has_timelapse
-
-
+from fenetre.archive import (
+    archive_daydir,
+    list_unarchived_dirs,
+    check_dir_has_timelapse,
+)
 
 
 class TestArchive(unittest.TestCase):
@@ -47,6 +49,11 @@ class TestArchive(unittest.TestCase):
         # Check that only the unarchived directory is returned
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], unarchived_dir)
+
+    def test_list_unarchived_dirs_missing_camera_dir(self):
+        missing_camera_dir = os.path.join(self.temp_dir.name, "missing-camera")
+
+        self.assertEqual(list_unarchived_dirs(missing_camera_dir), [])
 
     @patch("fenetre.archive.get_today_date")
     @patch("fenetre.archive.is_dir_older_than_n_days")
