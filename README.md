@@ -151,7 +151,7 @@ Make sure each config uses distinct ports and work directories before enabling m
 
 ## Running with Docker on Intel
 
-The included `Dockerfile` builds an Ubuntu 26.04 image with Python and ffmpeg. It runs in CPU-only environments by default and can use hardware encoding when the host exposes supported devices such as Intel VA-API/QuickSync through `/dev/dri`.
+The included `Dockerfile` builds an Ubuntu 26.04 image with Python and ffmpeg. It runs in CPU-only environments by default. The AMD64 image also includes Intel VA-API/QuickSync runtime packages for hosts that expose `/dev/dri`; the ARM64 image stays CPU-only.
 
 Build the image:
 

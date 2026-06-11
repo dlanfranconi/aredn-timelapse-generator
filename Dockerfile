@@ -40,14 +40,15 @@ RUN apt-get update && \
         ffmpeg \
         libgl1 \
         libglib2.0-0 \
-        libva-drm2 \
-        libva2 \
-        libvpl2 \
-        mesa-va-drivers \
-        python3 \
-        vainfo && \
-    if apt-cache show intel-media-va-driver >/dev/null 2>&1; then \
-        apt-get install -y --no-install-recommends intel-media-va-driver; \
+        python3 && \
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends \
+            intel-media-va-driver \
+            libva-drm2 \
+            libva2 \
+            libvpl2 \
+            mesa-va-drivers \
+            vainfo; \
     fi && \
     rm -rf /var/lib/apt/lists/*
 
