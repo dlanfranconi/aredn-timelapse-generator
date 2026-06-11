@@ -182,7 +182,11 @@ Or use compose:
 docker compose up --build
 ```
 
-## Deploying with Portainer and GHCR
+## Portainer Stack Deployment
+
+This is the recommended deployment path for Portainer. It uses the prebuilt
+GHCR image, keeps all runtime state on the host, and lets you update the
+container without losing config, snapshots, timelapses, or logs.
 
 The GitHub Actions workflow publishes multi-arch AMD64/ARM64 images to GHCR:
 
