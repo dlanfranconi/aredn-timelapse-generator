@@ -82,9 +82,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const addCameraBtn = document.getElementById('addCameraBtn'); // Get the new button
     const siteNameInput = document.getElementById('siteNameInput');
     const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
+    const newCameraName = document.getElementById('newCameraName');
+    const newCameraDescription = document.getElementById('newCameraDescription');
+    const newCameraVendor = document.getElementById('newCameraVendor');
+    const newCameraUrl = document.getElementById('newCameraUrl');
+    const toggleNewCameraUrlBtn = document.getElementById('toggleNewCameraUrlBtn');
+    const testNewCameraBtn = document.getElementById('testNewCameraBtn');
+    const confirmNewCameraBtn = document.getElementById('confirmNewCameraBtn');
+    const newCameraTestResult = document.getElementById('newCameraTestResult');
     const configFormContainer = document.getElementById('configFormContainer');
     const statusMessage = document.getElementById('statusMessage');
     let loadedConfigData = null;
+    let newCameraLastTest = null;
 
     loadConfigBtn.addEventListener('click', fetchAndDisplayConfig);
     saveConfigBtn.addEventListener('click', saveConfiguration);
@@ -93,6 +102,16 @@ document.addEventListener('DOMContentLoaded', () => {
     syncUiBtn.addEventListener('click', syncUI);
     addCameraBtn.addEventListener('click', handleAddCamera); // Add event listener
     saveSiteNameBtn.addEventListener('click', saveSiteName);
+    toggleNewCameraUrlBtn.addEventListener('click', toggleNewCameraUrl);
+    newCameraVendor.addEventListener('change', applyNewCameraTemplate);
+    newCameraUrl.addEventListener('input', resetNewCameraTest);
+    newCameraName.addEventListener('input', resetNewCameraTest);
+    testNewCameraBtn.addEventListener('click', testNewCameraSnapshot);
+    confirmNewCameraBtn.addEventListener('click', confirmNewCameraAdd);
+    document.querySelectorAll('.option-toggle').forEach(toggle => {
+        toggle.addEventListener('change', () => syncOptionGroup(toggle));
+        syncOptionGroup(toggle);
+    });
 
     async function fetchAndDisplayConfig() {
         setStatus('Loading configuration...', 'info');
@@ -136,6 +155,182 @@ document.addEventListener('DOMContentLoaded', () => {
             toggle.textContent = showing ? 'Show' : 'Hide';
         });
         inputWrapper.appendChild(toggle);
+    }
+
+    function syncOptionGroup(toggle) {
+        const fieldset = toggle.closest('.option-group');
+        if (!fieldset) return;
+        fieldset.classList.toggle('enabled', toggle.checked);
+        fieldset.querySelectorAll('.option-content input, .option-content select, .option-content textarea').forEach(input => {
+            input.disabled = !toggle.checked;
+        });
+    }
+
+    function toggleNewCameraUrl() {
+        const showing = newCameraUrl.type !== 'password';
+        newCameraUrl.type = showing ? 'password' : 'text';
+        toggleNewCameraUrlBtn.textContent = showing ? 'Show' : 'Hide';
+    }
+
+    function applyNewCameraTemplate() {
+        const templates = {
+            generic: 'http://camera.example/snapshot.jpg',
+            reolink: 'http://CAMERA_IP/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=USERNAME&password=PASSWORD',
+            sunba: 'http://CAMERA_IP/cgi-bin/snapshot.cgi?chn=0&u=USERNAME&p=PASSWORD'
+        };
+        if (!newCameraUrl.value || Object.values(templates).includes(newCameraUrl.value)) {
+            newCameraUrl.value = templates[newCameraVendor.value] || templates.generic;
+        }
+        resetNewCameraTest();
+    }
+
+    function resetNewCameraTest() {
+        newCameraLastTest = null;
+        confirmNewCameraBtn.disabled = true;
+        newCameraTestResult.innerHTML = '';
+    }
+
+    function numberValue(id, fallback) {
+        const value = parseFloat(document.getElementById(id).value);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    function intValue(id, fallback) {
+        const value = parseInt(document.getElementById(id).value, 10);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    function checked(id) {
+        const el = document.getElementById(id);
+        return Boolean(el && el.checked);
+    }
+
+    function collectNewCameraPayload(requireTest = true) {
+        const postprocessing = [];
+        if (checked('newCameraTimestampEnabled')) {
+            postprocessing.push({
+                type: 'timestamp',
+                enabled: true,
+                position: document.getElementById('newCameraTimestampPosition').value || 'bottom_right',
+                size: 24,
+                color: 'white',
+                format: '%Y-%m-%d %H:%M:%S %Z'
+            });
+        }
+
+        const payload = {
+            name: newCameraName.value.trim(),
+            description: newCameraDescription.value.trim() || newCameraName.value.trim(),
+            url: newCameraUrl.value.trim(),
+            timeout_s: intValue('newCameraTimeout', 15),
+            cache_bust: checked('newCameraCacheBust'),
+            gather_metrics: true,
+            mozjpeg_optimize: checked('newCameraMozjpeg'),
+            timelapse_enabled: checked('newCameraTimelapse'),
+            require_test: requireTest,
+            postprocessing
+        };
+
+        if (checked('newCameraFixedIntervalEnabled')) {
+            payload.snap_interval_enabled = true;
+            payload.snap_interval_s = intValue('newCameraSnapInterval', 60);
+        }
+        if (checked('newCameraActivityEnabled')) {
+            payload.activity_interval_enabled = true;
+            payload.activity_interval_s = intValue('newCameraActivityInterval', 10);
+            payload.ssim_enabled = true;
+            payload.ssim_setpoint = numberValue('newCameraSsimSetpoint', 0.88);
+            payload.ssim_area = document.getElementById('newCameraSsimArea').value.trim() || '0,0,1,1';
+        }
+        if (checked('newCameraSunEnabled')) {
+            const windowMinutes = intValue('newCameraSunWindow', 45);
+            payload.sunrise_sunset_enabled = true;
+            payload.sunrise_sunset_interval_s = intValue('newCameraSunInterval', 10);
+            payload.lat = numberValue('newCameraLat', 35.2828);
+            payload.lon = numberValue('newCameraLon', -120.6596);
+            payload.sunrise_offset_start_minutes = windowMinutes;
+            payload.sunrise_offset_end_minutes = windowMinutes;
+            payload.sunset_offset_start_minutes = windowMinutes;
+            payload.sunset_offset_end_minutes = windowMinutes;
+        }
+        if (checked('newCameraSkyEnabled')) {
+            payload.sky_area_enabled = true;
+            payload.sky_area = document.getElementById('newCameraSkyArea').value.trim() || '0,0,1,0.35';
+        }
+        if (checked('newCameraStorageEnabled')) {
+            payload.work_dir_max_size_GB = intValue('newCameraStorageGb', 5);
+        }
+        return payload;
+    }
+
+    function validateNewCameraPayload(payload) {
+        if (!payload.name) {
+            throw new Error('Camera ID is required.');
+        }
+        if (!/^[A-Za-z0-9_-]+$/.test(payload.name)) {
+            throw new Error('Camera ID can only use letters, numbers, underscores, and dashes.');
+        }
+        if (!payload.url) {
+            throw new Error('Snapshot URL is required.');
+        }
+    }
+
+    async function testNewCameraSnapshot() {
+        try {
+            const payload = collectNewCameraPayload(false);
+            validateNewCameraPayload(payload);
+            newCameraTestResult.textContent = 'Testing snapshot URL...';
+            confirmNewCameraBtn.disabled = true;
+            const response = await fetch('/api/camera/test_snapshot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: payload.url, timeout_s: payload.timeout_s })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `Snapshot test failed with HTTP ${response.status}`);
+            }
+            newCameraLastTest = { url: payload.url, name: payload.name };
+            newCameraTestResult.innerHTML = '';
+            const summary = document.createElement('div');
+            summary.textContent = `Snapshot OK: ${result.width}x${result.height}, ${Math.round(result.bytes / 1024)} KB`;
+            const preview = document.createElement('img');
+            preview.alt = 'Snapshot preview';
+            preview.src = result.preview_data_url;
+            newCameraTestResult.appendChild(summary);
+            newCameraTestResult.appendChild(preview);
+            confirmNewCameraBtn.disabled = false;
+        } catch (error) {
+            newCameraLastTest = null;
+            confirmNewCameraBtn.disabled = true;
+            newCameraTestResult.textContent = error.message;
+            setStatus(`Snapshot test failed: ${error.message}`, 'error');
+        }
+    }
+
+    async function confirmNewCameraAdd() {
+        try {
+            const payload = collectNewCameraPayload(true);
+            validateNewCameraPayload(payload);
+            if (!newCameraLastTest || newCameraLastTest.url !== payload.url || newCameraLastTest.name !== payload.name) {
+                throw new Error('Test the current camera ID and snapshot URL before adding it.');
+            }
+            setStatus(`Adding camera '${payload.name}'...`, 'info');
+            const response = await fetch('/api/camera/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `Failed to add camera with HTTP ${response.status}`);
+            }
+            setStatus(result.message || `Camera '${payload.name}' added. Reload the app to make it live.`, 'success');
+            await fetchAndDisplayConfig();
+            confirmNewCameraBtn.disabled = true;
+        } catch (error) {
+            setStatus(`Error adding camera: ${error.message}`, 'error');
+        }
     }
 
     function renderConfigForm(data, parentElement, parentKey = '') {
@@ -261,10 +456,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updatedConfig.global.deployment_name = siteName;
         setStatus('Saving GUI name...', 'info');
         try {
-            const response = await fetch('/config', {
+            const response = await fetch('/api/global/deployment_name', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedConfig),
+                body: JSON.stringify({ deployment_name: siteName }),
             });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
@@ -687,74 +882,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchAndDisplayConfig();
 
     function handleAddCamera() {
-        const cameraName = prompt("Enter a name for the new camera (e.g., 'front-yard-cam'):");
-        if (!cameraName || cameraName.trim() === "") {
-            setStatus("Camera name cannot be empty.", "error");
-            return;
-        }
-        if (/[.\s\[\]\#\*\/]/.test(cameraName)) {
-            setStatus("Camera name contains invalid characters (e.g., . / [ ] # * space). Please use a simple name.", "error");
-            return;
-        }
-
-        // Check if camera name already exists
-        // This requires knowing the current config structure. Assume 'cameras' is a top-level key.
-        // A simple check: see if a fieldset with this data-key already exists.
-        const existingCameraFieldset = configFormContainer.querySelector(`fieldset[data-key="cameras.${cameraName}"]`);
-        if (existingCameraFieldset) {
-            setStatus(`A camera with the name '${cameraName}' already exists.`, "error");
-            return;
-        }
-
-        let camerasFieldset = configFormContainer.querySelector('fieldset[data-key="cameras"]');
-        if (!camerasFieldset) {
-            // If no cameras section exists yet, create it.
-            // This might happen if the config is entirely empty or has no 'cameras' key.
-            camerasFieldset = document.createElement('fieldset');
-            const legend = document.createElement('legend');
-            legend.textContent = 'cameras';
-            camerasFieldset.appendChild(legend);
-            camerasFieldset.dataset.key = 'cameras';
-            camerasFieldset.dataset.type = 'object'; // 'cameras' is an object containing camera items
-            configFormContainer.appendChild(camerasFieldset); // Or insert in a specific order if needed
-        }
-
-        const newCameraFieldset = document.createElement('fieldset');
-        const newCameraLegend = document.createElement('legend');
-        newCameraLegend.textContent = cameraName;
-        newCameraFieldset.appendChild(newCameraLegend);
-        newCameraFieldset.dataset.key = `cameras.${cameraName}`; // This is how it will be identified in getFormDataAsJson
-        newCameraFieldset.dataset.type = 'object'; // Each camera is an object
-
-        // Add source type selector
-        const typeSelectorContainer = document.createElement('div');
-        typeSelectorContainer.classList.add('type-selector-container');
-        const selectLabel = document.createElement('label');
-        selectLabel.textContent = 'Select camera source type: ';
-        typeSelectorContainer.appendChild(selectLabel);
-
-        const sourceTypeSelect = document.createElement('select');
-        availableCameraSourceTypes.forEach(type => {
-            const option = document.createElement('option');
-            option.value = type;
-            option.textContent = type;
-            sourceTypeSelect.appendChild(option);
-        });
-        typeSelectorContainer.appendChild(sourceTypeSelect);
-
-        const confirmButton = document.createElement('button');
-        confirmButton.textContent = 'Confirm Source Type';
-        confirmButton.type = 'button';
-        confirmButton.addEventListener('click', () => {
-            const selectedSourceType = sourceTypeSelect.value;
-            typeSelectorContainer.remove(); // Remove selector UI
-            renderCameraItem(newCameraFieldset, cameraName, selectedSourceType);
-        });
-        typeSelectorContainer.appendChild(confirmButton);
-        newCameraFieldset.appendChild(typeSelectorContainer);
-
-        camerasFieldset.appendChild(newCameraFieldset);
-        setStatus(`Camera '${cameraName}' structure added. Configure and save.`, 'info');
+        document.querySelector('.camera-add-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        newCameraName.focus();
+        setStatus('Use the Add Camera form, test the snapshot URL, then confirm the add.', 'info');
     }
 
     function renderCameraItem(cameraFieldset, cameraNameKey, selectedSourceType) {

@@ -161,6 +161,10 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
 
     if payload.get("disabled"):
         camera["disabled"] = True
+    if payload.get("timelapse_enabled") is not None:
+        camera["timelapse_enabled"] = bool(payload.get("timelapse_enabled"))
+    if payload.get("work_dir_max_size_GB"):
+        camera["work_dir_max_size_GB"] = int(payload.get("work_dir_max_size_GB"))
     if payload.get("snap_interval_enabled"):
         camera["snap_interval_s"] = int(payload.get("snap_interval_s") or 60)
     if payload.get("activity_interval_enabled"):
@@ -249,6 +253,32 @@ def update_config():
         return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
     except Exception as e:
         return jsonify({"error": f"Error processing configuration: {str(e)}"}), 500
+
+
+@app.route("/api/global/deployment_name", methods=["PUT"])
+def update_deployment_name():
+    try:
+        payload = request.get_json(force=True) or {}
+        deployment_name = (payload.get("deployment_name") or "").strip()
+        if not deployment_name:
+            return jsonify({"error": "deployment_name is required."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        config.setdefault("global", {})
+        if not isinstance(config["global"], dict):
+            return jsonify({"error": "Config key 'global' must be a mapping."}), 400
+        config["global"]["deployment_name"] = deployment_name
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        message = "GUI name updated. Reload and sync UI to publish the change."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return jsonify({"message": message, "backup": os.path.basename(backup_path) if backup_path else None}), 200
+    except BadRequest:
+        return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to update GUI name: {str(e)}"}), 500
 
 
 @app.route("/")

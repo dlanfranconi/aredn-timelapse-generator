@@ -99,6 +99,90 @@ h1 {
     cursor: not-allowed;
 }
 
+.form-grid,
+.option-content {
+    display: grid;
+    grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+}
+
+.inline-field {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.inline-field input {
+    flex: 1;
+}
+
+.option-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.option-group {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    background-color: #f7f7f7;
+}
+
+.option-group legend {
+    font-weight: bold;
+}
+
+.option-group:not(.enabled) .option-content {
+    opacity: 0.45;
+}
+
+.option-group:not(.enabled) .option-content input,
+.option-group:not(.enabled) .option-content select {
+    pointer-events: none;
+}
+
+.option-group > label {
+    display: block;
+    margin: 6px 0;
+}
+
+.option-group input[type="text"],
+.option-group input[type="password"],
+.option-group input[type="number"],
+.option-group select,
+.camera-add-panel input[type="text"],
+.camera-add-panel input[type="password"],
+.camera-add-panel input[type="number"],
+.camera-add-panel select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+}
+
+.add-camera-actions {
+    margin-top: 12px;
+}
+
+.camera-test-result {
+    margin-top: 12px;
+}
+
+.camera-test-result img {
+    display: block;
+    max-width: 420px;
+    max-height: 240px;
+    width: auto;
+    height: auto;
+    margin-top: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
 #configFormContainer fieldset {
     border: 1px solid #ddd;
     padding: 10px;

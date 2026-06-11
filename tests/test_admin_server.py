@@ -74,6 +74,79 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml, new_config_data_json)
 
+    def test_update_deployment_name_patches_existing_config(self):
+        response = self.app.put(
+            "/api/global/deployment_name",
+            data=json.dumps({"deployment_name": "Mesh Skywatch"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["global"]["deployment_name"], "Mesh Skywatch"
+        )
+        self.assertEqual(
+            updated_data_yaml["cameras"], self.test_config_data["cameras"]
+        )
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_with_guided_options(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        payload = {
+            "name": "ridge-cam",
+            "description": "Ridge Cam",
+            "url": "http://camera/snapshot.jpg",
+            "timeout_s": 12,
+            "cache_bust": True,
+            "mozjpeg_optimize": True,
+            "timelapse_enabled": True,
+            "work_dir_max_size_GB": 5,
+            "snap_interval_enabled": True,
+            "snap_interval_s": 60,
+            "activity_interval_enabled": True,
+            "activity_interval_s": 10,
+            "ssim_enabled": True,
+            "ssim_setpoint": 0.88,
+            "ssim_area": "0,0,1,1",
+            "sky_area_enabled": True,
+            "sky_area": "0,0,1,0.35",
+            "sunrise_sunset_enabled": True,
+            "sunrise_sunset_interval_s": 10,
+            "lat": 35.2828,
+            "lon": -120.6596,
+            "postprocessing": [
+                {
+                    "type": "timestamp",
+                    "enabled": True,
+                    "position": "bottom_right",
+                    "size": 24,
+                    "color": "white",
+                    "format": "%Y-%m-%d %H:%M:%S %Z",
+                }
+            ],
+        }
+
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["ridge-cam"]
+        self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
+        self.assertEqual(camera["snap_interval_s"], 60)
+        self.assertEqual(camera["activity_interval_s"], 10)
+        self.assertEqual(camera["work_dir_max_size_GB"], 5)
+        self.assertEqual(camera["ssim_area"], "0,0,1,1")
+        self.assertEqual(camera["sky_area"], "0,0,1,0.35")
+        self.assertTrue(camera["sunrise_sunset"]["enabled"])
+        self.assertTrue(camera["timelapse_enabled"])
+
     def test_update_config_invalid_json(self):
         invalid_json_string = '{"global": {"setting": "value"}, "broken": [1,2,'
         response = self.app.put(

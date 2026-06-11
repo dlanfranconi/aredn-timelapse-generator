@@ -31,6 +31,115 @@
             <button id="saveSiteNameBtn" type="button" disabled>Save GUI name</button>
         </section>
 
+        <section class="quick-settings camera-add-panel">
+            <h2>Add Camera</h2>
+            <div class="form-grid">
+                <label for="newCameraName">Camera ID</label>
+                <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
+
+                <label for="newCameraDescription">Display name</label>
+                <input id="newCameraDescription" type="text" autocomplete="off" placeholder="North Ridge">
+
+                <label for="newCameraVendor">Template</label>
+                <select id="newCameraVendor">
+                    <option value="generic">Generic HTTP snapshot</option>
+                    <option value="reolink">Reolink HTTP snapshot</option>
+                    <option value="sunba">Sunba HTTP snapshot</option>
+                </select>
+
+                <label for="newCameraUrl">Snapshot URL</label>
+                <div class="inline-field">
+                    <input id="newCameraUrl" type="password" autocomplete="off" placeholder="http://camera/snapshot.jpg">
+                    <button id="toggleNewCameraUrlBtn" type="button">Show</button>
+                </div>
+            </div>
+
+            <div class="option-groups">
+                <fieldset class="option-group enabled">
+                    <legend>Required Capture</legend>
+                    <label><input id="newCameraCacheBust" type="checkbox" checked> Cache bust URL</label>
+                    <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
+                    <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
+                    <label for="newCameraTimeout">Timeout seconds</label>
+                    <input id="newCameraTimeout" type="number" min="1" value="15">
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraFixedIntervalEnabled" type="checkbox" checked> Normal capture interval</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSnapInterval">Seconds</label>
+                        <input id="newCameraSnapInterval" type="number" min="1" value="60">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraActivityEnabled" type="checkbox" checked> Sky activity fast capture</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraActivityInterval">Fast seconds</label>
+                        <input id="newCameraActivityInterval" type="number" min="1" value="10">
+                        <label for="newCameraSsimSetpoint">SSIM threshold</label>
+                        <input id="newCameraSsimSetpoint" type="number" min="0" max="1" step="0.01" value="0.88">
+                        <label for="newCameraSsimArea">Activity crop box</label>
+                        <input id="newCameraSsimArea" type="text" value="0,0,1,1">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraSunEnabled" type="checkbox" checked> Sunrise/sunset fast capture</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSunInterval">Fast seconds</label>
+                        <input id="newCameraSunInterval" type="number" min="1" value="10">
+                        <label for="newCameraLat">Latitude</label>
+                        <input id="newCameraLat" type="number" step="0.000001" value="35.2828">
+                        <label for="newCameraLon">Longitude</label>
+                        <input id="newCameraLon" type="number" step="0.000001" value="-120.6596">
+                        <label for="newCameraSunWindow">Window minutes</label>
+                        <input id="newCameraSunWindow" type="number" min="0" value="45">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraSkyEnabled" type="checkbox" checked> Sky/daylight crop box</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSkyArea">Sky crop box</label>
+                        <input id="newCameraSkyArea" type="text" value="0,0,1,0.35">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraStorageEnabled" type="checkbox" checked> Per-camera storage cap</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraStorageGb">GB</label>
+                        <input id="newCameraStorageGb" type="number" min="1" value="5">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraTimestampEnabled" type="checkbox" checked> Timestamp overlay</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraTimestampPosition">Position</label>
+                        <select id="newCameraTimestampPosition">
+                            <option value="bottom_right">Bottom right</option>
+                            <option value="bottom_left">Bottom left</option>
+                            <option value="top_right">Top right</option>
+                            <option value="top_left">Top left</option>
+                        </select>
+                    </div>
+                </fieldset>
+            </div>
+
+            <div class="add-camera-actions">
+                <button id="testNewCameraBtn" type="button">Test Snapshot URL</button>
+                <button id="confirmNewCameraBtn" type="button" disabled>Add Camera to Config</button>
+            </div>
+            <div id="newCameraTestResult" class="camera-test-result"></div>
+        </section>
+
+        <section class="quick-settings advanced-config-note">
+            <h2>Advanced Config Editor</h2>
+            <p>Use the guided controls above for common changes. The raw editor below rewrites the full YAML config and is intended for advanced edits only.</p>
+        </section>
+
         <div id="configFormContainer">
             <!-- Dynamic form will be rendered here by JavaScript -->
             <p>Click "Load Current Config" to view and edit.</p>
