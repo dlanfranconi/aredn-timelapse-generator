@@ -52,6 +52,29 @@ let mapVisible = false;
 let mapVisibilityInitialized = false;
 let remoteFetchGeneration = 0;
 
+function fitMapToMarkers() {
+    setTimeout(() => {
+        map.invalidateSize();
+        if (latestMarkerBounds && latestMarkerBounds.isValid()) {
+            map.fitBounds(latestMarkerBounds, markerBoundsFitOptions);
+        }
+    }, 250);
+}
+
+function setMapVisible(visible) {
+    mapVisible = visible;
+    body.classList.toggle('map-visible', visible);
+    mapToggleButton.classList.toggle('map-open', visible);
+    mapToggleButton.setAttribute('aria-pressed', String(visible));
+    if (visible) {
+        fitMapToMarkers();
+    }
+}
+
+mapToggleButton.addEventListener('click', () => {
+    setMapVisible(!mapVisible);
+});
+
 function applyMapTheme(isDark) {
     const desiredLayer = isDark ? darkTileLayer : lightTileLayer;
     if (desiredLayer === activeTileLayer) {
@@ -68,6 +91,13 @@ map.addLayer(markerCluster);
 map.addLayer(circleLayerGroup);
 
 var cameraMarkers = {};
+
+function clearCameraLayers() {
+    markerCluster.clearLayers();
+    circleLayerGroup.clearLayers();
+    cameraMarkers = {};
+    latestMarkerBounds = null;
+}
 
 function escapeHtml(value) {
     const div = document.createElement('div');
@@ -157,6 +187,40 @@ function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
 function createPopupContent(camera) {
     const description = camera.description ? `<br><span>${escapeHtml(camera.description)}</span>` : '';
     return `<b>${escapeHtml(camera.title)}</b>${description}`;
+}
+
+function updateCameraMap(cameras) {
+    clearCameraLayers();
+    cameras.forEach(camera => {
+        const lat = camera.lat == null ? NaN : Number(camera.lat);
+        const lon = camera.lon == null ? NaN : Number(camera.lon);
+        const layer = addCameraLayer(
+            lat,
+            lon,
+            Number(camera.map_radius_m || 0),
+            createPopupContent(camera)
+        );
+        if (layer) {
+            cameraMarkers[camera.title] = layer;
+        }
+    });
+    if (mapVisible) {
+        fitMapToMarkers();
+    }
+}
+
+function updateHeaderLinks(uiConfig) {
+    const mainWebsiteLink = document.getElementById('main-website-link');
+    const githubLink = document.getElementById('github-link');
+
+    if (mainWebsiteLink) {
+        mainWebsiteLink.href = uiConfig.main_website_url || 'https://fenetre.cam';
+        mainWebsiteLink.style.display = uiConfig.show_main_website_icon === false ? 'none' : 'flex';
+    }
+
+    if (githubLink) {
+        githubLink.style.display = uiConfig.show_github_icon === false ? 'none' : 'flex';
+    }
 }
 
 function parseTimestampFromFilename(filename) {
@@ -294,6 +358,9 @@ function createCameraListItem(camera) {
     listItem.querySelector('.camera-header').addEventListener('click', () => {
         const details = listItem.querySelector('.camera-details');
         details.classList.toggle('active');
+        if (mapVisible) {
+            focusCameraLayer(cameraMarkers[camera.title]);
+        }
     });
 
     return listItem;
@@ -410,9 +477,17 @@ function updateAllCameras() {
         .then(response => response.json())
         .then(data => {
             const deploymentName = data.global.deployment_name || 'AREDN805';
+            const uiConfig = (data.global && data.global.ui) || {};
+            updateHeaderLinks(uiConfig);
             document.querySelector('#list-header h1').textContent = `${deploymentName} Cameras`;
 
             const cameras = data.cameras || [];
+            updateCameraMap(cameras);
+            if (!mapVisibilityInitialized) {
+                const showMapByDefault = Boolean(uiConfig.show_map_by_default);
+                setMapVisible(showMapByDefault);
+                mapVisibilityInitialized = true;
+            }
             cameras.forEach(camera => updateCamera(camera, data));
         })
         .catch(error => {

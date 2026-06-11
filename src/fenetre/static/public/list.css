@@ -23,6 +23,7 @@ body.dark-mode {
     height: 100vh;
     transition: width 0.5s ease;
     border-right: 1px solid #ccc;
+    overflow: hidden;
 }
 body.dark-mode #map-panel {
     border-right: 1px solid #333;
@@ -31,6 +32,18 @@ body.dark-mode #map-panel {
 #map {
     height: 100%;
     visibility: hidden;
+}
+
+body.map-visible #map-panel {
+    width: min(42vw, 640px);
+}
+
+body.map-visible #list-panel {
+    width: calc(100% - min(42vw, 640px));
+}
+
+body.map-visible #map {
+    visibility: visible;
 }
 body.dark-mode #map {
     background-color: #0f0f0f;
@@ -78,12 +91,24 @@ body.dark-mode .marker-cluster-large div {
     justify-content: center;
     align-items: center;
     color: #333;
+    background: #fff;
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+#controls button {
+    background: #fff;
+    color: #333;
 }
 
 #controls button .icon {
     width: 24px;
     height: 24px;
+    flex: 0 0 24px;
+    color: currentColor;
+}
+
+#map-toggle .icon-list,
+#theme-toggle .icon-moon {
     display: none;
 }
 
@@ -180,6 +205,15 @@ body.dark-mode #theme-toggle {
     justify-content: center;
     align-items: center;
     color: #333;
+    background: #fff;
+}
+
+body.dark-mode #controls button,
+body.dark-mode #map-toggle,
+body.dark-mode #theme-toggle {
+    background-color: #333;
+    color: #e0e0e0;
+    border-color: #555;
 }
 
 body.dark-mode #controls a {
@@ -381,6 +415,22 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
 }
 
 @media (max-width: 600px) {
+    body.map-visible #main-container {
+        flex-direction: column;
+    }
+
+    body.map-visible #map-panel {
+        width: 100%;
+        height: 42vh;
+        border-right: 0;
+        border-bottom: 1px solid #ccc;
+    }
+
+    body.map-visible #list-panel {
+        width: 100%;
+        height: 58vh;
+    }
+
     .camera-header img { width: 100px; }
     .camera-details .links a {
         display: block;
