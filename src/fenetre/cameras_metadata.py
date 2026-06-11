@@ -5,7 +5,6 @@ import math
 import os
 from typing import Dict, Any
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -65,10 +64,14 @@ def _load_existing_cameras(json_filepath: str) -> list:
 
 
 def _camera_timelapse_enabled(cam_conf: Dict[str, Any]) -> bool:
+    if cam_conf.get("generate_timelapse") is False:
+        return False
+    if cam_conf.get("timelapse_enabled") is False:
+        return False
     timelapse_cfg = cam_conf.get("timelapse")
     if isinstance(timelapse_cfg, dict):
         return bool(timelapse_cfg.get("enabled", True))
-    return bool(cam_conf.get("timelapse_enabled", True))
+    return True
 
 
 def build_cameras_metadata(

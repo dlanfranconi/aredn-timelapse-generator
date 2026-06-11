@@ -36,8 +36,10 @@ timelapse:
     enabled: true
     interval_s: 1200
     framerate: 30
+    max_width: 1280
+    max_height: 720
     ffmpeg_2pass: false
-    output_format: file
+    output_format: hls
 
     # CPU-only rolling timelapse. Keep this fast enough to update every interval.
     ffmpeg_options: >-
@@ -51,6 +53,8 @@ timelapse:
   daily_timelapse:
     enabled: true
     framerate: 60
+    max_width: 1920
+    max_height: 1080
     ffmpeg_2pass: false
 
     # CPU-only daily archive timelapse. Increase preset quality only if runtime is acceptable.
@@ -99,6 +103,10 @@ cameras:
     # Camera location.
     lat: 35.2828
     lon: -120.6596
+
+    # Set either key to false to exclude a camera from frequent and daily
+    # timelapse generation.
+    timelapse_enabled: true
 
     postprocessing:
       - type: timestamp

@@ -261,6 +261,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "url": "http://legacy",
                     "description": "Legacy camera",
                     "disabled": True,
+                    "generate_timelapse": False,
                     "timelapse_enabled": False,
                 },
                 "nested": {
@@ -276,6 +277,7 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(cameras_conf["legacy"]["description"], "Legacy camera")
         self.assertTrue(cameras_conf["legacy"]["disabled"])
+        self.assertFalse(cameras_conf["legacy"]["generate_timelapse"])
         self.assertFalse(cameras_conf["legacy"]["timelapse_enabled"])
         self.assertEqual(cameras_conf["nested"]["description"], "Nested camera")
         self.assertFalse(cameras_conf["nested"]["timelapse"]["enabled"])
@@ -381,9 +383,13 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertTrue(timelapse_conf["daily_timelapse"]["enabled"])
         self.assertTrue(timelapse_conf["frequent_timelapse"]["enabled"])
         self.assertEqual(timelapse_conf["frequent_timelapse"]["output_format"], "file")
+        self.assertEqual(timelapse_conf["frequent_timelapse"]["max_width"], 1280)
+        self.assertEqual(timelapse_conf["frequent_timelapse"]["max_height"], 720)
         self.assertEqual(
             timelapse_conf["frequent_timelapse"]["hls_segment_type"], "mpegts"
         )
+        self.assertEqual(timelapse_conf["daily_timelapse"]["max_width"], 1920)
+        self.assertEqual(timelapse_conf["daily_timelapse"]["max_height"], 1080)
 
     def test_config_load_frequent_timelapse_fmp4_segments(self):
         test_data = {

@@ -597,6 +597,20 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             default=1200,
             min_value=1,
         )
+        ft_out["max_width"] = _int(
+            ft.get("max_width"),
+            "timelapse.frequent_timelapse.max_width",
+            errors,
+            default=1280,
+            min_value=160,
+        )
+        ft_out["max_height"] = _int(
+            ft.get("max_height"),
+            "timelapse.frequent_timelapse.max_height",
+            errors,
+            default=720,
+            min_value=90,
+        )
         out["frequent_timelapse"] = ft_out
 
     if "daily_timelapse" in cfg:
@@ -629,6 +643,20 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             "timelapse.daily_timelapse.file_extension",
             errors,
             default="mp4",
+        )
+        dt_out["max_width"] = _int(
+            dt.get("max_width"),
+            "timelapse.daily_timelapse.max_width",
+            errors,
+            default=1920,
+            min_value=160,
+        )
+        dt_out["max_height"] = _int(
+            dt.get("max_height"),
+            "timelapse.daily_timelapse.max_height",
+            errors,
+            default=1080,
+            min_value=90,
         )
         out["daily_timelapse"] = dt_out
 
@@ -861,6 +889,15 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 f"cameras.{name}.timelapse_enabled",
                 errors,
             )
+        if cam.get("generate_timelapse") is not None:
+            legacy_timelapse_enabled = _bool(
+                cam.get("generate_timelapse"),
+                f"cameras.{name}.generate_timelapse",
+                errors,
+            )
+            if cam_out.get("timelapse_enabled") is None:
+                cam_out["timelapse_enabled"] = legacy_timelapse_enabled
+            cam_out["generate_timelapse"] = legacy_timelapse_enabled
         if cam.get("timelapse") is not None:
             timelapse_cfg = _dict(
                 cam.get("timelapse"), f"cameras.{name}.timelapse", errors

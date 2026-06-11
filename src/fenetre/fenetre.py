@@ -925,6 +925,8 @@ def is_camera_timelapse_enabled(camera_name: str) -> bool:
     camera_cfg = cameras_config.get(camera_name, {})
     if camera_cfg.get("disabled", False):
         return False
+    if camera_cfg.get("generate_timelapse") is False:
+        return False
     if camera_cfg.get("timelapse_enabled") is False:
         return False
     camera_timelapse = camera_cfg.get("timelapse")
@@ -1800,6 +1802,8 @@ def frequent_timelapse_loop():
                 "dir": pic_dir,
                 "log_dir": global_config.get("log_dir"),
                 "ffmpeg_options": timelapse_settings.get("ffmpeg_options", ""),
+                "max_width": timelapse_settings.get("max_width"),
+                "max_height": timelapse_settings.get("max_height"),
                 "log_max_bytes": global_config.get("log_max_bytes", 10000000),
                 "log_backup_count": global_config.get("log_backup_count", 5),
             }
@@ -1950,6 +1954,8 @@ def timelapse_loop():
                     ),
                     file_extension=daily_cfg.get("file_extension", "webm"),
                     framerate=daily_cfg.get("framerate", 60),
+                    max_width=daily_cfg.get("max_width"),
+                    max_height=daily_cfg.get("max_height"),
                     log_max_bytes=global_config.get("log_max_bytes", 10000000),
                     log_backup_count=global_config.get("log_backup_count", 5),
                 )

@@ -293,10 +293,19 @@ Good default CPU options:
 timelapse:
   frequent_timelapse:
     ffmpeg_2pass: false
+    framerate: 30
+    max_width: 1280
+    max_height: 720
     ffmpeg_options: -c:v libx264 -preset veryfast -crf 23 -movflags +faststart
     file_extension: mp4
     output_format: hls
+  daily_timelapse:
+    framerate: 60
+    max_width: 1920
+    max_height: 1080
 ```
+
+For low-bandwidth deployments, keep the frequent timelapse at 720p HLS and the daily archive at 1080p MP4 unless you have confirmed the network and CPU can handle more. Per-camera timelapse generation can be disabled with `timelapse_enabled: false`; the legacy `generate_timelapse: false` key is also honored.
 
 Recommended Intel VAAPI options:
 

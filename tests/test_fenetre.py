@@ -151,6 +151,10 @@ class TestFenetre(unittest.TestCase):
                 "disabled_camera": {"url": "http://cam", "disabled": True},
                 "legacy_disabled": {
                     "url": "http://cam",
+                    "generate_timelapse": False,
+                },
+                "timelapse_enabled_disabled": {
+                    "url": "http://cam",
                     "timelapse_enabled": False,
                 },
                 "nested_disabled": {
@@ -162,6 +166,7 @@ class TestFenetre(unittest.TestCase):
             self.assertTrue(is_camera_timelapse_enabled("enabled"))
             self.assertFalse(is_camera_timelapse_enabled("disabled_camera"))
             self.assertFalse(is_camera_timelapse_enabled("legacy_disabled"))
+            self.assertFalse(is_camera_timelapse_enabled("timelapse_enabled_disabled"))
             self.assertFalse(is_camera_timelapse_enabled("nested_disabled"))
         finally:
             if original_cameras_config is missing:
