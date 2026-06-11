@@ -182,20 +182,69 @@ Or use compose:
 docker compose up --build
 ```
 
-For Portainer/GHCR deployments, keep runtime state on the host and only replace
-the container image. The GitHub Actions workflow publishes multi-arch AMD64/ARM64
-images to GHCR:
+## Deploying with Portainer and GHCR
+
+The GitHub Actions workflow publishes multi-arch AMD64/ARM64 images to GHCR:
 
 ```text
 ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
 ```
 
-Use these persistent host paths:
+Use persistent host paths so container upgrades do not delete config, photos,
+timelapses, or logs:
 
 ```text
 /srv/fenetre/config.yaml  -> /srv/fenetre/config.yaml
 /srv/fenetre/data         -> /srv/fenetre/data
 /srv/fenetre/logs         -> /srv/fenetre/logs
+```
+
+On the Docker host, create the directories and seed the config once:
+
+```bash
+sudo mkdir -p /srv/fenetre/data /srv/fenetre/logs
+sudo install -m 0664 config.aredn-example.yaml /srv/fenetre/config.yaml
+```
+
+In Portainer:
+
+1. Go to **Stacks**.
+2. Select **Add stack**.
+3. Name the stack, for example `fenetre`.
+4. Paste the stack YAML below.
+5. Change `FENETRE_ADMIN_PASSWORD` before deploying.
+6. Deploy the stack.
+7. Open the public UI at `http://HOST:8888/`.
+8. Open the admin UI at `http://HOST:8889/` and log in.
+
+Example Portainer stack:
+
+```yaml
+services:
+  fenetre:
+    image: ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
+    container_name: fenetre
+    restart: unless-stopped
+
+    ports:
+      - "8888:8888" # public, view-only site
+      - "8889:8889" # admin UI, Basic Auth protected
+
+    environment:
+      TZ: America/Los_Angeles
+      FENETRE_PID_FILE: /tmp/fenetre.pid
+      FENETRE_ADMIN_USERNAME: admin
+      FENETRE_ADMIN_PASSWORD: change-this-password
+
+    volumes:
+      - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
+      - /srv/fenetre/data:/srv/fenetre/data
+      - /srv/fenetre/logs:/srv/fenetre/logs
+
+    # Optional AMD64 Intel VAAPI/QuickSync acceleration.
+    # Uncomment only on hosts with /dev/dri available.
+    # devices:
+    #   - /dev/dri:/dev/dri
 ```
 
 The config mount is intentionally read-write because the admin UI updates the
