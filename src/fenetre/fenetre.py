@@ -869,11 +869,22 @@ def _classify_timelapse_file(
         return None
     if extension == "m3u8" and frequent_config.get("output_format") == "hls":
         return "frequent"
-    if extension == (daily_config.get("file_extension") or "mp4").lower():
+
+    daily_extension = (daily_config.get("file_extension") or "mp4").lower()
+    frequent_extension = (frequent_config.get("file_extension") or "mp4").lower()
+    if extension == daily_extension:
         return "daily"
-    if extension == (frequent_config.get("file_extension") or "mp4").lower():
+    if (
+        frequent_config.get("output_format") == "file"
+        and extension == frequent_extension
+        and frequent_extension != daily_extension
+    ):
         return "frequent"
-    return "timelapse"
+
+    # Date-named video files are daily archives in normal deployments. Treat
+    # older formats as daily too so previously generated archives remain visible
+    # after changing file_extension.
+    return "daily"
 
 
 def discover_camera_timelapses(

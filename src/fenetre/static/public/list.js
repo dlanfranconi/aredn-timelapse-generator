@@ -325,6 +325,17 @@ function populateTimelapseArchive(select, timelapses, todayStr) {
     select.style.display = 'inline-block';
 }
 
+async function updateTimelapseArchiveSelect(camera, select, todayStr) {
+    try {
+        const timelapseData = await fetchCameraTimelapses(camera.title);
+        const timelapses = timelapseData.timelapses || [];
+        populateTimelapseArchive(select, timelapses, todayStr);
+    } catch (error) {
+        select.style.display = 'none';
+        console.error(`Failed to load timelapse archive for ${camera.title}:`, error);
+    }
+}
+
 function createCameraListItem(camera) {
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
@@ -388,6 +399,10 @@ function updateCamera(camera, cameraData) {
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
     const timelapseArchiveSelect = listItem.querySelector('.select-timelapse-archive');
     const linkHistory = listItem.querySelector('.link-history');
+    const today = new Date();
+    const todayStr = formatDate(today);
+    const photo_dir = `/photos/${camera.title}`;
+    const timelapseEnabled = camera.timelapse_enabled !== false;
 
     if (camera.description) {
         cameraDescription.textContent = camera.description;
@@ -408,6 +423,14 @@ function updateCamera(camera, cameraData) {
         window.open(destination, '_blank');
         timelapseArchiveSelect.value = '';
     };
+
+    if (!timelapseEnabled) {
+        linkTimelapseToday.style.display = 'none';
+        timelapseArchiveSelect.style.display = 'none';
+    } else {
+        configureTodayTimelapseLink(linkTimelapseToday, camera, todayStr, cameraData);
+        updateTimelapseArchiveSelect(camera, timelapseArchiveSelect, todayStr);
+    }
 
     fetch(camera.dynamic_metadata)
         .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
@@ -438,33 +461,11 @@ function updateCamera(camera, cameraData) {
                 cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
             }
 
-            const today = new Date();
-
-            const todayStr = formatDate(today);
-            const photo_dir = `/photos/${camera.title}`;
-
             const fullscreenUrl = `fullscreen.html?camera=${encodeURIComponent(camera.title)}`;
             linkFullscreen.href = fullscreenUrl;
             fullscreenImageLink.href = fullscreenUrl;
             linkToday.href = `${photo_dir}/${todayStr}/`;
             linkHistory.href = `${photo_dir}/daylight.html`;
-
-            const timelapseEnabled = camera.timelapse_enabled !== false;
-
-            if (!timelapseEnabled) {
-                linkTimelapseToday.style.display = 'none';
-                timelapseArchiveSelect.style.display = 'none';
-            } else {
-                configureTodayTimelapseLink(linkTimelapseToday, camera, todayStr, cameraData);
-                try {
-                    const timelapseData = await fetchCameraTimelapses(camera.title);
-                    const timelapses = timelapseData.timelapses || [];
-                    populateTimelapseArchive(timelapseArchiveSelect, timelapses, todayStr);
-                } catch (error) {
-                    timelapseArchiveSelect.style.display = 'none';
-                    console.error(`Failed to load timelapse archive for ${camera.title}:`, error);
-                }
-            }
         })
         .catch(error => {
             lastPictureTime.textContent = 'Error loading metadata';
