@@ -1,7 +1,43 @@
 import datetime
 import pytz
 from astral import LocationInfo
-from astral.sun import elevation, noon, sun
+from astral.sun import elevation, noon, sunrise, sunset
+
+
+def _empty_svg(width, height, background_color="transparent"):
+    return f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="{background_color}" /></svg>'
+
+
+def _seconds_since_midnight(dt):
+    return dt.hour * 3600 + dt.minute * 60 + dt.second + (dt.microsecond / 1000000)
+
+
+def _time_bars_svg(
+    width, height, major_bar_width, minor_bar_width, major_bar_color, minor_bar_color
+):
+    time_bars = []
+    hour_width = width / 24
+    for hour in range(24):
+        x = hour * hour_width
+        if hour in [6, 12, 18]:
+            time_bars.append(
+                f'<line x1="{x:.2f}" y1="0" x2="{x:.2f}" y2="{height}" stroke="{major_bar_color}" stroke-width="{major_bar_width}" />'
+            )
+        else:
+            time_bars.append(
+                f'<line x1="{x:.2f}" y1="{height/2}" x2="{x:.2f}" y2="{height}" stroke="{minor_bar_color}" stroke-width="{minor_bar_width}" />'
+            )
+    return "\n    ".join(time_bars)
+
+
+def _daily_elevations(observer, date, tz):
+    return [
+        elevation(
+            observer,
+            tz.localize(datetime.datetime.combine(date, datetime.time(hour=hour))),
+        )
+        for hour in range(24)
+    ]
 
 
 def create_sun_path_svg(
@@ -40,60 +76,69 @@ def create_sun_path_svg(
     location = LocationInfo(latitude=latitude, longitude=longitude)
     tz = pytz.timezone(timezone)
 
+    time_bars_svg = _time_bars_svg(
+        width,
+        height,
+        major_bar_width,
+        minor_bar_width,
+        major_bar_color,
+        minor_bar_color,
+    )
+
     try:
-        s = sun(location.observer, date=date, tzinfo=tz)
-        sunrise = s["sunrise"]
-        sunset = s["sunset"]
+        sunrise_time = sunrise(location.observer, date=date, tzinfo=tz)
+        sunset_time = sunset(location.observer, date=date, tzinfo=tz)
         noon_time = noon(location.observer, date=date, tzinfo=tz)
         max_elevation = elevation(location.observer, noon_time)
     except ValueError:
-        # Sun never rises or sets (polar night/day)
-        return f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="transparent" /></svg>'
+        elevations = _daily_elevations(location.observer, date, tz)
+        max_elevation = max(elevations)
+        if max_elevation <= 0:
+            # Sun is below the horizon all day.
+            return _empty_svg(width, height, background_color)
+        daylight_intervals = [(0, 86400)]
+    else:
+        if max_elevation <= 0:
+            # Sun is below the horizon all day.
+            return _empty_svg(width, height, background_color)
 
-    if max_elevation <= 0:
-        # Sun is below the horizon all day
-        return f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="transparent" /></svg>'
+        sunrise_seconds = _seconds_since_midnight(sunrise_time)
+        sunset_seconds = _seconds_since_midnight(sunset_time)
 
-    # Convert to seconds from midnight
-    sunrise_seconds = sunrise.hour * 3600 + sunrise.minute * 60 + sunrise.second
-    sunset_seconds = sunset.hour * 3600 + sunset.minute * 60 + sunset.second
+        if sunset_seconds >= sunrise_seconds:
+            daylight_intervals = [(sunrise_seconds, sunset_seconds)]
+        else:
+            daylight_intervals = [(0, sunset_seconds), (sunrise_seconds, 86400)]
 
-    sunrise_x = (sunrise_seconds / 86400) * width
-    sunset_x = (sunset_seconds / 86400) * width
-
-    arc_width = sunset_x - sunrise_x
-    rx = arc_width / 2
-
-    # Make arc height proportional to the sun's max elevation
-    # Max elevation is 90 degrees. Max arc height is height - 10 for margin.
+    # Make arc height proportional to the sun's max elevation. Max elevation is
+    # 90 degrees; max arc height is height - 10 for margin.
     ry = (max_elevation / 90.0) * (height - 10)
 
     # The arc should be placed at the bottom of the SVG.
     # The y-coordinate for start and end should be the same.
     y_coord = height - 5
 
-    path_data = (
-        f"M {sunrise_x:.2f},{y_coord} A {rx:.2f},{ry} 0 0 1 {sunset_x:.2f},{y_coord}"
-    )
+    paths = []
+    for start_seconds, end_seconds in daylight_intervals:
+        start_x = (start_seconds / 86400) * width
+        end_x = (end_seconds / 86400) * width
+        arc_width = end_x - start_x
+        if arc_width <= 0:
+            continue
+        rx = arc_width / 2
+        path_data = (
+            f"M {start_x:.2f},{y_coord} A {rx:.2f},{ry} 0 0 1 " f"{end_x:.2f},{y_coord}"
+        )
+        paths.append(
+            f'<path d="{path_data}" fill="{sun_arc_color}" stroke="{sun_arc_color}" stroke-width="2" />'
+        )
 
-    time_bars = []
-    hour_width = width / 24
-    for hour in range(24):
-        x = hour * hour_width
-        if hour in [6, 12, 18]:
-            time_bars.append(
-                f'<line x1="{x:.2f}" y1="0" x2="{x:.2f}" y2="{height}" stroke="{major_bar_color}" stroke-width="{major_bar_width}" />'
-            )
-        else:
-            time_bars.append(
-                f'<line x1="{x:.2f}" y1="{height/2}" x2="{x:.2f}" y2="{height}" stroke="{minor_bar_color}" stroke-width="{minor_bar_width}" />'
-            )
-    time_bars_svg = "\n    ".join(time_bars)
+    paths_svg = "\n    ".join(paths)
 
     svg = f"""
 <svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="{background_color}" />
-    <path d="{path_data}" fill="{sun_arc_color}" stroke="{sun_arc_color}" stroke-width="2" />
+    {paths_svg}
     {time_bars_svg}
 </svg>
 """
