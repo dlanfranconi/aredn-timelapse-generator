@@ -869,7 +869,7 @@ def _classify_timelapse_file(
         return None
     if extension == "m3u8" and frequent_config.get("output_format") == "hls":
         return "frequent"
-    if extension == (daily_config.get("file_extension") or "webm").lower():
+    if extension == (daily_config.get("file_extension") or "mp4").lower():
         return "daily"
     if extension == (frequent_config.get("file_extension") or "mp4").lower():
         return "frequent"

@@ -297,8 +297,9 @@ function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
 
 function populateTimelapseArchive(select, timelapses, todayStr) {
     const archiveItems = timelapses
-        .filter(item => item.date !== todayStr && item.format !== 'm3u8')
-        .filter(item => item.type === 'daily' || item.type === 'timelapse');
+        .filter(item => item.date !== todayStr)
+        .filter(item => item.type === 'daily')
+        .filter(item => item.format !== 'm3u8' && item.url);
     select.innerHTML = '';
 
     if (archiveItems.length === 0) {
@@ -308,7 +309,7 @@ function populateTimelapseArchive(select, timelapses, todayStr) {
 
     const placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = 'Timelapse archive';
+    placeholder.textContent = 'Previous Timelapses';
     select.appendChild(placeholder);
 
     archiveItems.forEach(item => {

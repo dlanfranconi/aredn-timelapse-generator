@@ -20,7 +20,7 @@ DEFAULT_SUN_PATH_POSTPROCESSING = {
     "overlay_rect_width": 4,
 }
 DEFAULT_FREQUENT_TIMELAPSE_FFMPEG_OPTIONS = (
-    "-c:v libx264 -preset veryfast -crf 30 -pix_fmt yuv420p"
+    "-c:v libx264 -preset veryfast -crf 26 -pix_fmt yuv420p"
 )
 DEFAULT_DAILY_TIMELAPSE_FFMPEG_OPTIONS = (
     "-c:v libx264 -preset medium -crf 28 -pix_fmt yuv420p -movflags +faststart"

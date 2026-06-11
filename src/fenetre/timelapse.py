@@ -233,7 +233,7 @@ def create_incremental_hls_timelapse(
         if framerate is None:
             framerate = 30
     else:
-        default_encoder_options = "-c:v libx264 -preset veryfast -crf 23"
+        default_encoder_options = "-c:v libx264 -preset veryfast -crf 26"
         max_width = max_width or 1280
         max_height = max_height or 720
         if framerate is None:

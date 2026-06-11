@@ -83,6 +83,20 @@ class TestFenetre(unittest.TestCase):
                 ],
             )
 
+    def test_discover_camera_timelapses_defaults_mp4_to_daily(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            day_dir = os.path.join(tmpdir, "photos", "cam1", "2026-05-02")
+            os.makedirs(day_dir)
+            with open(os.path.join(day_dir, "2026-05-02.mp4"), "wb") as f:
+                f.write(b"timelapse")
+
+            timelapses = discover_camera_timelapses("cam1", tmpdir, {}, {})
+
+            self.assertEqual(
+                [(item["date"], item["type"], item["format"]) for item in timelapses],
+                [("2026-05-02", "daily", "mp4")],
+            )
+
     def test_discover_camera_timelapses_ignores_unsafe_camera_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertEqual(

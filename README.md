@@ -296,7 +296,7 @@ timelapse:
     framerate: 30
     max_width: 1280
     max_height: 720
-    ffmpeg_options: -c:v libx264 -preset veryfast -crf 23 -movflags +faststart
+    ffmpeg_options: -c:v libx264 -preset veryfast -crf 26 -movflags +faststart
     file_extension: mp4
     output_format: hls
   daily_timelapse:

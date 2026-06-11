@@ -85,6 +85,7 @@ class TestTimelapse(unittest.TestCase):
         args, kwargs = mock_subprocess_run.call_args
         self.assertEqual(args[0][args[0].index("-r") + 1], "30")
         self.assertIn("scale=-2:720,format=yuv420p", args[0])
+        self.assertEqual(args[0][args[0].index("-crf") + 1], "26")
 
     @patch("fenetre.timelapse.subprocess.run")
     @patch("fenetre.timelapse.get_image_dimensions", return_value=(1920, 1080))

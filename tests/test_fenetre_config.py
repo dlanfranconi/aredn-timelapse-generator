@@ -385,6 +385,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(timelapse_conf["frequent_timelapse"]["output_format"], "file")
         self.assertEqual(timelapse_conf["frequent_timelapse"]["max_width"], 1280)
         self.assertEqual(timelapse_conf["frequent_timelapse"]["max_height"], 720)
+        self.assertIn("-crf 26", timelapse_conf["frequent_timelapse"]["ffmpeg_options"])
         self.assertEqual(
             timelapse_conf["frequent_timelapse"]["hls_segment_type"], "mpegts"
         )
