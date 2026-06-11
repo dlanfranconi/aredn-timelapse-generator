@@ -1,4 +1,5 @@
 import base64
+import hmac
 import json
 import os
 import re
@@ -47,6 +48,54 @@ gopro_state_gauge = Gauge("gopro_state", "GoPro State", ["camera_name", "state_n
 gopro_setting_gauge = Gauge("gopro_setting", "GoPro Setting", ["camera_name", "setting_name"])
 
 app = Flask(__name__)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _admin_auth_enabled() -> bool:
+    if "FENETRE_ADMIN_AUTH_ENABLED" in app.config:
+        return bool(app.config["FENETRE_ADMIN_AUTH_ENABLED"])
+    return _env_bool("FENETRE_ADMIN_AUTH_ENABLED", True)
+
+
+def _admin_credentials() -> tuple[str, str]:
+    username = app.config.get("FENETRE_ADMIN_USERNAME") or os.environ.get(
+        "FENETRE_ADMIN_USERNAME", "admin"
+    )
+    password = app.config.get("FENETRE_ADMIN_PASSWORD") or os.environ.get(
+        "FENETRE_ADMIN_PASSWORD", "admin"
+    )
+    return str(username), str(password)
+
+
+def _auth_failed_response():
+    return Response(
+        "Authentication required.\n",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Fenetre Admin", charset="UTF-8"'},
+    )
+
+
+@app.before_request
+def require_admin_auth():
+    if not _admin_auth_enabled():
+        return None
+
+    auth = request.authorization
+    if not auth:
+        return _auth_failed_response()
+
+    expected_username, expected_password = _admin_credentials()
+    username_ok = hmac.compare_digest(auth.username or "", expected_username)
+    password_ok = hmac.compare_digest(auth.password or "", expected_password)
+    if not (username_ok and password_ok):
+        return _auth_failed_response()
+    return None
 
 
 def _config_file_path():

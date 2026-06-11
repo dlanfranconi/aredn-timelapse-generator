@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import base64
 # Add project root to allow importing admin_server
 import sys
 import tempfile
@@ -41,6 +42,12 @@ class ConfigServerTestCase(unittest.TestCase):
         # Patch the module-level variables in admin_server directly
         flask_app.config["FENETRE_CONFIG_FILE"] = self.temp_config_file.name
         flask_app.config["FENETRE_PID_FILE_PATH"] = self.temp_pid_file.name
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        flask_app.config.pop("FENETRE_ADMIN_USERNAME", None)
+        flask_app.config.pop("FENETRE_ADMIN_PASSWORD", None)
+
+    def tearDown(self):
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
 
     def test_get_config_success(self):
         response = self.app.get("/config")
@@ -146,6 +153,23 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["sky_area"], "0,0,1,0.35")
         self.assertTrue(camera["sunrise_sunset"]["enabled"])
         self.assertTrue(camera["timelapse_enabled"])
+
+    def test_admin_auth_requires_basic_credentials(self):
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        flask_app.config["FENETRE_ADMIN_USERNAME"] = "admin"
+        flask_app.config["FENETRE_ADMIN_PASSWORD"] = "admin"
+
+        unauthenticated = self.app.get("/config")
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertIn("Basic", unauthenticated.headers["WWW-Authenticate"])
+
+        bad_token = base64.b64encode(b"admin:wrong").decode("ascii")
+        bad = self.app.get("/config", headers={"Authorization": f"Basic {bad_token}"})
+        self.assertEqual(bad.status_code, 401)
+
+        good_token = base64.b64encode(b"admin:admin").decode("ascii")
+        good = self.app.get("/config", headers={"Authorization": f"Basic {good_token}"})
+        self.assertEqual(good.status_code, 200)
 
     def test_update_config_invalid_json(self):
         invalid_json_string = '{"global": {"setting": "value"}, "broken": [1,2,'

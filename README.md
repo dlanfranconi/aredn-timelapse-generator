@@ -201,6 +201,16 @@ Use these persistent host paths:
 The config mount is intentionally read-write because the admin UI updates the
 YAML file and writes timestamped backups beside it.
 
+The admin UI on port `8889` requires HTTP Basic Auth. Defaults are
+`admin` / `admin`; change them in Portainer or compose before exposing the admin
+port:
+
+```yaml
+environment:
+  FENETRE_ADMIN_USERNAME: admin
+  FENETRE_ADMIN_PASSWORD: change-this-password
+```
+
 Useful checks inside the built image:
 
 ```bash
