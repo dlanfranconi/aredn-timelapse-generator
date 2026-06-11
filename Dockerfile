@@ -38,7 +38,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
-        intel-media-va-driver \
         libgl1 \
         libglib2.0-0 \
         libva-drm2 \
@@ -47,6 +46,9 @@ RUN apt-get update && \
         mesa-va-drivers \
         python3 \
         vainfo && \
+    if apt-cache show intel-media-va-driver >/dev/null 2>&1; then \
+        apt-get install -y --no-install-recommends intel-media-va-driver; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /srv/fenetre/venv /srv/fenetre/venv

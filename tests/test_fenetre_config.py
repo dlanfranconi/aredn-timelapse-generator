@@ -97,6 +97,23 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(cameras_conf["cam1"]["url"], "http://cam1")
         self.assertTrue(admin_server_conf["enabled"])
 
+    def test_config_load_storage_management_defaults(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "storage_management": {"enabled": True},
+            },
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        storage_conf = global_conf["storage_management"]
+        self.assertEqual(storage_conf["camera_max_size_GB"], 5)
+        self.assertTrue(storage_conf["prune_snapshots_first"])
+
     def test_config_load_camera_unavailable_command(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

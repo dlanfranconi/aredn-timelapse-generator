@@ -163,6 +163,8 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
         camera["disabled"] = True
     if payload.get("snap_interval_enabled"):
         camera["snap_interval_s"] = int(payload.get("snap_interval_s") or 60)
+    if payload.get("activity_interval_enabled"):
+        camera["activity_interval_s"] = int(payload.get("activity_interval_s") or 10)
     if payload.get("ssim_enabled"):
         camera["ssim_setpoint"] = float(payload.get("ssim_setpoint") or 0.85)
         if payload.get("ssim_area"):
@@ -239,7 +241,7 @@ def update_config():
         raw_config = _load_raw_config()
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        message = "Configuration updated successfully. Reload is required to apply changes."
+        message = "Configuration updated successfully (saved as YAML). Reload is required to apply changes."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
         return jsonify({"message": message}), 200

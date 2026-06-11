@@ -574,8 +574,8 @@ class TestPostprocess(unittest.TestCase):
             "Generic text step is enabled but no 'text_content' was provided."
         )
 
-    @patch("fenetre.postprocess.pyexiv2.Image")
-    def test_get_exif_dict_from_path(self, mock_image_cls):
+    @patch("fenetre.postprocess.pyexiv2")
+    def test_get_exif_dict_from_path(self, mock_pyexiv2):
         mock_context = MagicMock()
         mock_img = MagicMock()
         mock_img.read_exif.return_value = {
@@ -589,11 +589,11 @@ class TestPostprocess(unittest.TestCase):
         }
         mock_context.__enter__.return_value = mock_img
         mock_context.__exit__.return_value = False
-        mock_image_cls.return_value = mock_context
+        mock_pyexiv2.Image.return_value = mock_context
 
         result = get_exif_dict("/tmp/fake.jpg")
 
-        mock_image_cls.assert_called_once_with("/tmp/fake.jpg")
+        mock_pyexiv2.Image.assert_called_once_with("/tmp/fake.jpg")
         self.assertEqual(result["iso"], 200.0)
         self.assertAlmostEqual(result["focal_length"], 35.0)
         self.assertAlmostEqual(result["aperture"], 2.8)
@@ -602,8 +602,8 @@ class TestPostprocess(unittest.TestCase):
         self.assertEqual(result["width"], 4000.0)
         self.assertEqual(result["height"], 3000.0)
 
-    @patch("fenetre.postprocess.pyexiv2.ImageData")
-    def test_get_exif_dict_from_bytes(self, mock_image_data_cls):
+    @patch("fenetre.postprocess.pyexiv2")
+    def test_get_exif_dict_from_bytes(self, mock_pyexiv2):
         mock_context = MagicMock()
         mock_img = MagicMock()
         mock_img.read_exif.return_value = {
@@ -611,12 +611,12 @@ class TestPostprocess(unittest.TestCase):
         }
         mock_context.__enter__.return_value = mock_img
         mock_context.__exit__.return_value = False
-        mock_image_data_cls.return_value = mock_context
+        mock_pyexiv2.ImageData.return_value = mock_context
 
         payload = b"\xff\xd8\xff\xe1"
         result = get_exif_dict(payload)
 
-        mock_image_data_cls.assert_called_once_with(payload)
+        mock_pyexiv2.ImageData.assert_called_once_with(payload)
         self.assertEqual(result["iso"], 100.0)
 
     @patch("fenetre.postprocess.Image.open")

@@ -56,7 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const commonCameraFields = {
         description: { type: 'text', default: 'A new camera' },
-        // snap_interval_s: { type: 'number', default: 60 }, // If not set, implies dynamic SSIM-based interval
+        snap_interval_s: { type: 'number', default: 60 },
+        activity_interval_s: { type: 'number', default: 10 },
         timeout_s: { type: 'number', default: 60 },
         sky_area: { type: 'text', default: '0,0,1920,500' }, // Example, might need better default or placeholder
         ssim_area: { type: 'text', default: '0,0,1920,1080' },
@@ -67,14 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // Order for common fields (can be refined)
     const commonCameraFieldsOrder = [
-        'description', 'timeout_s', 'sky_area', 'ssim_area', 'ssim_setpoint',
+        'description', 'snap_interval_s', 'activity_interval_s', 'timeout_s', 'sky_area', 'ssim_area', 'ssim_setpoint',
         'disabled', 'mozjpeg_optimize', 'postprocessing'
-        // 'snap_interval_s' can be added if a fixed interval is desired as a common option.
-        // If snap_interval_s is present, it overrides SSIM logic.
-        // The absence of snap_interval_s implies dynamic interval.
-        // This needs to be clear in the UI, perhaps by having snap_interval_s and if it's empty/0, ssim settings apply.
-        // For now, keeping snap_interval_s out of common template to encourage dynamic by default.
-        // Users can add it manually if the form allows adding arbitrary key-value pairs, or we add it as an optional common field.
     ];
 
     // NOTE: The duplicate declaration of commonCameraFieldsOrder that was here has been removed.
@@ -85,8 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const rebuildCamerasBtn = document.getElementById('rebuildCamerasBtn');
     const syncUiBtn = document.getElementById('syncUiBtn');
     const addCameraBtn = document.getElementById('addCameraBtn'); // Get the new button
+    const siteNameInput = document.getElementById('siteNameInput');
+    const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
     const configFormContainer = document.getElementById('configFormContainer');
     const statusMessage = document.getElementById('statusMessage');
+    let loadedConfigData = null;
 
     loadConfigBtn.addEventListener('click', fetchAndDisplayConfig);
     saveConfigBtn.addEventListener('click', saveConfiguration);
@@ -94,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rebuildCamerasBtn.addEventListener('click', rebuildCamerasJson);
     syncUiBtn.addEventListener('click', syncUI);
     addCameraBtn.addEventListener('click', handleAddCamera); // Add event listener
+    saveSiteNameBtn.addEventListener('click', saveSiteName);
 
     async function fetchAndDisplayConfig() {
         setStatus('Loading configuration...', 'info');
@@ -104,6 +103,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             const config = await response.json();
+            loadedConfigData = config.config || config;
+            siteNameInput.value = (loadedConfigData.global && loadedConfigData.global.deployment_name) || 'fenetre.cam';
+            saveSiteNameBtn.disabled = false;
             renderConfigForm(config, configFormContainer, '');
             setStatus('Configuration loaded successfully.', 'success');
             saveConfigBtn.disabled = false;
@@ -111,6 +113,29 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error fetching config:', error);
             setStatus(`Error fetching configuration: ${error.message}`, 'error');
         }
+    }
+
+    function isSensitiveField(key) {
+        const normalized = key.toLowerCase();
+        return normalized === 'url'
+            || normalized.endsWith('.url')
+            || normalized.includes('password')
+            || normalized.includes('token')
+            || normalized.includes('secret')
+            || normalized.includes('root_ca');
+    }
+
+    function appendRevealToggle(inputWrapper, input) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'reveal-field-btn';
+        toggle.textContent = 'Show';
+        toggle.addEventListener('click', () => {
+            const showing = input.type !== 'password';
+            input.type = showing ? 'password' : 'text';
+            toggle.textContent = showing ? 'Show' : 'Hide';
+        });
+        inputWrapper.appendChild(toggle);
     }
 
     function renderConfigForm(data, parentElement, parentKey = '') {
@@ -164,11 +189,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     parentElement.appendChild(formRow);
                 } else {
                     const input = document.createElement('input');
-                    input.type = 'text';
+                    input.type = isSensitiveField(currentKey) ? 'password' : 'text';
                     input.id = currentKey;
                     input.value = value;
                     input.dataset.key = currentKey;
                     inputWrapper.appendChild(input);
+                    if (isSensitiveField(currentKey)) {
+                        appendRevealToggle(inputWrapper, input);
+                    }
                     formRow.appendChild(inputWrapper);
                     parentElement.appendChild(formRow);
                 }
@@ -213,6 +241,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 fieldset.appendChild(content);
                 parentElement.appendChild(fieldset);
             }
+        }
+    }
+
+    async function saveSiteName() {
+        if (!loadedConfigData) {
+            setStatus('Load the configuration before saving the GUI name.', 'error');
+            return;
+        }
+        const siteName = siteNameInput.value.trim();
+        if (!siteName) {
+            setStatus('GUI name cannot be empty.', 'error');
+            return;
+        }
+        const updatedConfig = structuredClone(loadedConfigData);
+        if (!updatedConfig.global) {
+            updatedConfig.global = {};
+        }
+        updatedConfig.global.deployment_name = siteName;
+        setStatus('Saving GUI name...', 'info');
+        try {
+            const response = await fetch('/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedConfig),
+            });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+            loadedConfigData = updatedConfig;
+            const deploymentInput = document.getElementById('config.global.deployment_name');
+            if (deploymentInput) {
+                deploymentInput.value = siteName;
+            }
+            const result = await response.json();
+            setStatus(result.message || 'GUI name saved. Reload the app and sync UI to publish it.', 'success');
+        } catch (error) {
+            console.error('Error saving GUI name:', error);
+            setStatus(`Error saving GUI name: ${error.message}`, 'error');
         }
     }
 
@@ -530,6 +597,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             const result = await response.json();
+            loadedConfigData = configData;
+            if (configData.global && configData.global.deployment_name) {
+                siteNameInput.value = configData.global.deployment_name;
+            }
             setStatus(result.message || 'Configuration saved successfully!', 'success');
         } catch (error) {
             console.error('Error saving config:', error);
@@ -786,12 +857,15 @@ document.addEventListener('DOMContentLoaded', () => {
             input.rows = (fieldConfig.default.match(/\n/g) || []).length + 2;
         } else { // 'text' or other
             input = document.createElement('input');
-            input.type = 'text';
+            input.type = isSensitiveField(fieldKey) ? 'password' : 'text';
             input.value = fieldConfig.default;
         }
         input.id = fieldKey;
         input.dataset.key = fieldKey;
         parentElement.appendChild(input);
+        if (isSensitiveField(fieldKey)) {
+            appendRevealToggle(parentElement, input);
+        }
         parentElement.appendChild(document.createElement('br'));
     }
 

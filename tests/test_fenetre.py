@@ -11,6 +11,7 @@ from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
     cleanup_frequent_timelapse_artifacts,
     discover_camera_timelapses,
+    enforce_camera_storage_limit,
     get_pic_from_url,
     get_ssim_for_area,
     is_camera_timelapse_enabled,
@@ -87,6 +88,58 @@ class TestFenetre(unittest.TestCase):
                 discover_camera_timelapses("../cam1", tmpdir, {}, {}),
                 [],
             )
+
+    def test_storage_prunes_snapshots_before_daily_timelapse(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            camera_dir = os.path.join(tmpdir, "photos", "cam1")
+            day1 = os.path.join(camera_dir, "2026-05-01")
+            day2 = os.path.join(camera_dir, "2026-05-02")
+            os.makedirs(day1)
+            os.makedirs(day2)
+            with open(os.path.join(day1, "2026-05-01.mp4"), "wb") as f:
+                f.write(b"d" * 500)
+            with open(os.path.join(day1, "2026-05-01T12-00-00UTC.jpg"), "wb") as f:
+                f.write(b"j" * 1000)
+            with open(os.path.join(day2, "2026-05-02.mp4"), "wb") as f:
+                f.write(b"d" * 500)
+
+            had_global = hasattr(fenetre_module, "global_config")
+            had_timelapse = hasattr(fenetre_module, "timelapse_config")
+            old_global = getattr(fenetre_module, "global_config", None)
+            old_timelapse = getattr(fenetre_module, "timelapse_config", None)
+            try:
+                fenetre_module.global_config = {
+                    "work_dir": tmpdir,
+                    "pic_dir": os.path.join(tmpdir, "photos"),
+                }
+                fenetre_module.timelapse_config = {
+                    "daily_timelapse": {"file_extension": "mp4"}
+                }
+
+                enforce_camera_storage_limit(
+                    "cam1",
+                    {},
+                    {
+                        "camera_max_size_GB": 1200 / (1024**3),
+                        "prune_snapshots_first": True,
+                    },
+                    dry_run=False,
+                )
+            finally:
+                if had_global:
+                    fenetre_module.global_config = old_global
+                else:
+                    delattr(fenetre_module, "global_config")
+                if had_timelapse:
+                    fenetre_module.timelapse_config = old_timelapse
+                else:
+                    delattr(fenetre_module, "timelapse_config")
+
+            self.assertFalse(
+                os.path.exists(os.path.join(day1, "2026-05-01T12-00-00UTC.jpg"))
+            )
+            self.assertTrue(os.path.exists(os.path.join(day1, "2026-05-01.mp4")))
+            self.assertTrue(os.path.exists(os.path.join(day2, "2026-05-02.mp4")))
 
     def test_is_camera_timelapse_enabled_respects_disable_flags(self):
         missing = object()

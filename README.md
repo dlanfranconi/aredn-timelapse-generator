@@ -151,7 +151,7 @@ Make sure each config uses distinct ports and work directories before enabling m
 
 ## Running with Docker on Intel
 
-The included `Dockerfile` builds an Ubuntu 26.04 image with Python, ffmpeg, and Intel VA-API runtime libraries. This is intended for non-Raspberry Pi deployments where Docker is useful and the host has Intel graphics exposed through `/dev/dri`.
+The included `Dockerfile` builds an Ubuntu 26.04 image with Python and ffmpeg. It runs in CPU-only environments by default and can use hardware encoding when the host exposes supported devices such as Intel VA-API/QuickSync through `/dev/dri`.
 
 Build the image:
 
@@ -183,7 +183,8 @@ docker compose up --build
 ```
 
 For Portainer/GHCR deployments, keep runtime state on the host and only replace
-the container image. The WIP image is published as:
+the container image. The GitHub Actions workflow publishes multi-arch AMD64/ARM64
+images to GHCR:
 
 ```text
 ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
@@ -210,6 +211,12 @@ docker run --rm --entrypoint ffmpeg fenetre:intel-vaapi -hide_banner -encoders |
 When using hardware encoding, set `ffmpeg_options` in the relevant timelapse config to an encoder available on the host, such as `h264_vaapi`, `hevc_vaapi`, or a supported `*_qsv` encoder. The container provides the userspace libraries, but the host kernel driver and `/dev/dri` devices still determine what actually works.
 
 Raspberry Pi camera deployments are better served by the systemd approach above because `picamera2`, `libcamera`, and device permissions are closely tied to Raspberry Pi OS.
+
+## Capture cadence and storage retention
+
+For HTTP/HTTPS snapshot cameras, use `snap_interval_s: 60` for one snapshot per minute and `activity_interval_s: 10` for fast capture when SSIM detects changes inside `ssim_area`. Sunrise/sunset windows use `sunrise_sunset.interval_s`, typically `10`.
+
+Storage management is configured under `global.storage_management`. Set `work_dir_max_size_GB: 50` for the full deployment and `camera_max_size_GB: 5` for the default per-camera cap. When `prune_snapshots_first: true`, Fenetre removes old snapshots and rolling timelapse artifacts from days that already have a daily timelapse before trimming old daily timelapse files.
 
 ## Recommended video encoding options
 

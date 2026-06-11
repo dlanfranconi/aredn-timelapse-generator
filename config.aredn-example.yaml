@@ -11,7 +11,14 @@ global:
 
     # Global hard ceiling.
     work_dir_max_size_GB: 50
+    # Default per-camera ceiling. Individual cameras can override with
+    # work_dir_max_size_GB.
+    camera_max_size_GB: 5
+    # Delete snapshots and rolling timelapse artifacts before deleting daily
+    # archive timelapses.
+    prune_snapshots_first: true
 
+  deployment_name: Fenetre Skywatch
   ui:
     landing_page: list
     show_map_by_default: false
@@ -27,7 +34,7 @@ admin_server:
 timelapse:
   frequent_timelapse:
     enabled: true
-    interval_s: 900
+    interval_s: 1200
     framerate: 30
     ffmpeg_2pass: false
     output_format: file
@@ -43,7 +50,7 @@ timelapse:
 
   daily_timelapse:
     enabled: true
-    framerate: 30
+    framerate: 60
     ffmpeg_2pass: false
 
     # CPU-only daily archive timelapse. Increase preset quality only if runtime is acceptable.
@@ -77,6 +84,8 @@ cameras:
 
     # Normal daytime interval.
     snap_interval_s: 60
+    # Fast interval when SSIM sees activity in ssim_area.
+    activity_interval_s: 10
 
     # Aggressive capture around sunrise/sunset.
     sunrise_sunset:

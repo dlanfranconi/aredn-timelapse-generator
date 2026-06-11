@@ -200,6 +200,19 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             default=10,
             min_value=1,
         )
+        sm_out["camera_max_size_GB"] = _int(
+            sm.get("camera_max_size_GB"),
+            "global.storage_management.camera_max_size_GB",
+            errors,
+            default=5,
+            min_value=1,
+        )
+        sm_out["prune_snapshots_first"] = _bool(
+            sm.get("prune_snapshots_first"),
+            "global.storage_management.prune_snapshots_first",
+            errors,
+            default=True,
+        )
         out["storage_management"] = sm_out
 
     out["user_agent"] = _str(cfg.get("user_agent"), "global.user_agent", errors)
@@ -967,6 +980,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
         for k in (
             "work_dir_max_size_GB",
             "snap_interval_s",
+            "activity_interval_s",
             "tuning_file",
             "exposure_time",
             "analogue_gain",

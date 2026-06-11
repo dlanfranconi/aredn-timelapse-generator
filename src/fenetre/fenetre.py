@@ -741,19 +741,29 @@ def snap(camera_name, camera_config: Dict):
                 new_pic,
                 camera_config.get("sky_area"),
             )
-        # SSIM logic
-        if not (sunrise_sunset or fixed_snap_interval):
+        # SSIM activity logic. With snap_interval_s set, SSIM can still
+        # temporarily switch the next capture to activity_interval_s.
+        if not sunrise_sunset:
             with profiler.timed(f"camera.{camera_name}.ssim"):
                 ssim = get_ssim_for_area(
                     previous_pic, new_pic, camera_config.get("ssim_area", None)
                 )
             ssim_setpoint = camera_config.get("ssim_setpoint", 0.85)
-            if ssim < ssim_setpoint:
-                sleep_intervals[camera_name] = sleep_intervals[camera_name] * 0.9
-            else:
-                sleep_intervals[camera_name] = min(
-                    90, sleep_intervals[camera_name] + 2  # TODO: Make this configurable
+            if fixed_snap_interval:
+                sleep_intervals[camera_name] = (
+                    camera_config.get("activity_interval_s", 10)
+                    if ssim < ssim_setpoint
+                    else fixed_snap_interval
                 )
+            else:
+                if ssim < ssim_setpoint:
+                    sleep_intervals[camera_name] = sleep_intervals[camera_name] * 0.9
+                else:
+                    sleep_intervals[camera_name] = min(
+                        90,
+                        sleep_intervals[camera_name]
+                        + 2,  # TODO: Make this configurable
+                    )
             if camera_config.get("gather_metrics", True):
                 metric_camera_ssim_value.labels(camera_name=camera_name).set(ssim)
                 metric_camera_ssim_target.labels(camera_name=camera_name).set(
@@ -2003,6 +2013,135 @@ def get_dir_size(path="."):
     return total_size
 
 
+def _sorted_day_dirs(camera_dir: str) -> List[str]:
+    if not os.path.isdir(camera_dir):
+        return []
+    day_dirs = [
+        d.path
+        for d in os.scandir(camera_dir)
+        if d.is_dir() and DATE_DIR_PATTERN.match(d.name)
+    ]
+    return sorted(day_dirs, key=lambda path: os.path.basename(path))
+
+
+def _daily_timelapse_path(day_dir: str) -> Optional[str]:
+    daily_cfg = timelapse_config.get("daily_timelapse", {}) or {}
+    extension = daily_cfg.get("file_extension") or "mp4"
+    candidate = os.path.join(
+        day_dir, f"{os.path.basename(os.path.normpath(day_dir))}.{extension}"
+    )
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
+def _remove_file_for_storage(path: str, dry_run: bool) -> int:
+    if not os.path.isfile(path):
+        return 0
+    size = os.path.getsize(path)
+    if dry_run:
+        logger.info("[DRY RUN] Would delete %s to free %.2f MB", path, size / (1024**2))
+    else:
+        logger.info("Deleting %s to free %.2f MB", path, size / (1024**2))
+        os.remove(path)
+    return size
+
+
+def _prune_snapshots_keep_daily_timelapse(
+    camera_dir: str, current_size_bytes: int, limit_bytes: int, dry_run: bool
+) -> int:
+    for day_dir in _sorted_day_dirs(camera_dir):
+        if current_size_bytes <= limit_bytes:
+            break
+        if not _daily_timelapse_path(day_dir):
+            continue
+        for pattern in ("*.jpg", "segment-*.*", "*.m3u8", "init.mp4", ".*.hls-manifest.json"):
+            for path in sorted(glob.glob(os.path.join(day_dir, pattern))):
+                if current_size_bytes <= limit_bytes:
+                    break
+                current_size_bytes -= _remove_file_for_storage(path, dry_run)
+        archive_marker = os.path.join(day_dir, "archived")
+        if not dry_run and not os.path.exists(archive_marker):
+            open(archive_marker, "w").close()
+    return current_size_bytes
+
+
+def _prune_daily_timelapses(
+    camera_dir: str, current_size_bytes: int, limit_bytes: int, dry_run: bool
+) -> int:
+    for day_dir in _sorted_day_dirs(camera_dir):
+        if current_size_bytes <= limit_bytes:
+            break
+        daily_path = _daily_timelapse_path(day_dir)
+        if daily_path:
+            current_size_bytes -= _remove_file_for_storage(daily_path, dry_run)
+            continue
+        dir_size = get_dir_size(day_dir)
+        if dry_run:
+            logger.info(
+                "[DRY RUN] Would delete %s to free %.2f MB",
+                day_dir,
+                dir_size / (1024**2),
+            )
+        else:
+            logger.info("Deleting %s to free %.2f MB", day_dir, dir_size / (1024**2))
+            shutil.rmtree(day_dir)
+        current_size_bytes -= dir_size
+    return current_size_bytes
+
+
+def enforce_camera_storage_limit(
+    camera_name: str,
+    camera_config: Dict,
+    storage_management_config: Dict,
+    dry_run: bool,
+) -> int:
+    camera_limit_gb = camera_config.get(
+        "work_dir_max_size_GB", storage_management_config.get("camera_max_size_GB")
+    )
+    if camera_limit_gb is None:
+        return 0
+
+    camera_dir = os.path.join(global_config["pic_dir"], camera_name)
+    if not os.path.isdir(camera_dir):
+        return 0
+
+    current_size_bytes = get_dir_size(camera_dir)
+    metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(
+        current_size_bytes
+    )
+    limit_bytes = camera_limit_gb * (1024**3)
+
+    if current_size_bytes <= limit_bytes:
+        return current_size_bytes
+
+    logger.info(
+        "Camera %s is over its %.2f GB limit. Current size: %.2f GB.",
+        camera_name,
+        camera_limit_gb,
+        current_size_bytes / (1024**3),
+    )
+
+    if storage_management_config.get("prune_snapshots_first", True):
+        current_size_bytes = _prune_snapshots_keep_daily_timelapse(
+            camera_dir, current_size_bytes, limit_bytes, dry_run
+        )
+
+    if current_size_bytes > limit_bytes:
+        logger.info(
+            "Camera %s is still over limit after snapshot pruning; trimming oldest daily timelapses.",
+            camera_name,
+        )
+        current_size_bytes = _prune_daily_timelapses(
+            camera_dir, current_size_bytes, limit_bytes, dry_run
+        )
+
+    metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(
+        current_size_bytes
+    )
+    return current_size_bytes
+
+
 def disk_management_loop():
     """
     This is a loop that manages disk space.
@@ -2019,46 +2158,9 @@ def disk_management_loop():
         # Manage per-camera limits
         for camera_name, camera_config in cameras_config.items():
             try:
-                camera_limit_gb = camera_config.get("work_dir_max_size_GB")
-                if camera_limit_gb is None:
-                    continue
-
-                camera_dir = os.path.join(global_config["pic_dir"], camera_name)
-                if not os.path.isdir(camera_dir):
-                    continue
-
-                current_size_bytes = get_dir_size(camera_dir)
-                metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(
-                    current_size_bytes
+                enforce_camera_storage_limit(
+                    camera_name, camera_config, storage_management_config, dry_run
                 )
-
-                limit_bytes = camera_limit_gb * (1024**3)
-
-                if current_size_bytes > limit_bytes:
-                    logger.info(
-                        f"Camera {camera_name} is over its limit of {camera_limit_gb} GB. Current size: {current_size_bytes / (1024**3):.2f} GB. Deleting oldest directories."
-                    )
-                    subdirs = sorted(
-                        [
-                            d.path
-                            for d in os.scandir(camera_dir)
-                            if d.is_dir() and d.name != "daylight"
-                        ]
-                    )
-                    for subdir in subdirs:
-                        if current_size_bytes <= limit_bytes:
-                            break
-                        dir_to_delete_size = get_dir_size(subdir)
-                        if dry_run:
-                            logger.info(
-                                f"[DRY RUN] Would delete {subdir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
-                            )
-                        else:
-                            logger.info(
-                                f"Deleting {subdir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
-                            )
-                            shutil.rmtree(subdir)
-                        current_size_bytes -= dir_to_delete_size
             except Exception as e:
                 logger.warning(
                     f"Error in disk management loop for camera {camera_name}: {e}"
@@ -2099,17 +2201,28 @@ def disk_management_loop():
                     for day_dir in all_day_dirs:
                         if current_work_dir_size <= global_limit_bytes:
                             break
-                        dir_to_delete_size = get_dir_size(day_dir)
-                        if dry_run:
-                            logger.info(
-                                f"[DRY RUN] Would delete {day_dir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
-                            )
+                        daily_path = _daily_timelapse_path(day_dir)
+                        if daily_path:
+                            for pattern in ("*.jpg", "segment-*.*", "*.m3u8", "init.mp4", ".*.hls-manifest.json"):
+                                for path in sorted(glob.glob(os.path.join(day_dir, pattern))):
+                                    if current_work_dir_size <= global_limit_bytes:
+                                        break
+                                    current_work_dir_size -= _remove_file_for_storage(path, dry_run)
+                            if current_work_dir_size <= global_limit_bytes:
+                                break
+                            current_work_dir_size -= _remove_file_for_storage(daily_path, dry_run)
                         else:
-                            logger.info(
-                                f"Deleting {day_dir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
-                            )
-                            shutil.rmtree(day_dir)
-                        current_work_dir_size -= dir_to_delete_size
+                            dir_to_delete_size = get_dir_size(day_dir)
+                            if dry_run:
+                                logger.info(
+                                    f"[DRY RUN] Would delete {day_dir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
+                                )
+                            else:
+                                logger.info(
+                                    f"Deleting {day_dir} to free up {dir_to_delete_size / (1024**2):.2f} MB"
+                                )
+                                shutil.rmtree(day_dir)
+                            current_work_dir_size -= dir_to_delete_size
         except Exception as e:
             logger.warning(f"Error in disk management loop for global limit: {e}")
             logger.error(
