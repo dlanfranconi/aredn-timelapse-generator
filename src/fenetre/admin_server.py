@@ -262,11 +262,35 @@ def _slugify_camera_name(value: str) -> str:
     return value
 
 
+GUIDED_CAMERA_KEYS = {
+    "url",
+    "timeout_s",
+    "cache_bust",
+    "gather_metrics",
+    "mozjpeg_optimize",
+    "description",
+    "disabled",
+    "public",
+    "ptz",
+    "timelapse_enabled",
+    "work_dir_max_size_GB",
+    "snap_interval_s",
+    "activity_interval_s",
+    "ssim_setpoint",
+    "ssim_area",
+    "sky_area",
+    "lat",
+    "lon",
+    "sunrise_sunset",
+    "postprocessing",
+}
+
+
 def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True):
     request_url = url
     if cache_bust:
         separator = "&" if "?" in request_url else "?"
-        request_url = f"{request_url}{separator}_fenetre_test={int(datetime.utcnow().timestamp())}"
+        request_url = f"{request_url}{separator}_fenetre_test={int(datetime.now(timezone.utc).timestamp())}"
     headers = {
         "Accept": "image/*,*/*;q=0.8",
         "User-Agent": "Fenetre Admin Snapshot Tester",
@@ -284,7 +308,10 @@ def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True
     )
 
 
-def _build_camera_config(payload: dict) -> tuple[str, dict]:
+def _build_camera_config(
+    payload: dict, existing_camera: dict | None = None
+) -> tuple[str, dict]:
+    existing_camera = existing_camera or {}
     name = _slugify_camera_name(payload.get("name"))
     url = (payload.get("url") or "").strip()
     if not url:
@@ -319,7 +346,8 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
             "host": (payload.get("ptz_host") or "").strip(),
             "port": int(payload.get("ptz_port") or 80),
             "username": (payload.get("ptz_username") or "").strip(),
-            "password": payload.get("ptz_password") or "",
+            "password": payload.get("ptz_password")
+            or (existing_camera.get("ptz") or {}).get("password", ""),
             "profile_token": (payload.get("ptz_profile_token") or "").strip(),
             "presets": presets,
         }
@@ -389,6 +417,16 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
     if postprocessing:
         camera["postprocessing"] = postprocessing
     return name, camera
+
+
+def _merge_guided_camera_update(existing_camera: dict, camera: dict) -> dict:
+    merged = {
+        key: value
+        for key, value in (existing_camera or {}).items()
+        if key not in GUIDED_CAMERA_KEYS
+    }
+    merged.update(camera)
+    return merged
 
 
 def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, dict]:
@@ -733,6 +771,48 @@ def add_camera():
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Failed to add camera: {str(exc)}"}), 500
+
+
+@app.route("/api/camera/<path:camera_name>", methods=["PUT"])
+def update_camera(camera_name):
+    try:
+        payload = request.get_json(force=True) or {}
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        cameras = config.setdefault("cameras", {})
+        if not isinstance(cameras, dict):
+            return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
+        if camera_name not in cameras:
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+
+        old_camera = dict(cameras.get(camera_name) or {})
+        name, camera = _build_camera_config(payload, existing_camera=old_camera)
+        if name != camera_name and name in cameras:
+            return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        if payload.get("require_test", False):
+            _fetch_snapshot_bytes(
+                camera["url"],
+                timeout_s=camera.get("timeout_s", 15),
+                cache_bust=camera.get("cache_bust", True),
+            )
+
+        updated_camera = _merge_guided_camera_update(old_camera, camera)
+        if name != camera_name:
+            cameras.pop(camera_name)
+        cameras[name] = updated_camera
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        return jsonify(
+            {
+                "message": f"Camera '{name}' updated. Reload the app to make it live.",
+                "camera_name": name,
+                "backup": os.path.basename(backup_path) if backup_path else None,
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update camera: {str(exc)}"}), 500
 
 
 @app.route("/api/camera/rename", methods=["POST"])

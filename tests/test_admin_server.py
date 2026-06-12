@@ -205,6 +205,58 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertNotIn("description", updated_data_yaml["cameras"]["blank-desc"])
 
+    def test_update_camera_reuses_guided_form_and_preserves_ptz_password(self):
+        self.test_config_data["cameras"] = {
+            "cam1": {
+                "url": "http://old-camera/snapshot.jpg",
+                "description": "Old description",
+                "custom_key": "keep-me",
+                "ptz": {
+                    "enabled": True,
+                    "host": "192.0.2.10",
+                    "port": 80,
+                    "username": "operator",
+                    "password": "existing-secret",
+                },
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/api/camera/cam1",
+            data=json.dumps(
+                {
+                    "name": "cam1",
+                    "description": "",
+                    "url": "http://new-camera/snapshot.jpg",
+                    "timeout_s": 20,
+                    "public": True,
+                    "cache_bust": True,
+                    "mozjpeg_optimize": False,
+                    "timelapse_enabled": True,
+                    "require_test": False,
+                    "ptz_enabled": True,
+                    "ptz_host": "192.0.2.10",
+                    "ptz_port": 8899,
+                    "ptz_username": "operator",
+                    "ptz_password": "",
+                    "ptz_presets": [],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["cam1"]
+        self.assertEqual(camera["url"], "http://new-camera/snapshot.jpg")
+        self.assertNotIn("description", camera)
+        self.assertEqual(camera["custom_key"], "keep-me")
+        self.assertEqual(camera["ptz"]["password"], "existing-secret")
+        self.assertEqual(camera["ptz"]["port"], 8899)
+
     def test_storage_summary_reports_total_and_dry_run(self):
         work_dir = tempfile.mkdtemp()
         photos_dir = os.path.join(work_dir, "photos", "cam1")

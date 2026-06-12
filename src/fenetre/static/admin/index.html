@@ -40,10 +40,23 @@
             <div id="storageSummary" class="storage-summary-body">Loading storage usage...</div>
         </section>
 
+        <section class="quick-settings camera-editor">
+            <div class="section-header">
+                <h2>Cameras</h2>
+                <button id="editCameraBtn" type="button" disabled>Edit Selected Camera</button>
+            </div>
+            <div class="form-grid compact-form-grid">
+                <label for="editCameraSelect">Camera</label>
+                <select id="editCameraSelect">
+                    <option value="">Load config to select a camera</option>
+                </select>
+            </div>
+        </section>
+
         <div id="addCameraModal" class="modal" hidden>
             <div class="modal-card modal-card-wide">
                 <div class="modal-header">
-                    <h2>Add Camera</h2>
+                    <h2 id="cameraModalTitle">Add Camera</h2>
                     <button id="closeAddCameraModalBtn" type="button">Close</button>
                 </div>
         <section class="quick-settings camera-add-panel">

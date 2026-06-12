@@ -948,16 +948,20 @@ def discover_camera_timelapses(
         return []
 
     results = []
+    daily_extension = (daily_config.get("file_extension") or "mp4").lower()
     for date_name in sorted(os.listdir(camera_dir), reverse=True):
         if not DATE_DIR_PATTERN.match(date_name):
             continue
         day_dir = os.path.join(camera_dir, date_name)
         if not os.path.isdir(day_dir):
             continue
+        daily_candidates = []
+        frequent_candidates = []
         for filename in sorted(os.listdir(day_dir)):
             base, extension = os.path.splitext(filename)
             if base != date_name:
                 continue
+            extension = extension.lstrip(".").lower()
             timelapse_type = _classify_timelapse_file(
                 filename, daily_config, frequent_config
             )
@@ -966,16 +970,27 @@ def discover_camera_timelapses(
             filepath = os.path.join(day_dir, filename)
             if not os.path.isfile(filepath) or os.path.getsize(filepath) <= 0:
                 continue
-            results.append(
-                {
-                    "date": date_name,
-                    "type": timelapse_type,
-                    "format": extension.lstrip(".").lower(),
-                    "url": f"/photos/{camera_name}/{date_name}/{filename}",
-                    "bytes": os.path.getsize(filepath),
-                    "mtime": int(os.path.getmtime(filepath)),
-                }
+            item = {
+                "date": date_name,
+                "type": timelapse_type,
+                "format": extension,
+                "url": f"/photos/{camera_name}/{date_name}/{filename}",
+                "bytes": os.path.getsize(filepath),
+                "mtime": int(os.path.getmtime(filepath)),
+            }
+            if timelapse_type == "daily":
+                daily_candidates.append(item)
+            else:
+                frequent_candidates.append(item)
+        if daily_candidates:
+            daily_candidates.sort(
+                key=lambda item: (
+                    item["format"] != daily_extension,
+                    -item["mtime"],
+                )
             )
+            results.append(daily_candidates[0])
+        results.extend(frequent_candidates)
     return results
 
 
@@ -1430,6 +1445,7 @@ def main(argv):
     if not os.path.exists(timelapse_queue_file):
         open(timelapse_queue_file, "a").close()  # Create the file if it does not exist
     get_queue_size_and_set_metric(timelapse_queue_file, timelapse_queue_lock)
+    cleanup_stale_timelapse_artifacts_for_all_cameras()
     queue_missing_daily_timelapses()
 
     logger.info("Disk management thread will start in 10s...")
@@ -2102,6 +2118,7 @@ def timelapse_loop():
                         timelapse_config.get("frequent_timelapse", {}),
                         timelapse_config.get("daily_timelapse", {}),
                     )
+                    cleanup_stale_timelapse_artifacts(dir_to_process)
                     remove_from_timelapse_queue(
                         dir_to_process, timelapse_queue_file, timelapse_queue_lock
                     )
@@ -2190,6 +2207,66 @@ def _daily_timelapse_path(day_dir: str) -> Optional[str]:
     return None
 
 
+def _daily_timelapse_candidate_paths(day_dir: str) -> List[str]:
+    date_name = os.path.basename(os.path.normpath(day_dir))
+    paths = []
+    for extension in TIMELAPSE_VIDEO_EXTENSIONS:
+        if extension == "m3u8":
+            continue
+        paths.append(os.path.join(day_dir, f"{date_name}.{extension}"))
+    return paths
+
+
+def cleanup_stale_timelapse_artifacts(day_dir: str, dry_run: bool = False) -> int:
+    """Remove interrupted or duplicate daily timelapse files for one day dir."""
+    if not os.path.isdir(day_dir):
+        return 0
+    removed = 0
+    daily_path = _daily_timelapse_path(day_dir)
+
+    stale_patterns = [
+        os.path.join(day_dir, ".*.tmp.*"),
+        os.path.join(day_dir, "*.tmp.*"),
+    ]
+    date_name = os.path.basename(os.path.normpath(day_dir))
+    for extension in TIMELAPSE_VIDEO_EXTENSIONS:
+        stale_patterns.append(os.path.join(day_dir, f"{date_name}.{extension}"))
+
+    for path in sorted(
+        {path for pattern in stale_patterns for path in glob.glob(pattern)}
+    ):
+        if not os.path.isfile(path):
+            continue
+        if daily_path and os.path.abspath(path) == os.path.abspath(daily_path):
+            continue
+        should_remove = ".tmp." in os.path.basename(path) or os.path.getsize(path) <= 0
+        if daily_path and path in _daily_timelapse_candidate_paths(day_dir):
+            should_remove = True
+        if not should_remove:
+            continue
+        removed += 1
+        if dry_run:
+            logger.info("[DRY RUN] Would remove stale timelapse artifact %s", path)
+        else:
+            logger.info("Removing stale timelapse artifact %s", path)
+            os.remove(path)
+    return removed
+
+
+def cleanup_stale_timelapse_artifacts_for_all_cameras() -> int:
+    pic_dir = global_config.get("pic_dir")
+    if not pic_dir or not os.path.isdir(pic_dir):
+        return 0
+    removed = 0
+    for camera_name in sorted(cameras_config):
+        camera_dir = os.path.join(pic_dir, camera_name)
+        for day_dir in _sorted_day_dirs(camera_dir):
+            removed += cleanup_stale_timelapse_artifacts(day_dir)
+    if removed:
+        logger.info("Removed %s stale timelapse artifacts.", removed)
+    return removed
+
+
 def _date_from_day_dir(day_dir: str) -> Optional[date]:
     date_name = os.path.basename(os.path.normpath(day_dir))
     if not DATE_DIR_PATTERN.match(date_name):
@@ -2231,6 +2308,11 @@ def _should_queue_daily_timelapse(day_dir: str) -> bool:
     if _daily_timelapse_path(day_dir):
         return False
     return _day_dir_has_snapshots(day_dir)
+
+
+def _is_current_day_dir(day_dir: str) -> bool:
+    day_date = _date_from_day_dir(day_dir)
+    return day_date is not None and day_date >= _today_date_for_config()
 
 
 def queue_missing_daily_timelapses() -> int:
@@ -2288,6 +2370,8 @@ def _prune_snapshots_keep_daily_timelapse(
     for day_dir in _sorted_day_dirs(camera_dir):
         if current_size_bytes <= limit_bytes:
             break
+        if _is_current_day_dir(day_dir):
+            continue
         if not _daily_timelapse_path(day_dir):
             continue
         for pattern in (
@@ -2313,6 +2397,8 @@ def _prune_daily_timelapses(
     for day_dir in _sorted_day_dirs(camera_dir):
         if current_size_bytes <= limit_bytes:
             break
+        if _is_current_day_dir(day_dir):
+            continue
         daily_path = _daily_timelapse_path(day_dir)
         if daily_path:
             current_size_bytes -= _remove_file_for_storage(daily_path, dry_run)
@@ -2444,6 +2530,8 @@ def disk_management_loop():
                     for day_dir in all_day_dirs:
                         if current_work_dir_size <= global_limit_bytes:
                             break
+                        if _is_current_day_dir(day_dir):
+                            continue
                         daily_path = _daily_timelapse_path(day_dir)
                         if daily_path:
                             for pattern in (

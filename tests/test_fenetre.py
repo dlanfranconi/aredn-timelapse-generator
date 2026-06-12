@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 from PIL import Image
 from io import BytesIO
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
     cleanup_frequent_timelapse_artifacts,
+    cleanup_stale_timelapse_artifacts,
     discover_camera_timelapses,
     enforce_camera_storage_limit,
     get_pic_from_url,
@@ -73,15 +75,15 @@ class TestFenetre(unittest.TestCase):
             self.assertEqual(
                 [(item["date"], item["type"], item["format"]) for item in timelapses],
                 [
-                    ("2026-05-02", "frequent", "m3u8"),
                     ("2026-05-02", "daily", "webm"),
+                    ("2026-05-02", "frequent", "m3u8"),
                 ],
             )
             self.assertEqual(
                 [item["url"] for item in timelapses],
                 [
-                    "/photos/cam1/2026-05-02/2026-05-02.m3u8",
                     "/photos/cam1/2026-05-02/2026-05-02.webm",
+                    "/photos/cam1/2026-05-02/2026-05-02.m3u8",
                 ],
             )
 
@@ -99,9 +101,44 @@ class TestFenetre(unittest.TestCase):
                 [(item["date"], item["type"], item["format"]) for item in timelapses],
                 [
                     ("2026-05-02", "daily", "mp4"),
-                    ("2026-05-02", "daily", "webm"),
                 ],
             )
+
+    def test_cleanup_stale_timelapse_artifacts_removes_duplicates_and_temp_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            day_dir = os.path.join(tmpdir, "2026-05-02")
+            os.makedirs(day_dir)
+            keep_path = os.path.join(day_dir, "2026-05-02.mp4")
+            duplicate_path = os.path.join(day_dir, "2026-05-02.webm")
+            zero_path = os.path.join(day_dir, "2026-05-02.m3u8")
+            tmp_path = os.path.join(day_dir, ".2026-05-02.tmp.mp4")
+            for path, content in (
+                (keep_path, b"daily"),
+                (duplicate_path, b"old-daily"),
+                (zero_path, b""),
+                (tmp_path, b"partial"),
+            ):
+                with open(path, "wb") as f:
+                    f.write(content)
+
+            missing = object()
+            original_timelapse = getattr(fenetre_module, "timelapse_config", missing)
+            try:
+                fenetre_module.timelapse_config = {
+                    "daily_timelapse": {"file_extension": "mp4"}
+                }
+                removed = cleanup_stale_timelapse_artifacts(day_dir)
+            finally:
+                if original_timelapse is missing:
+                    delattr(fenetre_module, "timelapse_config")
+                else:
+                    fenetre_module.timelapse_config = original_timelapse
+
+            self.assertEqual(removed, 3)
+            self.assertTrue(os.path.exists(keep_path))
+            self.assertFalse(os.path.exists(duplicate_path))
+            self.assertFalse(os.path.exists(zero_path))
+            self.assertFalse(os.path.exists(tmp_path))
 
     def test_discover_camera_timelapses_ignores_unsafe_camera_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -190,6 +227,62 @@ class TestFenetre(unittest.TestCase):
             )
             self.assertTrue(os.path.exists(os.path.join(day1, "2026-05-01.mp4")))
             self.assertTrue(os.path.exists(os.path.join(day2, "2026-05-02.mp4")))
+
+    def test_storage_does_not_prune_current_day_snapshots(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            camera_dir = os.path.join(tmpdir, "photos", "cam1")
+            old_day = os.path.join(camera_dir, "2000-01-01")
+            current_day = os.path.join(camera_dir, today)
+            os.makedirs(old_day)
+            os.makedirs(current_day)
+            with open(os.path.join(old_day, "2000-01-01.mp4"), "wb") as f:
+                f.write(b"d" * 500)
+            with open(os.path.join(old_day, "2000-01-01T12-00-00UTC.jpg"), "wb") as f:
+                f.write(b"j" * 1000)
+            with open(os.path.join(current_day, f"{today}.mp4"), "wb") as f:
+                f.write(b"d" * 500)
+            current_snapshot = os.path.join(current_day, f"{today}T12-00-00UTC.jpg")
+            with open(current_snapshot, "wb") as f:
+                f.write(b"j" * 1000)
+
+            had_global = hasattr(fenetre_module, "global_config")
+            had_timelapse = hasattr(fenetre_module, "timelapse_config")
+            old_global = getattr(fenetre_module, "global_config", None)
+            old_timelapse = getattr(fenetre_module, "timelapse_config", None)
+            try:
+                fenetre_module.global_config = {
+                    "work_dir": tmpdir,
+                    "pic_dir": os.path.join(tmpdir, "photos"),
+                    "timezone": "UTC",
+                }
+                fenetre_module.timelapse_config = {
+                    "daily_timelapse": {"file_extension": "mp4"}
+                }
+
+                enforce_camera_storage_limit(
+                    "cam1",
+                    {},
+                    {
+                        "camera_max_size_GB": 1900 / (1024**3),
+                        "prune_snapshots_first": True,
+                    },
+                    dry_run=False,
+                )
+            finally:
+                if had_global:
+                    fenetre_module.global_config = old_global
+                else:
+                    delattr(fenetre_module, "global_config")
+                if had_timelapse:
+                    fenetre_module.timelapse_config = old_timelapse
+                else:
+                    delattr(fenetre_module, "timelapse_config")
+
+            self.assertTrue(os.path.exists(current_snapshot))
+            self.assertFalse(
+                os.path.exists(os.path.join(old_day, "2000-01-01T12-00-00UTC.jpg"))
+            )
 
     def test_is_camera_timelapse_enabled_respects_disable_flags(self):
         missing = object()

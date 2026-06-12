@@ -82,9 +82,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncUiBtn = document.getElementById('syncUiBtn');
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     const addCameraBtn = document.getElementById('addCameraBtn');
+    const editCameraBtn = document.getElementById('editCameraBtn');
+    const editCameraSelect = document.getElementById('editCameraSelect');
     const refreshStorageBtn = document.getElementById('refreshStorageBtn');
     const storageSummary = document.getElementById('storageSummary');
     const addCameraModal = document.getElementById('addCameraModal');
+    const cameraModalTitle = document.getElementById('cameraModalTitle');
     const closeAddCameraModalBtn = document.getElementById('closeAddCameraModalBtn');
     const userModal = document.getElementById('userModal');
     const closeUserModalBtn = document.getElementById('closeUserModalBtn');
@@ -114,6 +117,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let loadedConfigData = null;
     let newCameraLastTest = null;
     let usersPayload = { users: [], cameras: [] };
+    let cameraFormMode = 'add';
+    let editingCameraName = null;
+    let editingOriginalCamera = null;
 
     loadConfigBtn.addEventListener('click', fetchAndDisplayConfig);
     saveConfigBtn.addEventListener('click', saveConfiguration);
@@ -121,6 +127,10 @@ document.addEventListener('DOMContentLoaded', () => {
     rebuildCamerasBtn.addEventListener('click', rebuildCamerasJson);
     syncUiBtn.addEventListener('click', syncUI);
     addCameraBtn.addEventListener('click', handleAddCamera);
+    editCameraBtn.addEventListener('click', handleEditCamera);
+    editCameraSelect.addEventListener('change', () => {
+        editCameraBtn.disabled = !editCameraSelect.value;
+    });
     closeAddCameraModalBtn.addEventListener('click', () => hideModal(addCameraModal));
     manageUsersBtn.addEventListener('click', openUserManager);
     closeUserModalBtn.addEventListener('click', () => hideModal(userModal));
@@ -197,6 +207,170 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             storageSummary.textContent = `Storage summary unavailable: ${error.message}`;
         }
+    }
+
+    function populateCameraEditOptions() {
+        const cameras = (loadedConfigData && loadedConfigData.cameras) || {};
+        const previousValue = editCameraSelect.value;
+        editCameraSelect.innerHTML = '';
+        const names = Object.keys(cameras).sort();
+        if (!names.length) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No cameras configured';
+            editCameraSelect.appendChild(option);
+            editCameraBtn.disabled = true;
+            return;
+        }
+        names.forEach(cameraName => {
+            const option = document.createElement('option');
+            option.value = cameraName;
+            option.textContent = cameraName;
+            editCameraSelect.appendChild(option);
+        });
+        editCameraSelect.value = names.includes(previousValue) ? previousValue : names[0];
+        editCameraBtn.disabled = !editCameraSelect.value;
+    }
+
+    function setInputValue(id, value) {
+        const input = document.getElementById(id);
+        if (input) input.value = value ?? '';
+    }
+
+    function setCheckboxValue(id, value) {
+        const input = document.getElementById(id);
+        if (input) input.checked = Boolean(value);
+    }
+
+    function setSelectValue(id, value) {
+        const input = document.getElementById(id);
+        if (input) input.value = value ?? input.value;
+    }
+
+    function syncAllOptionGroups() {
+        document.querySelectorAll('.option-toggle').forEach(toggle => syncOptionGroup(toggle));
+    }
+
+    function resetCameraForm() {
+        cameraFormMode = 'add';
+        editingCameraName = null;
+        editingOriginalCamera = null;
+        cameraModalTitle.textContent = 'Add Camera';
+        confirmNewCameraBtn.textContent = 'Add Camera to Config';
+        newCameraName.disabled = false;
+        setInputValue('newCameraName', '');
+        setInputValue('newCameraDescription', '');
+        setSelectValue('newCameraVendor', 'generic');
+        setInputValue('newCameraUrl', '');
+        newCameraUrl.type = 'password';
+        toggleNewCameraUrlBtn.textContent = 'Show';
+        setCheckboxValue('newCameraPublic', true);
+        setCheckboxValue('newCameraCacheBust', true);
+        setCheckboxValue('newCameraMozjpeg', true);
+        setCheckboxValue('newCameraTimelapse', true);
+        setInputValue('newCameraTimeout', 15);
+        setCheckboxValue('newCameraFixedIntervalEnabled', true);
+        setInputValue('newCameraSnapInterval', 60);
+        setCheckboxValue('newCameraActivityEnabled', true);
+        setInputValue('newCameraActivityInterval', 10);
+        setInputValue('newCameraSsimSetpoint', 0.88);
+        setInputValue('newCameraSsimArea', '0,0,1,1');
+        setCheckboxValue('newCameraSunEnabled', true);
+        setInputValue('newCameraSunInterval', 10);
+        setInputValue('newCameraLat', 35.2828);
+        setInputValue('newCameraLon', -120.6596);
+        setInputValue('newCameraSunWindow', 45);
+        setCheckboxValue('newCameraSkyEnabled', true);
+        setInputValue('newCameraSkyArea', '0,0,1,0.35');
+        setCheckboxValue('newCameraStorageEnabled', true);
+        setInputValue('newCameraStorageGb', 5);
+        setCheckboxValue('newCameraTimestampEnabled', true);
+        setSelectValue('newCameraTimestampPosition', 'bottom_right');
+        setCheckboxValue('newCameraPtzEnabled', false);
+        setCheckboxValue('newCameraPtzPublic', false);
+        setCheckboxValue('newCameraPtzAllowPresets', true);
+        setCheckboxValue('newCameraPtzAllowManual', false);
+        setSelectValue('newCameraPtzAccessLevel', 'presets');
+        setInputValue('newCameraPtzHost', '');
+        setInputValue('newCameraPtzPort', 80);
+        setInputValue('newCameraPtzUsername', '');
+        setInputValue('newCameraPtzPassword', '');
+        setInputValue('newCameraPtzProfileToken', '');
+        setInputValue('newCameraPtzPresets', '');
+        resetNewCameraTest();
+        syncAllOptionGroups();
+    }
+
+    function inferSunWindow(sunConfig = {}) {
+        const values = [
+            sunConfig.sunrise_offset_start_minutes,
+            sunConfig.sunrise_offset_end_minutes,
+            sunConfig.sunset_offset_start_minutes,
+            sunConfig.sunset_offset_end_minutes,
+        ].filter(value => Number.isFinite(Number(value)));
+        return values.length ? Number(values[0]) : 45;
+    }
+
+    function fillCameraForm(cameraName) {
+        const camera = ((loadedConfigData && loadedConfigData.cameras) || {})[cameraName];
+        if (!camera) {
+            throw new Error(`Camera '${cameraName}' was not found in the loaded config.`);
+        }
+        resetCameraForm();
+        cameraFormMode = 'edit';
+        editingCameraName = cameraName;
+        editingOriginalCamera = camera;
+        cameraModalTitle.textContent = `Edit ${cameraName}`;
+        confirmNewCameraBtn.textContent = 'Save Camera Changes';
+        newCameraName.disabled = true;
+
+        setInputValue('newCameraName', cameraName);
+        setInputValue('newCameraDescription', camera.description || '');
+        setInputValue('newCameraUrl', camera.url || '');
+        setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
+        setCheckboxValue('newCameraPublic', camera.public !== false);
+        setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
+        setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
+        setCheckboxValue('newCameraTimelapse', camera.timelapse_enabled !== false && camera.generate_timelapse !== false);
+
+        setCheckboxValue('newCameraFixedIntervalEnabled', camera.snap_interval_s !== undefined);
+        setInputValue('newCameraSnapInterval', camera.snap_interval_s ?? 60);
+        setCheckboxValue('newCameraActivityEnabled', camera.activity_interval_s !== undefined || camera.ssim_setpoint !== undefined || camera.ssim_area !== undefined);
+        setInputValue('newCameraActivityInterval', camera.activity_interval_s ?? 10);
+        setInputValue('newCameraSsimSetpoint', camera.ssim_setpoint ?? 0.88);
+        setInputValue('newCameraSsimArea', camera.ssim_area || '0,0,1,1');
+
+        const sunConfig = camera.sunrise_sunset || {};
+        setCheckboxValue('newCameraSunEnabled', sunConfig.enabled !== false && (camera.lat !== undefined || camera.lon !== undefined || camera.sunrise_sunset !== undefined));
+        setInputValue('newCameraSunInterval', sunConfig.interval_s ?? 10);
+        setInputValue('newCameraLat', camera.lat ?? 35.2828);
+        setInputValue('newCameraLon', camera.lon ?? -120.6596);
+        setInputValue('newCameraSunWindow', inferSunWindow(sunConfig));
+
+        setCheckboxValue('newCameraSkyEnabled', camera.sky_area !== undefined);
+        setInputValue('newCameraSkyArea', camera.sky_area || '0,0,1,0.35');
+        setCheckboxValue('newCameraStorageEnabled', camera.work_dir_max_size_GB !== undefined);
+        setInputValue('newCameraStorageGb', camera.work_dir_max_size_GB ?? 5);
+
+        const timestampStep = (camera.postprocessing || []).find(step => step && step.type === 'timestamp');
+        setCheckboxValue('newCameraTimestampEnabled', Boolean(timestampStep));
+        setSelectValue('newCameraTimestampPosition', (timestampStep && timestampStep.position) || 'bottom_right');
+
+        const ptz = camera.ptz || {};
+        setCheckboxValue('newCameraPtzEnabled', ptz.enabled === true);
+        setCheckboxValue('newCameraPtzPublic', ptz.public === true);
+        setCheckboxValue('newCameraPtzAllowPresets', ptz.allow_presets !== false);
+        setCheckboxValue('newCameraPtzAllowManual', ptz.allow_manual_control === true);
+        setSelectValue('newCameraPtzAccessLevel', ptz.access_level || 'presets');
+        setInputValue('newCameraPtzHost', ptz.host || ptz.ip || '');
+        setInputValue('newCameraPtzPort', ptz.port ?? 80);
+        setInputValue('newCameraPtzUsername', ptz.username || '');
+        setInputValue('newCameraPtzPassword', '');
+        setInputValue('newCameraPtzProfileToken', ptz.profile_token || '');
+        setInputValue('newCameraPtzPresets', ptz.presets ? JSON.stringify(ptz.presets, null, 2) : '');
+        syncAllOptionGroups();
+        newCameraLastTest = { url: camera.url || '', name: cameraName };
+        confirmNewCameraBtn.disabled = false;
     }
 
     function selectedPtzCameras() {
@@ -338,6 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadedConfigData = config.config || config;
             siteNameInput.value = (loadedConfigData.global && loadedConfigData.global.deployment_name) || 'fenetre.cam';
             saveSiteNameBtn.disabled = false;
+            populateCameraEditOptions();
             renderConfigForm(config, configFormContainer, '');
             setStatus('Configuration loaded successfully.', 'success');
             saveConfigBtn.disabled = false;
@@ -419,7 +594,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function collectNewCameraPayload(requireTest = true) {
-        const postprocessing = [];
+        const postprocessing = cameraFormMode === 'edit' && editingOriginalCamera
+            ? (editingOriginalCamera.postprocessing || []).filter(step => step && step.type !== 'timestamp')
+            : [];
         if (checked('newCameraTimestampEnabled')) {
             postprocessing.push({
                 type: 'timestamp',
@@ -544,12 +721,17 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const payload = collectNewCameraPayload(true);
             validateNewCameraPayload(payload);
+            const urlChanged = cameraFormMode === 'edit'
+                && editingOriginalCamera
+                && payload.url !== (editingOriginalCamera.url || '');
             if (!newCameraLastTest || newCameraLastTest.url !== payload.url || newCameraLastTest.name !== payload.name) {
-                throw new Error('Test the current camera ID and snapshot URL before adding it.');
+                throw new Error('Test the current camera ID and snapshot URL before saving it.');
             }
-            setStatus(`Adding camera '${payload.name}'...`, 'info');
-            const response = await fetch('/api/camera/add', {
-                method: 'POST',
+            const isEdit = cameraFormMode === 'edit' && editingCameraName;
+            setStatus(`${isEdit ? 'Updating' : 'Adding'} camera '${payload.name}'...`, 'info');
+            payload.require_test = !isEdit || urlChanged;
+            const response = await fetch(isEdit ? `/api/camera/${encodeURIComponent(editingCameraName)}` : '/api/camera/add', {
+                method: isEdit ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
@@ -557,7 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 throw new Error(result.error || `Failed to add camera with HTTP ${response.status}`);
             }
-            setStatus(result.message || `Camera '${payload.name}' added. Reload the app to make it live.`, 'success');
+            setStatus(result.message || `Camera '${payload.name}' saved. Reload the app to make it live.`, 'success');
             await fetchAndDisplayConfig();
             await loadStorageSummary();
             hideModal(addCameraModal);
@@ -1117,9 +1299,26 @@ document.addEventListener('DOMContentLoaded', () => {
     loadStorageSummary();
 
     function handleAddCamera() {
+        resetCameraForm();
         showModal(addCameraModal);
         newCameraName.focus();
         setStatus('Use the Add Camera form, test the snapshot URL, then confirm the add.', 'info');
+    }
+
+    function handleEditCamera() {
+        const cameraName = editCameraSelect.value;
+        if (!cameraName) {
+            setStatus('Load the configuration and select a camera to edit.', 'error');
+            return;
+        }
+        try {
+            fillCameraForm(cameraName);
+            showModal(addCameraModal);
+            newCameraDescription.focus();
+            setStatus(`Editing camera '${cameraName}'. Save changes when finished.`, 'info');
+        } catch (error) {
+            setStatus(`Error loading camera for edit: ${error.message}`, 'error');
+        }
     }
 
     function renderCameraItem(cameraFieldset, cameraNameKey, selectedSourceType) {

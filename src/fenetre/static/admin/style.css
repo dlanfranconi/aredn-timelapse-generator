@@ -82,7 +82,9 @@ h1 {
     margin-right: 10px;
 }
 
-.quick-settings input {
+.quick-settings input,
+.quick-settings select,
+.quick-settings textarea {
     min-width: 260px;
     max-width: 100%;
     padding: 8px;
@@ -165,8 +167,12 @@ h1 {
 .option-content {
     display: grid;
     grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
-    gap: 8px 12px;
+    gap: 10px 14px;
     align-items: center;
+}
+
+.compact-form-grid {
+    grid-template-columns: minmax(120px, 180px) minmax(240px, 1fr);
 }
 
 .inline-field {
@@ -181,20 +187,21 @@ h1 {
 
 .option-groups {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 10px;
-    margin-top: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
 }
 
 .option-group {
     border: 1px solid #ddd;
     border-radius: 4px;
-    padding: 10px;
+    padding: 12px;
     background-color: #f7f7f7;
 }
 
 .option-group legend {
     font-weight: bold;
+    padding: 0 4px;
 }
 
 .option-group:not(.enabled) .option-content {
@@ -247,6 +254,8 @@ h1 {
 
 .modal-card {
     width: min(760px, 100%);
+    max-height: calc(100vh - 72px);
+    overflow-y: auto;
     background: #fff;
     border-radius: 8px;
     box-shadow: 0 15px 45px rgba(0, 0, 0, 0.25);
@@ -254,7 +263,7 @@ h1 {
 }
 
 .modal-card-wide {
-    width: min(1040px, 100%);
+    width: min(1120px, 100%);
 }
 
 .modal-header {
@@ -318,6 +327,9 @@ h1 {
 
 .add-camera-actions {
     margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .camera-test-result {
