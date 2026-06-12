@@ -66,6 +66,13 @@ from fenetre.camera_utils import (
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
+from fenetre.ptz import (
+    PTZBackendUnavailable,
+    PTZError,
+    PTZLocked,
+    goto_preset,
+    ptz_status,
+)
 from fenetre.timelapse import (
     add_to_timelapse_queue,
     create_incremental_hls_timelapse,
@@ -1005,12 +1012,79 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             },
         )
 
+    def _read_json_body(self):
+        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        if content_length <= 0:
+            return {}
+        if content_length > 64 * 1024:
+            raise ValueError("Request body is too large")
+        return json.loads(self.rfile.read(content_length).decode("utf-8"))
+
+    def _handle_ptz_status_api(self, parsed_url):
+        query = parse_qs(parsed_url.query)
+        camera_name = (query.get("camera") or [""])[0]
+        if not camera_name:
+            self._send_json(400, {"error": "camera query parameter is required"})
+            return
+        if camera_name not in cameras_config:
+            self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+            return
+        self._send_json(200, ptz_status(camera_name))
+
+    def _handle_ptz_preset_api(self):
+        try:
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            preset_id = (payload.get("preset") or "").strip()
+            if not camera_name or not preset_id:
+                self._send_json(400, {"error": "camera and preset are required"})
+                return
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not (
+                ptz_config.get("enabled")
+                and ptz_config.get("public")
+                and ptz_config.get("allow_presets", True)
+            ):
+                self._send_json(403, {"error": "Public PTZ presets are not enabled"})
+                return
+            result = goto_preset(
+                camera_name,
+                camera_config,
+                preset_id,
+                owner=self.client_address[0] if self.client_address else "public",
+                duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            self._send_json(200, result)
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ preset error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def do_GET(self):
         parsed_url = urlparse(self.path)
         if parsed_url.path == "/api/timelapses":
             self._handle_timelapses_api(parsed_url)
             return
+        if parsed_url.path == "/api/ptz/status":
+            self._handle_ptz_status_api(parsed_url)
+            return
         super().do_GET()
+
+    def do_POST(self):
+        parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/ptz/preset":
+            self._handle_ptz_preset_api()
+            return
+        self.send_error(405, "Method Not Allowed")
 
     def end_headers(self):
         cache_control = self._cache_control_header()
@@ -1024,7 +1098,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", allow_origin)
                 if allow_origin != "*":
                     self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers", "Origin, Range, Content-Type, Accept"
             )

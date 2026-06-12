@@ -17,6 +17,7 @@ from werkzeug.exceptions import BadRequest
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.config import config_load
 from fenetre.gopro import GoPro
+from fenetre.ptz import set_lock
 from fenetre.ui_utils import copy_public_html_files
 
 metric_pictures_taken_total = Counter(
@@ -297,6 +298,9 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
         camera["disabled"] = True
     camera["public"] = bool(payload.get("public", True))
     if payload.get("ptz_enabled"):
+        presets = payload.get("ptz_presets") or []
+        if isinstance(presets, str):
+            presets = json.loads(presets) if presets.strip() else []
         camera["ptz"] = {
             "enabled": True,
             "public": bool(payload.get("ptz_public", False)),
@@ -305,6 +309,12 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
                 payload.get("ptz_allow_manual_control", False)
             ),
             "access_level": payload.get("ptz_access_level") or "presets",
+            "host": (payload.get("ptz_host") or "").strip(),
+            "port": int(payload.get("ptz_port") or 80),
+            "username": (payload.get("ptz_username") or "").strip(),
+            "password": payload.get("ptz_password") or "",
+            "profile_token": (payload.get("ptz_profile_token") or "").strip(),
+            "presets": presets,
         }
     if payload.get("timelapse_enabled") is not None:
         camera["timelapse_enabled"] = bool(payload.get("timelapse_enabled"))
@@ -551,6 +561,31 @@ def delete_user(username):
         )
     except Exception as e:
         return jsonify({"error": f"Failed to remove user: {str(e)}"}), 500
+
+
+@app.route("/api/ptz/lock", methods=["POST"])
+def update_ptz_lock():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = (payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"error": "camera is required."}), 400
+        _, config = _load_effective_config_with_raw()
+        if camera_name not in (config.get("cameras") or {}):
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        status = set_lock(
+            camera_name,
+            bool(payload.get("locked", False)),
+            payload.get("reason") or "",
+        )
+        return jsonify({"camera": camera_name, "lock": status})
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to update PTZ lock: {str(e)}"}), 500
 
 
 @app.route("/config", methods=["PUT"])

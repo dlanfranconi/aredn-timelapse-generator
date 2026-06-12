@@ -364,6 +364,11 @@ function createCameraListItem(camera) {
                 <select class="select-timelapse-archive" aria-label="Timelapse archive"></select>
                 <a class="link-history" href="#" target="_blank">History</a>
             </div>
+            <div class="ptz-presets" hidden>
+                <select class="select-ptz-preset" aria-label="PTZ preset"></select>
+                <button class="btn-ptz-preset" type="button">Go</button>
+                <span class="ptz-status"></span>
+            </div>
         </div>
     `;
 
@@ -376,6 +381,53 @@ function createCameraListItem(camera) {
     });
 
     return listItem;
+}
+
+function configurePtzPresets(camera, listItem) {
+    const ptz = camera.ptz || {};
+    const presets = Array.isArray(ptz.presets) ? ptz.presets : [];
+    const wrapper = listItem.querySelector('.ptz-presets');
+    const select = listItem.querySelector('.select-ptz-preset');
+    const button = listItem.querySelector('.btn-ptz-preset');
+    const status = listItem.querySelector('.ptz-status');
+    if (!ptz.enabled || !ptz.public || !ptz.allow_presets || presets.length === 0) {
+        wrapper.hidden = true;
+        return;
+    }
+
+    select.innerHTML = '';
+    presets.forEach(preset => {
+        const option = document.createElement('option');
+        option.value = preset.id;
+        option.textContent = preset.name;
+        select.appendChild(option);
+    });
+    wrapper.hidden = false;
+    button.onclick = async () => {
+        if (!select.value) {
+            return;
+        }
+        button.disabled = true;
+        status.textContent = 'Moving...';
+        try {
+            const response = await fetch('/api/ptz/preset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera: camera.title, preset: select.value })
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `PTZ request failed: ${response.status}`);
+            }
+            status.textContent = result.session && result.session.seconds_remaining
+                ? `${result.session.seconds_remaining}s`
+                : 'Done';
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    };
 }
 
 function updateCamera(camera, cameraData) {
@@ -411,6 +463,7 @@ function updateCamera(camera, cameraData) {
         cameraDescription.textContent = '';
         cameraDescription.style.display = 'none';
     }
+    configurePtzPresets(camera, listItem);
     timelapseArchiveSelect.onchange = () => {
         const selectedOption = timelapseArchiveSelect.selectedOptions[0];
         if (!selectedOption || !selectedOption.value) {

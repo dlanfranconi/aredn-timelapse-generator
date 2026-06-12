@@ -5,6 +5,8 @@ import math
 import os
 from typing import Dict, Any
 
+from fenetre.ptz import public_ptz_metadata
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,22 +101,13 @@ def build_cameras_metadata(
         if cam_conf.get("public", True) is False:
             continue
 
-        ptz_config = cam_conf.get("ptz") or {}
         metadata = {
             "title": cam,
             "url": f"list.html?camera={cam}",
             "fullscreen_url": f"fullscreen.html?camera={cam}",
             "timelapse_enabled": _camera_timelapse_enabled(cam_conf),
             "public": True,
-            "ptz": {
-                "enabled": bool(ptz_config.get("enabled", False)),
-                "public": bool(ptz_config.get("public", False)),
-                "allow_presets": bool(ptz_config.get("allow_presets", True)),
-                "allow_manual_control": bool(
-                    ptz_config.get("allow_manual_control", False)
-                ),
-                "access_level": ptz_config.get("access_level", "presets"),
-            },
+            "ptz": public_ptz_metadata(cam_conf.get("ptz") or {}),
         }
 
         if cam_conf.get("source") == "external_website":

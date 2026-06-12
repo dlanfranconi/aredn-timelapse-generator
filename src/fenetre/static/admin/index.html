@@ -157,6 +157,18 @@
                             <option value="manual">Manual controls</option>
                             <option value="admin">Admin only</option>
                         </select>
+                        <label for="newCameraPtzHost">ONVIF host/IP</label>
+                        <input id="newCameraPtzHost" type="text" autocomplete="off" placeholder="192.0.2.10">
+                        <label for="newCameraPtzPort">ONVIF port</label>
+                        <input id="newCameraPtzPort" type="number" min="1" max="65535" value="80">
+                        <label for="newCameraPtzUsername">ONVIF username</label>
+                        <input id="newCameraPtzUsername" type="text" autocomplete="off">
+                        <label for="newCameraPtzPassword">ONVIF password</label>
+                        <input id="newCameraPtzPassword" type="password" autocomplete="new-password">
+                        <label for="newCameraPtzProfileToken">Profile token</label>
+                        <input id="newCameraPtzProfileToken" type="text" autocomplete="off" placeholder="Optional">
+                        <label for="newCameraPtzPresets">Presets JSON</label>
+                        <textarea id="newCameraPtzPresets" rows="5" placeholder='[{"id":"launch","name":"Launch Pad","token":"1"}]'></textarea>
                     </div>
                 </fieldset>
             </div>

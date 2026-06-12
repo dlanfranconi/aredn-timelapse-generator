@@ -475,11 +475,22 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.work_dir_max_size_GB = intValue('newCameraStorageGb', 5);
         }
         if (checked('newCameraPtzEnabled')) {
+            const presetsText = document.getElementById('newCameraPtzPresets').value.trim();
+            let presets = [];
+            if (presetsText) {
+                presets = JSON.parse(presetsText);
+            }
             payload.ptz_enabled = true;
             payload.ptz_public = checked('newCameraPtzPublic');
             payload.ptz_allow_presets = checked('newCameraPtzAllowPresets');
             payload.ptz_allow_manual_control = checked('newCameraPtzAllowManual');
             payload.ptz_access_level = document.getElementById('newCameraPtzAccessLevel').value || 'presets';
+            payload.ptz_host = document.getElementById('newCameraPtzHost').value.trim();
+            payload.ptz_port = intValue('newCameraPtzPort', 80);
+            payload.ptz_username = document.getElementById('newCameraPtzUsername').value.trim();
+            payload.ptz_password = document.getElementById('newCameraPtzPassword').value;
+            payload.ptz_profile_token = document.getElementById('newCameraPtzProfileToken').value.trim();
+            payload.ptz_presets = presets;
         }
         return payload;
     }

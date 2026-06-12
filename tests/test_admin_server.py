@@ -109,6 +109,14 @@ class ConfigServerTestCase(unittest.TestCase):
             "ptz_allow_presets": True,
             "ptz_allow_manual_control": False,
             "ptz_access_level": "presets",
+            "ptz_host": "192.0.2.10",
+            "ptz_port": 8899,
+            "ptz_username": "operator",
+            "ptz_password": "secret",
+            "ptz_profile_token": "profile-1",
+            "ptz_presets": [
+                {"id": "launch", "name": "Launch Pad", "token": "preset-1"}
+            ],
             "cache_bust": True,
             "mozjpeg_optimize": True,
             "timelapse_enabled": True,
@@ -156,6 +164,12 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(camera["ptz"]["allow_presets"])
         self.assertFalse(camera["ptz"]["allow_manual_control"])
         self.assertEqual(camera["ptz"]["access_level"], "presets")
+        self.assertEqual(camera["ptz"]["host"], "192.0.2.10")
+        self.assertEqual(camera["ptz"]["port"], 8899)
+        self.assertEqual(camera["ptz"]["username"], "operator")
+        self.assertEqual(camera["ptz"]["password"], "secret")
+        self.assertEqual(camera["ptz"]["profile_token"], "profile-1")
+        self.assertEqual(camera["ptz"]["presets"][0]["id"], "launch")
         self.assertEqual(camera["snap_interval_s"], 60)
         self.assertEqual(camera["activity_interval_s"], 10)
         self.assertEqual(camera["work_dir_max_size_GB"], 5)
@@ -239,6 +253,22 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(delete.status_code, 200)
         listed_again = self.app.get("/api/users")
         self.assertEqual(listed_again.json["users"], [])
+
+    def test_ptz_lock_endpoint_updates_runtime_lock(self):
+        response = self.app.post(
+            "/api/ptz/lock",
+            data=json.dumps(
+                {
+                    "camera": "cam1",
+                    "locked": True,
+                    "reason": "Launch framing",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["lock"]["locked"])
+        self.assertEqual(response.json["lock"]["reason"], "Launch framing")
 
     def test_admin_auth_requires_basic_credentials(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True

@@ -306,6 +306,17 @@ class FenetreConfigTestCase(unittest.TestCase):
                         "public": True,
                         "allow_presets": True,
                         "allow_manual_control": False,
+                        "host": "192.0.2.10",
+                        "port": 8899,
+                        "username": "operator",
+                        "password": "secret",
+                        "presets": [
+                            {
+                                "id": "launch",
+                                "name": "Launch Pad",
+                                "token": "preset-token",
+                            }
+                        ],
                     },
                 },
                 "private-cam": {"url": "http://private", "public": False},
@@ -323,6 +334,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertTrue(public_cam["ptz"]["public"])
         self.assertTrue(public_cam["ptz"]["allow_presets"])
         self.assertFalse(public_cam["ptz"]["allow_manual_control"])
+        self.assertEqual(
+            public_cam["ptz"]["presets"], [{"id": "launch", "name": "Launch Pad"}]
+        )
+        self.assertNotIn("password", public_cam["ptz"])
+        self.assertNotIn("host", public_cam["ptz"])
 
     def test_config_load_adds_default_sun_path_postprocessing(self):
         test_data = {

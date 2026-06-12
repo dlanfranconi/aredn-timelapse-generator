@@ -369,6 +369,35 @@ body.dark-mode .camera-details .filename {
     margin: 5px;
     padding: 8px 12px;
 }
+.ptz-presets {
+    margin: 8px 5px 0;
+}
+.ptz-presets select,
+.ptz-presets button {
+    border-radius: 4px;
+    font-size: 0.9em;
+    margin-right: 6px;
+    padding: 8px 12px;
+}
+.ptz-presets select {
+    background-color: #fff;
+    border: 1px solid #007bff;
+    color: #333;
+}
+.ptz-presets button {
+    background-color: #007bff;
+    border: 1px solid #007bff;
+    color: #fff;
+    cursor: pointer;
+}
+.ptz-presets button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+.ptz-status {
+    color: #555;
+    font-size: 0.85em;
+}
 .camera-details .links a:hover {
     background-color: #0056b3;
 }
@@ -379,6 +408,14 @@ body.dark-mode .camera-details .links select {
     background-color: #1e1e1e;
     border-color: #0056b3;
     color: #e0e0e0;
+}
+body.dark-mode .ptz-presets select {
+    background-color: #1e1e1e;
+    border-color: #0056b3;
+    color: #e0e0e0;
+}
+body.dark-mode .ptz-status {
+    color: #bbb;
 }
 body.dark-mode .camera-details .links a:hover {
     background-color: #003d80;
