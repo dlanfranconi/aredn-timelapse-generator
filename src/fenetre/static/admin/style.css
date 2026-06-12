@@ -38,6 +38,13 @@ h1 {
     cursor: not-allowed;
 }
 
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 #statusMessage {
     margin-bottom: 20px;
     padding: 10px;
@@ -81,6 +88,61 @@ h1 {
     padding: 8px;
     border-radius: 4px;
     border: 1px solid #ccc;
+}
+
+.storage-summary-body {
+    display: grid;
+    gap: 10px;
+}
+
+.storage-total {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.storage-total strong {
+    font-size: 1.35rem;
+}
+
+.storage-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e7f3ff;
+    color: #0056b3;
+    font-size: 0.85rem;
+}
+
+.storage-path {
+    color: #555;
+    font-family: monospace;
+    overflow-wrap: anywhere;
+}
+
+.storage-camera-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.storage-camera-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 8px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.storage-camera-list small {
+    grid-column: 1 / -1;
+    color: #666;
 }
 
 .quick-settings button,
@@ -156,12 +218,102 @@ h1 {
 .camera-add-panel input[type="text"],
 .camera-add-panel input[type="password"],
 .camera-add-panel input[type="number"],
-.camera-add-panel select {
+.camera-add-panel select,
+.camera-add-panel textarea,
+.user-form input,
+.user-form select {
     width: 100%;
     padding: 8px;
     border-radius: 4px;
     border: 1px solid #ccc;
     box-sizing: border-box;
+}
+
+.modal[hidden] {
+    display: none;
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 36px 16px;
+    background: rgba(0, 0, 0, 0.45);
+    overflow-y: auto;
+}
+
+.modal-card {
+    width: min(760px, 100%);
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.25);
+    padding: 18px;
+}
+
+.modal-card-wide {
+    width: min(1040px, 100%);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.modal-header h2 {
+    margin: 0;
+}
+
+.modal .quick-settings {
+    margin-bottom: 0;
+}
+
+.user-manager {
+    display: grid;
+    grid-template-columns: minmax(180px, 280px) minmax(320px, 1fr);
+    gap: 18px;
+}
+
+.user-list {
+    display: grid;
+    gap: 8px;
+}
+
+.user-list-item {
+    width: 100%;
+    text-align: left;
+    padding: 9px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #f9f9f9;
+    cursor: pointer;
+}
+
+.user-form {
+    display: grid;
+    grid-template-columns: minmax(140px, 180px) minmax(220px, 1fr);
+    gap: 10px 12px;
+    align-items: center;
+}
+
+.user-form label {
+    font-weight: bold;
+}
+
+.checkbox-line,
+.user-actions {
+    grid-column: 2;
+}
+
+.user-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .add-camera-actions {
@@ -188,6 +340,7 @@ h1 {
     padding: 10px;
     margin-bottom: 10px;
     border-radius: 4px;
+    background: #fff;
 }
 
 #configFormContainer legend {
@@ -197,7 +350,9 @@ h1 {
 }
 
 #configFormContainer .form-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(160px, 240px) minmax(240px, 1fr);
+    gap: 10px;
     align-items: center; /* Align items vertically */
     margin-bottom: 10px; /* Space between rows */
 }
@@ -205,7 +360,6 @@ h1 {
 #configFormContainer label {
     font-weight: bold;
     margin-right: 10px; /* Space between label and input */
-    flex: 0 0 200px; /* Fixed width for labels */
     white-space: nowrap;
 }
 
@@ -226,6 +380,21 @@ h1 {
     border-radius: 4px;
     border: 1px solid #ccc;
     box-sizing: border-box; /* Important for width calculation */
+}
+
+@media (max-width: 760px) {
+    .form-grid,
+    .option-content,
+    .user-manager,
+    .user-form,
+    #configFormContainer .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .checkbox-line,
+    .user-actions {
+        grid-column: auto;
+    }
 }
 
 #configFormContainer input[type="checkbox"] {

@@ -1015,6 +1015,8 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
 
         # Copy any known keys used elsewhere without deep validation to preserve behavior
         for k in (
+            "public",
+            "ptz",
             "work_dir_max_size_GB",
             "snap_interval_s",
             "activity_interval_s",

@@ -19,7 +19,8 @@
             <button id="reloadAppBtn">Reload Application Config</button>
             <button id="syncUiBtn">Sync UI</button>
             <button id="rebuildCamerasBtn">Rebuild cameras.json</button>
-            <button id="addCameraBtn">Add New Camera</button> <!-- Added this button -->
+            <button id="manageUsersBtn" type="button">Manage Users</button>
+            <button id="addCameraBtn" type="button">Add New Camera</button>
         </div>
 
         <div id="statusMessage"></div>
@@ -31,14 +32,27 @@
             <button id="saveSiteNameBtn" type="button" disabled>Save GUI name</button>
         </section>
 
+        <section class="quick-settings storage-summary">
+            <div class="section-header">
+                <h2>Storage</h2>
+                <button id="refreshStorageBtn" type="button">Refresh</button>
+            </div>
+            <div id="storageSummary" class="storage-summary-body">Loading storage usage...</div>
+        </section>
+
+        <div id="addCameraModal" class="modal" hidden>
+            <div class="modal-card modal-card-wide">
+                <div class="modal-header">
+                    <h2>Add Camera</h2>
+                    <button id="closeAddCameraModalBtn" type="button">Close</button>
+                </div>
         <section class="quick-settings camera-add-panel">
-            <h2>Add Camera</h2>
             <div class="form-grid">
                 <label for="newCameraName">Camera ID</label>
                 <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
 
-                <label for="newCameraDescription">Display name</label>
-                <input id="newCameraDescription" type="text" autocomplete="off" placeholder="North Ridge">
+                <label for="newCameraDescription">Description</label>
+                <textarea id="newCameraDescription" rows="2" placeholder="Optional text shown under the camera name"></textarea>
 
                 <label for="newCameraVendor">Template</label>
                 <select id="newCameraVendor">
@@ -57,6 +71,7 @@
             <div class="option-groups">
                 <fieldset class="option-group enabled">
                     <legend>Required Capture</legend>
+                    <label><input id="newCameraPublic" type="checkbox" checked> Show on public page</label>
                     <label><input id="newCameraCacheBust" type="checkbox" checked> Cache bust URL</label>
                     <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
                     <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
@@ -126,6 +141,24 @@
                         </select>
                     </div>
                 </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraPtzEnabled" type="checkbox"> PTZ controls</label></legend>
+                    <div class="option-content">
+                        <label><input id="newCameraPtzPublic" type="checkbox"> Show PTZ on public page</label>
+                        <span></span>
+                        <label><input id="newCameraPtzAllowPresets" type="checkbox" checked> Allow presets</label>
+                        <span></span>
+                        <label><input id="newCameraPtzAllowManual" type="checkbox"> Allow manual movement</label>
+                        <span></span>
+                        <label for="newCameraPtzAccessLevel">Default access</label>
+                        <select id="newCameraPtzAccessLevel">
+                            <option value="presets">Presets only</option>
+                            <option value="manual">Manual controls</option>
+                            <option value="admin">Admin only</option>
+                        </select>
+                    </div>
+                </fieldset>
             </div>
 
             <div class="add-camera-actions">
@@ -134,6 +167,54 @@
             </div>
             <div id="newCameraTestResult" class="camera-test-result"></div>
         </section>
+            </div>
+        </div>
+
+        <div id="userModal" class="modal" hidden>
+            <div class="modal-card modal-card-wide">
+                <div class="modal-header">
+                    <h2>Manage Users</h2>
+                    <button id="closeUserModalBtn" type="button">Close</button>
+                </div>
+                <div class="user-manager">
+                    <div>
+                        <h3>Users</h3>
+                        <div id="userList" class="user-list"></div>
+                    </div>
+                    <form id="userForm" class="user-form">
+                        <label for="userUsername">Username</label>
+                        <input id="userUsername" type="text" autocomplete="username" placeholder="operator">
+
+                        <label for="userPassword">New password</label>
+                        <input id="userPassword" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password">
+
+                        <label for="userRole">Role</label>
+                        <select id="userRole">
+                            <option value="viewer">Viewer</option>
+                            <option value="operator">Operator</option>
+                            <option value="admin">Admin</option>
+                        </select>
+
+                        <label for="userPtzAccess">PTZ access</label>
+                        <select id="userPtzAccess">
+                            <option value="presets">Presets only</option>
+                            <option value="manual">Manual controls</option>
+                            <option value="admin">Admin controls</option>
+                        </select>
+
+                        <label for="userPtzCameras">PTZ cameras</label>
+                        <select id="userPtzCameras" multiple size="8"></select>
+
+                        <label class="checkbox-line"><input id="userDisabled" type="checkbox"> Disabled</label>
+                        <div class="user-actions">
+                            <button id="newUserBtn" type="button">New User</button>
+                            <button id="saveUserBtn" type="submit">Save User</button>
+                            <button id="deleteUserBtn" type="button">Delete User</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
 
         <section class="quick-settings advanced-config-note">
             <h2>Advanced Config Editor</h2>

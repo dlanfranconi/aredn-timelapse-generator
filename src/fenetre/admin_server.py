@@ -19,33 +19,105 @@ from fenetre.config import config_load
 from fenetre.gopro import GoPro
 from fenetre.ui_utils import copy_public_html_files
 
-metric_pictures_taken_total = Counter("pictures_taken_total", "Total number of pictures taken", ["camera_name"])
-metric_last_successful_picture_timestamp = Gauge("capture_last_success_timestamp", "Timestamp of the last successfully taken picture", ["camera_name"])
-metric_capture_failures_total = Counter("capture_failures_total", "Total number of capture failures", ["camera_name"])
-metric_timelapses_created_total = Counter("timelapses_created_total", "Total number of timelapses created", ["camera_name", "type"])
-metric_timelapse_queue_size = Gauge("timelapse_queue_size", "Number of timelapses in the queue")
-metric_camera_directory_size_bytes = Gauge("camera_directory_size_bytes", "Size of the camera directory in bytes", ["camera_name"])
-metric_work_directory_size_bytes = Gauge("work_dir_size_bytes", "Size of the work directory in bytes")
-metric_directories_total = Gauge("dir_total_count", "Total number of directories", ["camera_name"])
-metric_directories_archived_total = Gauge("dir_archived_count", "Number of archived directories", ["camera_name"])
-metric_directories_timelapse_total = Gauge("dir_timelapse_count", "Number of directories with a timelapse file", ["camera_name"])
-metric_directories_daylight_total = Gauge("dir_daylight_count", "Number of directories with a daylight.png file", ["camera_name"])
-metric_picture_width_pixels = Gauge("picture_width_pixels", "Width of the captured picture in pixels", ["camera_name"])
-metric_picture_height_pixels = Gauge("picture_height_pixels", "Height of the captured picture in pixels", ["camera_name"])
-metric_picture_size_bytes = Gauge("picture_size_bytes", "Size of the captured picture in bytes", ["camera_name"])
-metric_picture_iso = Gauge("picture_iso", "ISO value of the captured picture", ["camera_name"])
-metric_picture_focal_length_mm = Gauge("picture_focal_length_mm", "Focal length of the captured picture in mm", ["camera_name"])
-metric_picture_aperture = Gauge("picture_aperture", "Aperture value of the captured picture", ["camera_name"])
-metric_picture_exposure_time_seconds = Gauge("picture_exposure_time_seconds", "Exposure time of the captured picture in seconds", ["camera_name"])
-metric_picture_white_balance = Gauge("picture_white_balance", "White balance value of the captured picture", ["camera_name"])
-metric_processing_time_seconds = Gauge("capture_processing_time_seconds", "Time it took to fetch and process a new picture", ["camera_name"])
-metric_sleep_time_seconds = Gauge("capture_loop_sleep_time_seconds", "Time the camera sleeps between pictures", ["camera_name"])
-metric_camera_mode = Gauge("camera_mode", "Current camera mode with mode label", ["camera_name", "mode"])
-metric_camera_ssim_value = Gauge("camera_ssim_value", "Latest SSIM measurement", ["camera_name"])
-metric_camera_ssim_target = Gauge("camera_ssim_target", "Configured SSIM target", ["camera_name"])
-metric_camera_online = Gauge("camera_online", "Camera online status reported by the snap loop", ["camera_name"])
+metric_pictures_taken_total = Counter(
+    "pictures_taken_total", "Total number of pictures taken", ["camera_name"]
+)
+metric_last_successful_picture_timestamp = Gauge(
+    "capture_last_success_timestamp",
+    "Timestamp of the last successfully taken picture",
+    ["camera_name"],
+)
+metric_capture_failures_total = Counter(
+    "capture_failures_total", "Total number of capture failures", ["camera_name"]
+)
+metric_timelapses_created_total = Counter(
+    "timelapses_created_total",
+    "Total number of timelapses created",
+    ["camera_name", "type"],
+)
+metric_timelapse_queue_size = Gauge(
+    "timelapse_queue_size", "Number of timelapses in the queue"
+)
+metric_camera_directory_size_bytes = Gauge(
+    "camera_directory_size_bytes",
+    "Size of the camera directory in bytes",
+    ["camera_name"],
+)
+metric_work_directory_size_bytes = Gauge(
+    "work_dir_size_bytes", "Size of the work directory in bytes"
+)
+metric_directories_total = Gauge(
+    "dir_total_count", "Total number of directories", ["camera_name"]
+)
+metric_directories_archived_total = Gauge(
+    "dir_archived_count", "Number of archived directories", ["camera_name"]
+)
+metric_directories_timelapse_total = Gauge(
+    "dir_timelapse_count",
+    "Number of directories with a timelapse file",
+    ["camera_name"],
+)
+metric_directories_daylight_total = Gauge(
+    "dir_daylight_count",
+    "Number of directories with a daylight.png file",
+    ["camera_name"],
+)
+metric_picture_width_pixels = Gauge(
+    "picture_width_pixels", "Width of the captured picture in pixels", ["camera_name"]
+)
+metric_picture_height_pixels = Gauge(
+    "picture_height_pixels", "Height of the captured picture in pixels", ["camera_name"]
+)
+metric_picture_size_bytes = Gauge(
+    "picture_size_bytes", "Size of the captured picture in bytes", ["camera_name"]
+)
+metric_picture_iso = Gauge(
+    "picture_iso", "ISO value of the captured picture", ["camera_name"]
+)
+metric_picture_focal_length_mm = Gauge(
+    "picture_focal_length_mm",
+    "Focal length of the captured picture in mm",
+    ["camera_name"],
+)
+metric_picture_aperture = Gauge(
+    "picture_aperture", "Aperture value of the captured picture", ["camera_name"]
+)
+metric_picture_exposure_time_seconds = Gauge(
+    "picture_exposure_time_seconds",
+    "Exposure time of the captured picture in seconds",
+    ["camera_name"],
+)
+metric_picture_white_balance = Gauge(
+    "picture_white_balance",
+    "White balance value of the captured picture",
+    ["camera_name"],
+)
+metric_processing_time_seconds = Gauge(
+    "capture_processing_time_seconds",
+    "Time it took to fetch and process a new picture",
+    ["camera_name"],
+)
+metric_sleep_time_seconds = Gauge(
+    "capture_loop_sleep_time_seconds",
+    "Time the camera sleeps between pictures",
+    ["camera_name"],
+)
+metric_camera_mode = Gauge(
+    "camera_mode", "Current camera mode with mode label", ["camera_name", "mode"]
+)
+metric_camera_ssim_value = Gauge(
+    "camera_ssim_value", "Latest SSIM measurement", ["camera_name"]
+)
+metric_camera_ssim_target = Gauge(
+    "camera_ssim_target", "Configured SSIM target", ["camera_name"]
+)
+metric_camera_online = Gauge(
+    "camera_online", "Camera online status reported by the snap loop", ["camera_name"]
+)
 gopro_state_gauge = Gauge("gopro_state", "GoPro State", ["camera_name", "state_name"])
-gopro_setting_gauge = Gauge("gopro_setting", "GoPro Setting", ["camera_name", "setting_name"])
+gopro_setting_gauge = Gauge(
+    "gopro_setting", "GoPro Setting", ["camera_name", "setting_name"]
+)
 
 app = Flask(__name__)
 
@@ -148,7 +220,9 @@ def _load_effective_config_with_raw() -> tuple[dict, dict]:
 def _backup_config(config_file_path: str) -> str | None:
     if not os.path.exists(config_file_path):
         return None
-    backup_path = f"{config_file_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    backup_path = (
+        f"{config_file_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    )
     with open(config_file_path, "rb") as src, open(backup_path, "wb") as dst:
         dst.write(src.read())
     return backup_path
@@ -161,7 +235,9 @@ def _write_yaml_for_bind_mount(config_file_path: str, config_data: dict) -> str 
     we keep a timestamped backup and then truncate/write/fsync the mounted file.
     """
     backup_path = _backup_config(config_file_path)
-    rendered = yaml.safe_dump(config_data, sort_keys=False, default_flow_style=False, indent=2)
+    rendered = yaml.safe_dump(
+        config_data, sort_keys=False, default_flow_style=False, indent=2
+    )
     with open(config_file_path, "w") as f:
         f.write(rendered)
         f.flush()
@@ -183,14 +259,21 @@ def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True
     if cache_bust:
         separator = "&" if "?" in request_url else "?"
         request_url = f"{request_url}{separator}_fenetre_test={int(datetime.utcnow().timestamp())}"
-    headers = {"Accept": "image/*,*/*;q=0.8", "User-Agent": "Fenetre Admin Snapshot Tester"}
+    headers = {
+        "Accept": "image/*,*/*;q=0.8",
+        "User-Agent": "Fenetre Admin Snapshot Tester",
+    }
     response = requests.get(request_url, timeout=timeout_s, headers=headers)
     response.raise_for_status()
     image_bytes = response.content
     image = Image.open(BytesIO(image_bytes))
     image.verify()
     reopened = Image.open(BytesIO(image_bytes))
-    return image_bytes, response.headers.get("content-type", "image/jpeg"), reopened.size
+    return (
+        image_bytes,
+        response.headers.get("content-type", "image/jpeg"),
+        reopened.size,
+    )
 
 
 def _build_camera_config(payload: dict) -> tuple[str, dict]:
@@ -201,15 +284,28 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
 
     camera = {
         "url": url,
-        "description": payload.get("description") or name,
         "timeout_s": int(payload.get("timeout_s") or 15),
         "cache_bust": bool(payload.get("cache_bust", True)),
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),
     }
+    description = (payload.get("description") or "").strip()
+    if description:
+        camera["description"] = description
 
     if payload.get("disabled"):
         camera["disabled"] = True
+    camera["public"] = bool(payload.get("public", True))
+    if payload.get("ptz_enabled"):
+        camera["ptz"] = {
+            "enabled": True,
+            "public": bool(payload.get("ptz_public", False)),
+            "allow_presets": bool(payload.get("ptz_allow_presets", True)),
+            "allow_manual_control": bool(
+                payload.get("ptz_allow_manual_control", False)
+            ),
+            "access_level": payload.get("ptz_access_level") or "presets",
+        }
     if payload.get("timelapse_enabled") is not None:
         camera["timelapse_enabled"] = bool(payload.get("timelapse_enabled"))
     if payload.get("work_dir_max_size_GB"):
@@ -231,10 +327,18 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
         camera["sunrise_sunset"] = {
             "enabled": True,
             "interval_s": int(payload.get("sunrise_sunset_interval_s") or 15),
-            "sunrise_offset_start_minutes": int(payload.get("sunrise_offset_start_minutes") or 45),
-            "sunrise_offset_end_minutes": int(payload.get("sunrise_offset_end_minutes") or 45),
-            "sunset_offset_start_minutes": int(payload.get("sunset_offset_start_minutes") or 45),
-            "sunset_offset_end_minutes": int(payload.get("sunset_offset_end_minutes") or 45),
+            "sunrise_offset_start_minutes": int(
+                payload.get("sunrise_offset_start_minutes") or 45
+            ),
+            "sunrise_offset_end_minutes": int(
+                payload.get("sunrise_offset_end_minutes") or 45
+            ),
+            "sunset_offset_start_minutes": int(
+                payload.get("sunset_offset_start_minutes") or 45
+            ),
+            "sunset_offset_end_minutes": int(
+                payload.get("sunset_offset_end_minutes") or 45
+            ),
         }
 
     postprocessing = []
@@ -243,23 +347,80 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
             continue
         step_type = step.get("type")
         if step_type == "timestamp":
-            postprocessing.append({
-                "type": "timestamp",
-                "enabled": bool(step.get("enabled", True)),
-                "position": step.get("position") or "bottom_right",
-                "size": int(step.get("size") or 24),
-                "color": step.get("color") or "white",
-                "format": step.get("format") or "%Y-%m-%d %H:%M:%S %Z",
-            })
+            postprocessing.append(
+                {
+                    "type": "timestamp",
+                    "enabled": bool(step.get("enabled", True)),
+                    "position": step.get("position") or "bottom_right",
+                    "size": int(step.get("size") or 24),
+                    "color": step.get("color") or "white",
+                    "format": step.get("format") or "%Y-%m-%d %H:%M:%S %Z",
+                }
+            )
         elif step_type == "crop" and step.get("area"):
             postprocessing.append({"type": "crop", "area": step.get("area")})
         elif step_type == "resize":
-            postprocessing.append({"type": "resize", "width": int(step.get("width") or 1280), "height": int(step.get("height") or 720)})
+            postprocessing.append(
+                {
+                    "type": "resize",
+                    "width": int(step.get("width") or 1280),
+                    "height": int(step.get("height") or 720),
+                }
+            )
         elif step_type == "awb":
             postprocessing.append({"type": "awb"})
     if postprocessing:
         camera["postprocessing"] = postprocessing
     return name, camera
+
+
+def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, dict]:
+    username = (payload.get("username") or "").strip()
+    if not username:
+        raise ValueError("username is required.")
+    if not re.match(r"^[A-Za-z0-9_.@-]+$", username):
+        raise ValueError("username can only use letters, numbers, _, ., @, and -.")
+
+    existing = dict(existing or {})
+    user = {
+        "disabled": bool(payload.get("disabled", existing.get("disabled", False))),
+        "role": payload.get("role") or existing.get("role") or "viewer",
+        "ptz_cameras": payload.get("ptz_cameras", existing.get("ptz_cameras", []))
+        or [],
+        "ptz_access": payload.get("ptz_access", existing.get("ptz_access", "presets")),
+    }
+    if payload.get("password"):
+        # Store plaintext for now to match existing Basic Auth deployment style.
+        # This config block is groundwork for multi-user admin/PTZ auth.
+        user["password"] = str(payload["password"])
+    elif existing.get("password"):
+        user["password"] = existing["password"]
+    return username, user
+
+
+def _work_dir_from_config(config: dict) -> str | None:
+    return (config.get("global") or {}).get("work_dir")
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    if not path or not os.path.exists(path):
+        return 0
+    for dirpath, _, filenames in os.walk(path):
+        for filename in filenames:
+            full_path = os.path.join(dirpath, filename)
+            if not os.path.islink(full_path):
+                total += os.path.getsize(full_path)
+    return total
+
+
+def _format_bytes(value: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(value)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
 
 
 @app.route("/metrics")
@@ -278,6 +439,120 @@ def get_config():
         return jsonify({"error": f"Error reading configuration: {str(e)}"}), 500
 
 
+@app.route("/api/storage/summary", methods=["GET"])
+def storage_summary():
+    try:
+        _, config = _load_effective_config_with_raw()
+        work_dir = _work_dir_from_config(config)
+        storage_config = (config.get("global") or {}).get(
+            "storage_management", {}
+        ) or {}
+        photos_dir = os.path.join(work_dir, "photos") if work_dir else None
+        total_bytes = _dir_size(work_dir) if work_dir else 0
+
+        cameras = []
+        for name, camera_cfg in (config.get("cameras") or {}).items():
+            camera_dir = os.path.join(photos_dir, name) if photos_dir else None
+            size_bytes = _dir_size(camera_dir) if camera_dir else 0
+            limit_gb = camera_cfg.get(
+                "work_dir_max_size_GB", storage_config.get("camera_max_size_GB")
+            )
+            cameras.append(
+                {
+                    "name": name,
+                    "bytes": size_bytes,
+                    "display": _format_bytes(size_bytes),
+                    "limit_GB": limit_gb,
+                }
+            )
+        cameras.sort(key=lambda item: item["bytes"], reverse=True)
+
+        return jsonify(
+            {
+                "work_dir": work_dir,
+                "bytes": total_bytes,
+                "display": _format_bytes(total_bytes),
+                "limit_GB": storage_config.get("work_dir_max_size_GB"),
+                "enabled": bool(storage_config.get("enabled", False)),
+                "dry_run": bool(storage_config.get("dry_run", True)),
+                "cameras": cameras,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to calculate storage summary: {str(e)}"}), 500
+
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    try:
+        _, config = _load_effective_config_with_raw()
+        users = config.get("users") or {}
+        public_users = []
+        for username, user in users.items():
+            public_users.append(
+                {
+                    "username": username,
+                    "disabled": bool(user.get("disabled", False)),
+                    "role": user.get("role", "viewer"),
+                    "ptz_cameras": user.get("ptz_cameras", []),
+                    "ptz_access": user.get("ptz_access", "presets"),
+                    "has_password": bool(user.get("password")),
+                }
+            )
+        return jsonify(
+            {
+                "users": public_users,
+                "cameras": sorted((config.get("cameras") or {}).keys()),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to list users: {str(e)}"}), 500
+
+
+@app.route("/api/users", methods=["POST"])
+def upsert_user():
+    try:
+        payload = request.get_json(force=True) or {}
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        users = config.setdefault("users", {})
+        username, user = _normalize_user(payload, users.get(payload.get("username")))
+        users[username] = user
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        return jsonify(
+            {
+                "message": f"User '{username}' saved.",
+                "backup": os.path.basename(backup_path) if backup_path else None,
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to save user: {str(e)}"}), 500
+
+
+@app.route("/api/users/<path:username>", methods=["DELETE"])
+def delete_user(username):
+    try:
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        users = config.setdefault("users", {})
+        if username not in users:
+            return jsonify({"error": f"User '{username}' was not found."}), 404
+        users.pop(username)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        return jsonify(
+            {
+                "message": f"User '{username}' removed.",
+                "backup": os.path.basename(backup_path) if backup_path else None,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to remove user: {str(e)}"}), 500
+
+
 @app.route("/config", methods=["PUT"])
 def update_config():
     try:
@@ -290,7 +565,12 @@ def update_config():
         if "config" in new_config_json and len(new_config_json.keys()) == 1:
             new_config_json = new_config_json["config"]
         if not isinstance(new_config_json, dict):
-            return jsonify({"error": "Root element of the configuration must be a dictionary."}), 400
+            return (
+                jsonify(
+                    {"error": "Root element of the configuration must be a dictionary."}
+                ),
+                400,
+            )
         raw_config = _load_raw_config()
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
@@ -299,7 +579,10 @@ def update_config():
             message += f" Backup: {os.path.basename(backup_path)}"
         return jsonify({"message": message}), 200
     except BadRequest:
-        return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
     except Exception as e:
         return jsonify({"error": f"Error processing configuration: {str(e)}"}), 500
 
@@ -323,9 +606,20 @@ def update_deployment_name():
         message = "GUI name updated. Reload and sync UI to publish the change."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
-        return jsonify({"message": message, "backup": os.path.basename(backup_path) if backup_path else None}), 200
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "backup": os.path.basename(backup_path) if backup_path else None,
+                }
+            ),
+            200,
+        )
     except BadRequest:
-        return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
     except Exception as e:
         return jsonify({"error": f"Failed to update GUI name: {str(e)}"}), 500
 
@@ -343,15 +637,20 @@ def test_snapshot_url():
         timeout_s = int(payload.get("timeout_s") or 15)
         if not url:
             return jsonify({"error": "Snapshot URL is required."}), 400
-        image_bytes, content_type, size = _fetch_snapshot_bytes(url, timeout_s=timeout_s)
-        return jsonify({
-            "ok": True,
-            "content_type": content_type,
-            "width": size[0],
-            "height": size[1],
-            "bytes": len(image_bytes),
-            "preview_data_url": "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii"),
-        })
+        image_bytes, content_type, size = _fetch_snapshot_bytes(
+            url, timeout_s=timeout_s
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "content_type": content_type,
+                "width": size[0],
+                "height": size[1],
+                "bytes": len(image_bytes),
+                "preview_data_url": "data:image/jpeg;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }
+        )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
@@ -369,11 +668,24 @@ def add_camera():
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
         if payload.get("require_test", True):
-            _fetch_snapshot_bytes(camera["url"], timeout_s=camera.get("timeout_s", 15), cache_bust=camera.get("cache_bust", True))
+            _fetch_snapshot_bytes(
+                camera["url"],
+                timeout_s=camera.get("timeout_s", 15),
+                cache_bust=camera.get("cache_bust", True),
+            )
         config["cameras"][name] = camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        return jsonify({"message": f"Camera '{name}' added. Reload the app to make it live.", "camera_name": name, "backup": os.path.basename(backup_path) if backup_path else None}), 200
+        return (
+            jsonify(
+                {
+                    "message": f"Camera '{name}' added. Reload the app to make it live.",
+                    "camera_name": name,
+                    "backup": os.path.basename(backup_path) if backup_path else None,
+                }
+            ),
+            200,
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -398,7 +710,15 @@ def rename_camera():
             cameras[new_name]["description"] = payload.get("description")
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        return jsonify({"message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.", "backup": os.path.basename(backup_path) if backup_path else None}), 200
+        return (
+            jsonify(
+                {
+                    "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.",
+                    "backup": os.path.basename(backup_path) if backup_path else None,
+                }
+            ),
+            200,
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -423,14 +743,30 @@ def capture_for_ui(camera_name):
     try:
         _, config = _load_effective_config_with_raw()
         if "cameras" not in config or camera_name not in config["cameras"]:
-            return jsonify({"error": f"Camera '{camera_name}' not found in configuration."}), 404
+            return (
+                jsonify(
+                    {"error": f"Camera '{camera_name}' not found in configuration."}
+                ),
+                404,
+            )
         camera_config = config["cameras"][camera_name]
         url = camera_config.get("url")
         gopro_ip = camera_config.get("gopro_ip")
         if not url and not gopro_ip:
-            return jsonify({"error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured."}), 400
+            return (
+                jsonify(
+                    {
+                        "error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured."
+                    }
+                ),
+                400,
+            )
         if url:
-            image_bytes, content_type, _ = _fetch_snapshot_bytes(url, camera_config.get("timeout_s", 20), camera_config.get("cache_bust", False))
+            image_bytes, content_type, _ = _fetch_snapshot_bytes(
+                url,
+                camera_config.get("timeout_s", 20),
+                camera_config.get("cache_bust", False),
+            )
             return send_file(BytesIO(image_bytes), mimetype=content_type)
         gopro_model = camera_config.get("gopro_model") or "hero11"
         if gopro_model == "open_gopro":
@@ -441,9 +777,21 @@ def capture_for_ui(camera_name):
             return jsonify({"error": "Failed to capture photo from GoPro."}), 500
         return send_file(BytesIO(jpeg_bytes), mimetype="image/jpeg")
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Error fetching image for camera '{camera_name}': {str(e)}"}), 500
+        return (
+            jsonify(
+                {"error": f"Error fetching image for camera '{camera_name}': {str(e)}"}
+            ),
+            500,
+        )
     except Exception as e:
-        return jsonify({"error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"}), 500
+        return (
+            jsonify(
+                {
+                    "error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"
+                }
+            ),
+            500,
+        )
 
 
 @app.route("/api/camera/preview_crop", methods=["POST"])
@@ -455,13 +803,21 @@ def preview_crop():
         return jsonify({"error": "No crop_data provided in the request form."}), 400
     try:
         crop_data = json.loads(crop_data_str)
-        x = int(crop_data.get("x")); y = int(crop_data.get("y")); width = int(crop_data.get("width")); height = int(crop_data.get("height"))
+        x = int(crop_data.get("x"))
+        y = int(crop_data.get("y"))
+        width = int(crop_data.get("width"))
+        height = int(crop_data.get("height"))
         if width <= 0 or height <= 0:
             return jsonify({"error": "Crop width and height must be positive."}), 400
         img = Image.open(request.files["image"].stream)
         img = ImageOps.exif_transpose(img)
         img_width, img_height = img.size
-        crop_box = (max(0, x), max(0, y), min(img_width, x + width), min(img_height, y + height))
+        crop_box = (
+            max(0, x),
+            max(0, y),
+            min(img_width, x + width),
+            min(img_height, y + height),
+        )
         if crop_box[0] >= crop_box[2] or crop_box[1] >= crop_box[3]:
             return jsonify({"error": "Crop area is outside image bounds."}), 400
         cropped_img = img.crop(crop_box)
@@ -471,7 +827,12 @@ def preview_crop():
             img_format = "JPEG"
         cropped_img.save(img_io, format=img_format)
         img_io.seek(0)
-        return send_file(img_io, mimetype="image/jpeg" if img_format == "JPEG" else f"image/{img_format.lower()}")
+        return send_file(
+            img_io,
+            mimetype=(
+                "image/jpeg" if img_format == "JPEG" else f"image/{img_format.lower()}"
+            ),
+        )
     except Exception as e:
         return jsonify({"error": f"Error during image processing: {str(e)}"}), 500
 
@@ -483,7 +844,14 @@ def reload_config():
         return jsonify({"error": "FENETRE_PID_FILE_PATH not set in app config."}), 500
     try:
         if not os.path.exists(fenetre_pid_file_path):
-            return jsonify({"error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."}), 404
+            return (
+                jsonify(
+                    {
+                        "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
+                    }
+                ),
+                404,
+            )
         with open(fenetre_pid_file_path, "r") as f:
             pid_str = f.read().strip()
         if not pid_str:
@@ -492,7 +860,14 @@ def reload_config():
         os.kill(pid, signal.SIGHUP)
         return jsonify({"message": f"Reload signal sent to process {pid}."}), 200
     except ProcessLookupError:
-        return jsonify({"error": f"Process with PID read from {fenetre_pid_file_path} not found."}), 500
+        return (
+            jsonify(
+                {
+                    "error": f"Process with PID read from {fenetre_pid_file_path} not found."
+                }
+            ),
+            500,
+        )
     except ValueError:
         return jsonify({"error": f"Invalid PID found in {fenetre_pid_file_path}."}), 500
     except Exception as e:
@@ -503,16 +878,22 @@ def reload_config():
 def rebuild_cameras_json():
     try:
         config_file_path = _config_file_path()
-        (_, cameras_config, global_config, _, timelapse_config) = config_load(config_file_path)
+        _, cameras_config, global_config, _, timelapse_config = config_load(
+            config_file_path
+        )
         work_dir = global_config.get("work_dir")
         if not work_dir:
             return jsonify({"error": "work_dir not set in global configuration."}), 500
         cameras_json_path = os.path.join(work_dir, "cameras.json")
         backup_path = None
         if os.path.exists(cameras_json_path):
-            backup_path = f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
+            backup_path = (
+                f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
+            )
             os.replace(cameras_json_path, backup_path)
-        write_cameras_metadata(cameras_config, global_config, timelapse_config, cameras_json_path)
+        write_cameras_metadata(
+            cameras_config, global_config, timelapse_config, cameras_json_path
+        )
         message = "cameras.json rebuilt successfully."
         if backup_path:
             message += f" Previous file saved as {os.path.basename(backup_path)}."

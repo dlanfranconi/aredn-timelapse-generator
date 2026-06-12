@@ -283,6 +283,10 @@ body.dark-mode .camera-item {
     font-size: 0.9em;
     margin-top: 2px;
 }
+.camera-description:empty {
+    display: none;
+    margin: 0;
+}
 .last-picture-time {
     font-size: 0.9em;
     color: #666;

@@ -63,13 +63,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ssim_area: { type: 'text', default: '0,0,1920,1080' },
         ssim_setpoint: { type: 'number', default: 0.90, step: 0.01 }, // For float input
         disabled: { type: 'checkbox', default: false },
+        public: { type: 'checkbox', default: true },
         mozjpeg_optimize: { type: 'checkbox', default: false },
         postprocessing: { type: 'array', default: [] } // Special handling: this will use the postprocessing logic
     };
     // Order for common fields (can be refined)
     const commonCameraFieldsOrder = [
         'description', 'snap_interval_s', 'activity_interval_s', 'timeout_s', 'sky_area', 'ssim_area', 'ssim_setpoint',
-        'disabled', 'mozjpeg_optimize', 'postprocessing'
+        'disabled', 'public', 'mozjpeg_optimize', 'postprocessing'
     ];
 
     // NOTE: The duplicate declaration of commonCameraFieldsOrder that was here has been removed.
@@ -79,7 +80,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const reloadAppBtn = document.getElementById('reloadAppBtn');
     const rebuildCamerasBtn = document.getElementById('rebuildCamerasBtn');
     const syncUiBtn = document.getElementById('syncUiBtn');
-    const addCameraBtn = document.getElementById('addCameraBtn'); // Get the new button
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const addCameraBtn = document.getElementById('addCameraBtn');
+    const refreshStorageBtn = document.getElementById('refreshStorageBtn');
+    const storageSummary = document.getElementById('storageSummary');
+    const addCameraModal = document.getElementById('addCameraModal');
+    const closeAddCameraModalBtn = document.getElementById('closeAddCameraModalBtn');
+    const userModal = document.getElementById('userModal');
+    const closeUserModalBtn = document.getElementById('closeUserModalBtn');
+    const userList = document.getElementById('userList');
+    const userForm = document.getElementById('userForm');
+    const newUserBtn = document.getElementById('newUserBtn');
+    const saveUserBtn = document.getElementById('saveUserBtn');
+    const deleteUserBtn = document.getElementById('deleteUserBtn');
+    const userUsername = document.getElementById('userUsername');
+    const userPassword = document.getElementById('userPassword');
+    const userRole = document.getElementById('userRole');
+    const userPtzAccess = document.getElementById('userPtzAccess');
+    const userPtzCameras = document.getElementById('userPtzCameras');
+    const userDisabled = document.getElementById('userDisabled');
     const siteNameInput = document.getElementById('siteNameInput');
     const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
     const newCameraName = document.getElementById('newCameraName');
@@ -94,13 +113,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMessage = document.getElementById('statusMessage');
     let loadedConfigData = null;
     let newCameraLastTest = null;
+    let usersPayload = { users: [], cameras: [] };
 
     loadConfigBtn.addEventListener('click', fetchAndDisplayConfig);
     saveConfigBtn.addEventListener('click', saveConfiguration);
     reloadAppBtn.addEventListener('click', reloadApplication);
     rebuildCamerasBtn.addEventListener('click', rebuildCamerasJson);
     syncUiBtn.addEventListener('click', syncUI);
-    addCameraBtn.addEventListener('click', handleAddCamera); // Add event listener
+    addCameraBtn.addEventListener('click', handleAddCamera);
+    closeAddCameraModalBtn.addEventListener('click', () => hideModal(addCameraModal));
+    manageUsersBtn.addEventListener('click', openUserManager);
+    closeUserModalBtn.addEventListener('click', () => hideModal(userModal));
+    refreshStorageBtn.addEventListener('click', loadStorageSummary);
+    newUserBtn.addEventListener('click', clearUserForm);
+    userForm.addEventListener('submit', saveUser);
+    deleteUserBtn.addEventListener('click', deleteUser);
     saveSiteNameBtn.addEventListener('click', saveSiteName);
     toggleNewCameraUrlBtn.addEventListener('click', toggleNewCameraUrl);
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
@@ -108,10 +135,196 @@ document.addEventListener('DOMContentLoaded', () => {
     newCameraName.addEventListener('input', resetNewCameraTest);
     testNewCameraBtn.addEventListener('click', testNewCameraSnapshot);
     confirmNewCameraBtn.addEventListener('click', confirmNewCameraAdd);
+    [addCameraModal, userModal].forEach(modal => {
+        modal.addEventListener('click', event => {
+            if (event.target === modal) {
+                hideModal(modal);
+            }
+        });
+    });
     document.querySelectorAll('.option-toggle').forEach(toggle => {
         toggle.addEventListener('change', () => syncOptionGroup(toggle));
         syncOptionGroup(toggle);
     });
+
+    function showModal(modal) {
+        modal.hidden = false;
+    }
+
+    function hideModal(modal) {
+        modal.hidden = true;
+    }
+
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    function renderStorageSummary(data) {
+        const limit = data.limit_GB ? `${data.limit_GB} GB` : 'not set';
+        const status = data.enabled
+            ? (data.dry_run ? 'enabled in dry run' : 'enabled')
+            : 'disabled';
+        const cameraRows = (data.cameras || []).slice(0, 8).map(camera => {
+            const cameraLimit = camera.limit_GB ? `${camera.limit_GB} GB` : 'not set';
+            return `<li><span>${escapeHtml(camera.name)}</span><strong>${escapeHtml(camera.display)}</strong><small>limit ${escapeHtml(cameraLimit)}</small></li>`;
+        }).join('');
+        storageSummary.innerHTML = `
+            <div class="storage-total">
+                <strong>${escapeHtml(data.display)}</strong>
+                <span>of ${escapeHtml(limit)} global limit</span>
+                <span class="storage-badge">${escapeHtml(status)}</span>
+            </div>
+            <div class="storage-path">${escapeHtml(data.work_dir || 'No work_dir configured')}</div>
+            <ul class="storage-camera-list">${cameraRows}</ul>
+        `;
+    }
+
+    async function loadStorageSummary() {
+        storageSummary.textContent = 'Loading storage usage...';
+        try {
+            const response = await fetch('/api/storage/summary');
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }
+            renderStorageSummary(data);
+        } catch (error) {
+            storageSummary.textContent = `Storage summary unavailable: ${error.message}`;
+        }
+    }
+
+    function selectedPtzCameras() {
+        return Array.from(userPtzCameras.selectedOptions).map(option => option.value);
+    }
+
+    function renderUserList() {
+        userList.innerHTML = '';
+        if (!usersPayload.users.length) {
+            userList.textContent = 'No users configured.';
+            return;
+        }
+        usersPayload.users.forEach(user => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'user-list-item';
+            button.textContent = `${user.username}${user.disabled ? ' (disabled)' : ''}`;
+            button.addEventListener('click', () => fillUserForm(user));
+            userList.appendChild(button);
+        });
+    }
+
+    function populateUserCameraOptions(selected = []) {
+        const selectedSet = new Set(selected);
+        userPtzCameras.innerHTML = '';
+        (usersPayload.cameras || []).forEach(cameraName => {
+            const option = document.createElement('option');
+            option.value = cameraName;
+            option.textContent = cameraName;
+            option.selected = selectedSet.has(cameraName);
+            userPtzCameras.appendChild(option);
+        });
+    }
+
+    function clearUserForm() {
+        userUsername.value = '';
+        userPassword.value = '';
+        userRole.value = 'viewer';
+        userPtzAccess.value = 'presets';
+        userDisabled.checked = false;
+        populateUserCameraOptions([]);
+        deleteUserBtn.disabled = true;
+        userUsername.disabled = false;
+        userUsername.focus();
+    }
+
+    function fillUserForm(user) {
+        userUsername.value = user.username;
+        userPassword.value = '';
+        userRole.value = user.role || 'viewer';
+        userPtzAccess.value = user.ptz_access || 'presets';
+        userDisabled.checked = Boolean(user.disabled);
+        populateUserCameraOptions(user.ptz_cameras || []);
+        deleteUserBtn.disabled = false;
+        userUsername.disabled = false;
+    }
+
+    async function loadUsers() {
+        userList.textContent = 'Loading users...';
+        const response = await fetch('/api/users');
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP error! status: ${response.status}`);
+        }
+        usersPayload = data;
+        renderUserList();
+        populateUserCameraOptions([]);
+    }
+
+    async function openUserManager() {
+        showModal(userModal);
+        try {
+            await loadUsers();
+            clearUserForm();
+        } catch (error) {
+            setStatus(`Error loading users: ${error.message}`, 'error');
+        }
+    }
+
+    async function saveUser(event) {
+        event.preventDefault();
+        const payload = {
+            username: userUsername.value.trim(),
+            password: userPassword.value,
+            role: userRole.value,
+            disabled: userDisabled.checked,
+            ptz_access: userPtzAccess.value,
+            ptz_cameras: selectedPtzCameras()
+        };
+        try {
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `HTTP error! status: ${response.status}`);
+            }
+            userPassword.value = '';
+            setStatus(result.message || 'User saved.', 'success');
+            await loadUsers();
+        } catch (error) {
+            setStatus(`Error saving user: ${error.message}`, 'error');
+        }
+    }
+
+    async function deleteUser() {
+        const username = userUsername.value.trim();
+        if (!username) {
+            return;
+        }
+        if (!window.confirm(`Delete user '${username}'?`)) {
+            return;
+        }
+        try {
+            const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `HTTP error! status: ${response.status}`);
+            }
+            setStatus(result.message || 'User deleted.', 'success');
+            await loadUsers();
+            clearUserForm();
+        } catch (error) {
+            setStatus(`Error deleting user: ${error.message}`, 'error');
+        }
+    }
 
     async function fetchAndDisplayConfig() {
         setStatus('Loading configuration...', 'info');
@@ -220,9 +433,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const payload = {
             name: newCameraName.value.trim(),
-            description: newCameraDescription.value.trim() || newCameraName.value.trim(),
+            description: newCameraDescription.value.trim(),
             url: newCameraUrl.value.trim(),
             timeout_s: intValue('newCameraTimeout', 15),
+            public: checked('newCameraPublic'),
             cache_bust: checked('newCameraCacheBust'),
             gather_metrics: true,
             mozjpeg_optimize: checked('newCameraMozjpeg'),
@@ -259,6 +473,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (checked('newCameraStorageEnabled')) {
             payload.work_dir_max_size_GB = intValue('newCameraStorageGb', 5);
+        }
+        if (checked('newCameraPtzEnabled')) {
+            payload.ptz_enabled = true;
+            payload.ptz_public = checked('newCameraPtzPublic');
+            payload.ptz_allow_presets = checked('newCameraPtzAllowPresets');
+            payload.ptz_allow_manual_control = checked('newCameraPtzAllowManual');
+            payload.ptz_access_level = document.getElementById('newCameraPtzAccessLevel').value || 'presets';
         }
         return payload;
     }
@@ -327,6 +548,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             setStatus(result.message || `Camera '${payload.name}' added. Reload the app to make it live.`, 'success');
             await fetchAndDisplayConfig();
+            await loadStorageSummary();
+            hideModal(addCameraModal);
             confirmNewCameraBtn.disabled = true;
         } catch (error) {
             setStatus(`Error adding camera: ${error.message}`, 'error');
@@ -733,7 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         currentObject[key] = {};
                         processChildren(child, currentObject[key]);
                     }
-                } else if (child.tagName === 'INPUT' || child.tagName === 'TEXTAREA') {
+                } else if (child.tagName === 'INPUT' || child.tagName === 'TEXTAREA' || child.tagName === 'SELECT') {
                     // This branch handles direct properties of an object that are input fields.
                     // These inputs should have a data-key.
                     if (child.dataset.key) {
@@ -880,9 +1103,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Automatically load the configuration when the page loads
     fetchAndDisplayConfig();
+    loadStorageSummary();
 
     function handleAddCamera() {
-        document.querySelector('.camera-add-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showModal(addCameraModal);
         newCameraName.focus();
         setStatus('Use the Add Camera form, test the snapshot URL, then confirm the add.', 'info');
     }

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 
 # Import the functions/classes to be tested
+from fenetre.cameras_metadata import build_cameras_metadata
 from fenetre.config import ConfigError, config_load
 from fenetre.fenetre import _cors_allow_origin_for_request, load_and_apply_configuration
 
@@ -261,6 +262,14 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "url": "http://legacy",
                     "description": "Legacy camera",
                     "disabled": True,
+                    "public": False,
+                    "ptz": {
+                        "enabled": True,
+                        "public": False,
+                        "allow_presets": True,
+                        "allow_manual_control": False,
+                        "access_level": "presets",
+                    },
                     "generate_timelapse": False,
                     "timelapse_enabled": False,
                 },
@@ -277,10 +286,43 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(cameras_conf["legacy"]["description"], "Legacy camera")
         self.assertTrue(cameras_conf["legacy"]["disabled"])
+        self.assertFalse(cameras_conf["legacy"]["public"])
+        self.assertTrue(cameras_conf["legacy"]["ptz"]["enabled"])
         self.assertFalse(cameras_conf["legacy"]["generate_timelapse"])
         self.assertFalse(cameras_conf["legacy"]["timelapse_enabled"])
         self.assertEqual(cameras_conf["nested"]["description"], "Nested camera")
         self.assertFalse(cameras_conf["nested"]["timelapse"]["enabled"])
+
+    def test_cameras_metadata_filters_private_and_includes_description_ptz(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "public-cam": {
+                    "url": "http://public",
+                    "description": "Ridgeline view",
+                    "public": True,
+                    "ptz": {
+                        "enabled": True,
+                        "public": True,
+                        "allow_presets": True,
+                        "allow_manual_control": False,
+                    },
+                },
+                "private-cam": {"url": "http://private", "public": False},
+            },
+            {"ui": {}},
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        self.assertEqual([cam["title"] for cam in metadata["cameras"]], ["public-cam"])
+        public_cam = metadata["cameras"][0]
+        self.assertEqual(public_cam["description"], "Ridgeline view")
+        self.assertTrue(public_cam["public"])
+        self.assertTrue(public_cam["ptz"]["enabled"])
+        self.assertTrue(public_cam["ptz"]["public"])
+        self.assertTrue(public_cam["ptz"]["allow_presets"])
+        self.assertFalse(public_cam["ptz"]["allow_manual_control"])
 
     def test_config_load_adds_default_sun_path_postprocessing(self):
         test_data = {

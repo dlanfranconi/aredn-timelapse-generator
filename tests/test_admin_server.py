@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import base64
+
 # Add project root to allow importing admin_server
 import sys
 import tempfile
@@ -11,8 +12,6 @@ from unittest.mock import patch
 import yaml
 
 from fenetre.admin_server import app as flask_app
-
-
 
 
 class ConfigServerTestCase(unittest.TestCase):
@@ -94,18 +93,22 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(
             updated_data_yaml["global"]["deployment_name"], "Mesh Skywatch"
         )
-        self.assertEqual(
-            updated_data_yaml["cameras"], self.test_config_data["cameras"]
-        )
+        self.assertEqual(updated_data_yaml["cameras"], self.test_config_data["cameras"])
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_with_guided_options(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
         payload = {
             "name": "ridge-cam",
-            "description": "Ridge Cam",
+            "description": "Ridge view across the valley",
             "url": "http://camera/snapshot.jpg",
             "timeout_s": 12,
+            "public": False,
+            "ptz_enabled": True,
+            "ptz_public": True,
+            "ptz_allow_presets": True,
+            "ptz_allow_manual_control": False,
+            "ptz_access_level": "presets",
             "cache_bust": True,
             "mozjpeg_optimize": True,
             "timelapse_enabled": True,
@@ -146,6 +149,13 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         camera = updated_data_yaml["cameras"]["ridge-cam"]
         self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
+        self.assertEqual(camera["description"], "Ridge view across the valley")
+        self.assertFalse(camera["public"])
+        self.assertTrue(camera["ptz"]["enabled"])
+        self.assertTrue(camera["ptz"]["public"])
+        self.assertTrue(camera["ptz"]["allow_presets"])
+        self.assertFalse(camera["ptz"]["allow_manual_control"])
+        self.assertEqual(camera["ptz"]["access_level"], "presets")
         self.assertEqual(camera["snap_interval_s"], 60)
         self.assertEqual(camera["activity_interval_s"], 10)
         self.assertEqual(camera["work_dir_max_size_GB"], 5)
@@ -153,6 +163,82 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["sky_area"], "0,0,1,0.35")
         self.assertTrue(camera["sunrise_sunset"]["enabled"])
         self.assertTrue(camera["timelapse_enabled"])
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_allows_blank_description(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "blank-desc",
+                    "description": "",
+                    "url": "http://camera/snapshot.jpg",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("description", updated_data_yaml["cameras"]["blank-desc"])
+
+    def test_storage_summary_reports_total_and_dry_run(self):
+        work_dir = tempfile.mkdtemp()
+        photos_dir = os.path.join(work_dir, "photos", "cam1")
+        os.makedirs(photos_dir)
+        with open(os.path.join(photos_dir, "frame.jpg"), "wb") as f:
+            f.write(b"x" * 2048)
+        self.test_config_data["global"] = {
+            "work_dir": work_dir,
+            "storage_management": {
+                "enabled": True,
+                "dry_run": True,
+                "work_dir_max_size_GB": 50,
+                "camera_max_size_GB": 5,
+            },
+        }
+        self.test_config_data["cameras"] = {"cam1": {"url": "http://localhost"}}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.get("/api/storage/summary")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["work_dir"], work_dir)
+        self.assertTrue(response.json["enabled"])
+        self.assertTrue(response.json["dry_run"])
+        self.assertEqual(response.json["limit_GB"], 50)
+        self.assertEqual(response.json["cameras"][0]["name"], "cam1")
+        self.assertEqual(response.json["cameras"][0]["limit_GB"], 5)
+
+    def test_user_management_crud(self):
+        create = self.app.post(
+            "/api/users",
+            data=json.dumps(
+                {
+                    "username": "operator",
+                    "password": "secret",
+                    "role": "operator",
+                    "disabled": False,
+                    "ptz_access": "manual",
+                    "ptz_cameras": ["cam1"],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 200)
+
+        listed = self.app.get("/api/users")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json["users"][0]["username"], "operator")
+        self.assertTrue(listed.json["users"][0]["has_password"])
+        self.assertEqual(listed.json["users"][0]["ptz_access"], "manual")
+
+        delete = self.app.delete("/api/users/operator")
+        self.assertEqual(delete.status_code, 200)
+        listed_again = self.app.get("/api/users")
+        self.assertEqual(listed_again.json["users"], [])
 
     def test_admin_auth_requires_basic_credentials(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
