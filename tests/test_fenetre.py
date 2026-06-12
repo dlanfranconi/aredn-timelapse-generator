@@ -16,6 +16,7 @@ from fenetre.fenetre import (
     get_ssim_for_area,
     is_sunrise_or_sunset,
     is_camera_timelapse_enabled,
+    queue_missing_daily_timelapses,
     run_camera_unavailable_command,
 )
 import fenetre.fenetre as fenetre_module
@@ -221,6 +222,73 @@ class TestFenetre(unittest.TestCase):
                 delattr(fenetre_module, "cameras_config")
             else:
                 fenetre_module.cameras_config = original_cameras_config
+
+    def test_queue_missing_daily_timelapses_backfills_past_snapshot_dirs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            photos_dir = os.path.join(tmpdir, "photos")
+            queue_file = os.path.join(tmpdir, "timelapse_queue.txt")
+            open(queue_file, "w").close()
+
+            eligible_day = os.path.join(photos_dir, "enabled", "2000-01-01")
+            existing_daily_day = os.path.join(photos_dir, "enabled", "2000-01-02")
+            empty_day = os.path.join(photos_dir, "enabled", "2000-01-03")
+            disabled_day = os.path.join(photos_dir, "disabled", "2000-01-01")
+            for day_dir in (eligible_day, existing_daily_day, empty_day, disabled_day):
+                os.makedirs(day_dir)
+            with open(
+                os.path.join(eligible_day, "2000-01-01T12-00-00UTC.jpg"), "wb"
+            ) as f:
+                f.write(b"jpg")
+            with open(
+                os.path.join(existing_daily_day, "2000-01-02T12-00-00UTC.jpg"), "wb"
+            ) as f:
+                f.write(b"jpg")
+            with open(os.path.join(existing_daily_day, "2000-01-02.webm"), "wb") as f:
+                f.write(b"webm")
+            with open(
+                os.path.join(disabled_day, "2000-01-01T12-00-00UTC.jpg"), "wb"
+            ) as f:
+                f.write(b"jpg")
+
+            missing = object()
+            originals = {
+                "global_config": getattr(fenetre_module, "global_config", missing),
+                "timelapse_config": getattr(
+                    fenetre_module, "timelapse_config", missing
+                ),
+                "cameras_config": getattr(fenetre_module, "cameras_config", missing),
+                "timelapse_queue_file": getattr(
+                    fenetre_module, "timelapse_queue_file", missing
+                ),
+            }
+            try:
+                fenetre_module.global_config = {
+                    "work_dir": tmpdir,
+                    "pic_dir": photos_dir,
+                    "timezone": "UTC",
+                }
+                fenetre_module.timelapse_config = {
+                    "daily_timelapse": {"enabled": True, "file_extension": "webm"}
+                }
+                fenetre_module.cameras_config = {
+                    "enabled": {},
+                    "disabled": {"generate_timelapse": False},
+                }
+                fenetre_module.timelapse_queue_file = queue_file
+
+                queued = queue_missing_daily_timelapses()
+            finally:
+                for name, value in originals.items():
+                    if value is missing:
+                        delattr(fenetre_module, name)
+                    else:
+                        setattr(fenetre_module, name, value)
+
+            with open(queue_file) as f:
+                queued_paths = {line.strip() for line in f if line.strip()}
+
+            self.assertEqual(queued, 1)
+            self.assertEqual(queued_paths, {eligible_day})
 
     @patch("fenetre.fenetre.subprocess.run")
     def test_run_camera_unavailable_command(self, mock_subprocess_run):

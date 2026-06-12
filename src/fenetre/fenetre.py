@@ -13,7 +13,7 @@ import threading
 import time
 import sys
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import partial
 from logging.handlers import RotatingFileHandler
 from threading import Thread
@@ -1429,6 +1429,7 @@ def main(argv):
     if not os.path.exists(timelapse_queue_file):
         open(timelapse_queue_file, "a").close()  # Create the file if it does not exist
     get_queue_size_and_set_metric(timelapse_queue_file, timelapse_queue_lock)
+    queue_missing_daily_timelapses()
 
     logger.info("Disk management thread will start in 10s...")
     interruptible_sleep(10, exit_event)
@@ -2181,6 +2182,86 @@ def _daily_timelapse_path(day_dir: str) -> Optional[str]:
     return None
 
 
+def _date_from_day_dir(day_dir: str) -> Optional[date]:
+    date_name = os.path.basename(os.path.normpath(day_dir))
+    if not DATE_DIR_PATTERN.match(date_name):
+        return None
+    try:
+        return datetime.strptime(date_name, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _today_date_for_config() -> date:
+    timezone_name = global_config.get("timezone", "UTC")
+    try:
+        timezone = pytz.timezone(timezone_name)
+    except pytz.UnknownTimeZoneError:
+        timezone = pytz.UTC
+    return datetime.now(timezone).date()
+
+
+def _day_dir_has_snapshots(day_dir: str) -> bool:
+    for pattern in ("*.jpg", "*.jpeg", "*.JPG", "*.JPEG"):
+        if glob.glob(os.path.join(day_dir, pattern)):
+            return True
+    return False
+
+
+def _should_queue_daily_timelapse(day_dir: str) -> bool:
+    daily_cfg = timelapse_config.get("daily_timelapse")
+    if not daily_cfg or not daily_cfg.get("enabled", True):
+        return False
+    if not os.path.isdir(day_dir):
+        return False
+    day_date = _date_from_day_dir(day_dir)
+    if day_date is None or day_date >= _today_date_for_config():
+        return False
+    camera_name = camera_name_from_day_dir(day_dir)
+    if not is_camera_timelapse_enabled(camera_name):
+        return False
+    if _daily_timelapse_path(day_dir):
+        return False
+    return _day_dir_has_snapshots(day_dir)
+
+
+def queue_missing_daily_timelapses() -> int:
+    """Queue past date folders that still have snapshots but no daily timelapse."""
+    if not timelapse_queue_file:
+        return 0
+    queued = 0
+    pic_dir = global_config.get("pic_dir")
+    if not pic_dir or not os.path.isdir(pic_dir):
+        return 0
+
+    for camera_name in sorted(cameras_config):
+        if not is_camera_timelapse_enabled(camera_name):
+            continue
+        camera_dir = os.path.join(pic_dir, camera_name)
+        if not os.path.isdir(camera_dir):
+            continue
+        for day_dir in _sorted_day_dirs(camera_dir):
+            if not _should_queue_daily_timelapse(day_dir):
+                continue
+            add_to_timelapse_queue(day_dir, timelapse_queue_file, timelapse_queue_lock)
+            queued += 1
+
+    if queued:
+        logger.info("Queued %s missing daily timelapse directories.", queued)
+    return queued
+
+
+def _preserve_and_queue_missing_daily_timelapse(day_dir: str) -> bool:
+    if not _should_queue_daily_timelapse(day_dir):
+        return False
+    add_to_timelapse_queue(day_dir, timelapse_queue_file, timelapse_queue_lock)
+    logger.info(
+        "Preserving %s because it has snapshots but no daily timelapse yet.",
+        day_dir,
+    )
+    return True
+
+
 def _remove_file_for_storage(path: str, dry_run: bool) -> int:
     if not os.path.isfile(path):
         return 0
@@ -2227,6 +2308,8 @@ def _prune_daily_timelapses(
         daily_path = _daily_timelapse_path(day_dir)
         if daily_path:
             current_size_bytes -= _remove_file_for_storage(daily_path, dry_run)
+            continue
+        if _preserve_and_queue_missing_daily_timelapse(day_dir):
             continue
         dir_size = get_dir_size(day_dir)
         if dry_run:
@@ -2375,6 +2458,8 @@ def disk_management_loop():
                             current_work_dir_size -= _remove_file_for_storage(
                                 daily_path, dry_run
                             )
+                        elif _preserve_and_queue_missing_daily_timelapse(day_dir):
+                            continue
                         else:
                             dir_to_delete_size = get_dir_size(day_dir)
                             if dry_run:
