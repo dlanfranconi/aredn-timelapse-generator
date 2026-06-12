@@ -45,6 +45,7 @@ ptz = [
 
 [project.scripts]
 fenetre = "fenetre.compat:run"
+fenetre-user = "fenetre.auth:main"
 daylight-tool = "fenetre.daylight_tool:run"
 timelapse-tool = "fenetre.timelapse_tool:run"
 

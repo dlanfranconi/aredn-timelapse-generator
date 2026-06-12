@@ -216,10 +216,11 @@ In Portainer:
 2. Select **Add stack**.
 3. Name the stack, for example `fenetre`.
 4. Paste the stack YAML below.
-5. Change `FENETRE_ADMIN_PASSWORD` before deploying.
-6. Deploy the stack.
-7. Open the public UI at `http://HOST:8888/`.
-8. Open the admin UI at `http://HOST:8889/` and log in.
+5. Deploy the stack.
+6. Open the public UI at `http://HOST:8888/`.
+7. Open the admin UI at `http://HOST:8889/` and log in.
+8. On first setup, log in as `admin` / `admin`, then change the password in
+   **Manage Users**.
 
 Example Portainer stack:
 
@@ -237,8 +238,6 @@ services:
     environment:
       TZ: America/Los_Angeles
       FENETRE_PID_FILE: /tmp/fenetre.pid
-      FENETRE_ADMIN_USERNAME: admin
-      FENETRE_ADMIN_PASSWORD: change-this-password
 
     volumes:
       - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
@@ -254,14 +253,17 @@ services:
 The config mount is intentionally read-write because the admin UI updates the
 YAML file and writes timestamped backups beside it.
 
-The admin UI on port `8889` requires HTTP Basic Auth. Defaults are
-`admin` / `admin`; change them in Portainer or compose before exposing the admin
-port:
+The admin UI on port `8889` requires HTTP Basic Auth. On first setup, Fenetre
+creates a config-backed admin user with username `admin` and password `admin`.
+This bootstrap only happens when the config has no `users:` block yet, so
+upgrading the container will not restore an admin user you removed or overwrite
+a password you changed.
 
-```yaml
-environment:
-  FENETRE_ADMIN_USERNAME: admin
-  FENETRE_ADMIN_PASSWORD: change-this-password
+Change the password from **Manage Users** in the admin UI after the first login.
+If you lock yourself out, reset the admin user from the container CLI:
+
+```bash
+docker exec -it fenetre fenetre-user --config /srv/fenetre/config.yaml reset-admin
 ```
 
 Useful checks inside the built image:

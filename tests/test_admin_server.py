@@ -11,7 +11,13 @@ from unittest.mock import patch
 
 import yaml
 
+from fenetre.auth import (
+    authenticate_config_user,
+    ensure_default_admin_user,
+    reset_admin_user,
+)
 from fenetre.admin_server import app as flask_app
+from fenetre.ptz import set_lock
 
 
 class ConfigServerTestCase(unittest.TestCase):
@@ -47,6 +53,7 @@ class ConfigServerTestCase(unittest.TestCase):
 
     def tearDown(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        set_lock("cam1", False)
 
     def test_get_config_success(self):
         response = self.app.get("/config")
@@ -254,6 +261,50 @@ class ConfigServerTestCase(unittest.TestCase):
         listed_again = self.app.get("/api/users")
         self.assertEqual(listed_again.json["users"], [])
 
+    def test_list_users_bootstraps_default_admin_user(self):
+        listed = self.app.get("/api/users")
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json["users"]), 1)
+        self.assertEqual(listed.json["users"][0]["username"], "admin")
+        self.assertEqual(listed.json["users"][0]["role"], "admin")
+        self.assertTrue(listed.json["users"][0]["has_password"])
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("admin", updated_data_yaml["users"])
+        self.assertNotIn("password", updated_data_yaml["users"]["admin"])
+        self.assertIn("password_hash", updated_data_yaml["users"]["admin"])
+
+    def test_default_admin_bootstrap_does_not_restore_removed_admin(self):
+        self.test_config_data["users"] = {}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        created = ensure_default_admin_user(self.temp_config_file.name)
+
+        self.assertFalse(created)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(updated_data_yaml["users"], {})
+
+    def test_reset_admin_user_restores_admin_manually(self):
+        self.test_config_data["users"] = {}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        reset_admin_user(self.temp_config_file.name, "manual-reset")
+
+        self.assertTrue(
+            authenticate_config_user(
+                self.temp_config_file.name, "admin", "manual-reset"
+            )
+        )
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("admin", updated_data_yaml["users"])
+        self.assertEqual(updated_data_yaml["users"]["admin"]["role"], "admin")
+
     def test_ptz_lock_endpoint_updates_runtime_lock(self):
         response = self.app.post(
             "/api/ptz/lock",
@@ -272,8 +323,6 @@ class ConfigServerTestCase(unittest.TestCase):
 
     def test_admin_auth_requires_basic_credentials(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
-        flask_app.config["FENETRE_ADMIN_USERNAME"] = "admin"
-        flask_app.config["FENETRE_ADMIN_PASSWORD"] = "admin"
 
         unauthenticated = self.app.get("/config")
         self.assertEqual(unauthenticated.status_code, 401)
@@ -286,6 +335,40 @@ class ConfigServerTestCase(unittest.TestCase):
         good_token = base64.b64encode(b"admin:admin").decode("ascii")
         good = self.app.get("/config", headers={"Authorization": f"Basic {good_token}"})
         self.assertEqual(good.status_code, 200)
+
+    def test_admin_auth_uses_changed_config_password(self):
+        ensure_default_admin_user(self.temp_config_file.name)
+        change = self.app.post(
+            "/api/users",
+            data=json.dumps(
+                {
+                    "username": "admin",
+                    "password": "changed",
+                    "role": "admin",
+                    "disabled": False,
+                    "ptz_access": "admin",
+                    "ptz_cameras": [],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(change.status_code, 200)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        old_token = base64.b64encode(b"admin:admin").decode("ascii")
+        old_response = self.app.get(
+            "/config", headers={"Authorization": f"Basic {old_token}"}
+        )
+        self.assertEqual(old_response.status_code, 401)
+
+        new_token = base64.b64encode(b"admin:changed").decode("ascii")
+        new_response = self.app.get(
+            "/config", headers={"Authorization": f"Basic {new_token}"}
+        )
+        self.assertEqual(new_response.status_code, 200)
+        self.assertTrue(
+            authenticate_config_user(self.temp_config_file.name, "admin", "changed")
+        )
 
     def test_update_config_invalid_json(self):
         invalid_json_string = '{"global": {"setting": "value"}, "broken": [1,2,'

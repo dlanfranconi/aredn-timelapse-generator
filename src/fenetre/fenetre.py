@@ -58,6 +58,7 @@ from fenetre.archive import (
     list_unarchived_dirs,
     scan_and_publish_metrics,
 )
+from fenetre.auth import ensure_default_admin_user
 from fenetre.camera_utils import (
     get_day_night_from_exif,
     format_shutter_speed,
@@ -1540,6 +1541,13 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
         apply_module_levels(global_config.get("logging_levels", {}))
         configure_profiler(global_config)
         configure_mqtt_manager(global_config)
+        try:
+            if ensure_default_admin_user(config_path_to_load):
+                logger.info(
+                    "Created default admin user 'admin'. Change this password in Manage Users."
+                )
+        except Exception as e:
+            logger.error("Failed to bootstrap default admin user: %s", e, exc_info=True)
 
         try:
             from .admin_server import app as imported_flask_app

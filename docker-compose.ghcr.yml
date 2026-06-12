@@ -11,9 +11,6 @@ services:
     environment:
       TZ: America/Los_Angeles
       FENETRE_PID_FILE: /tmp/fenetre.pid
-      # Change these in Portainer before exposing the admin port.
-      FENETRE_ADMIN_USERNAME: admin
-      FENETRE_ADMIN_PASSWORD: admin
 
     volumes:
       # Persistent runtime config on the host. The admin UI writes changes here.

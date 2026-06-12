@@ -4,7 +4,7 @@ import json
 import os
 import re
 import signal
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 
 import requests
@@ -14,6 +14,12 @@ from PIL import Image, ImageOps
 from prometheus_client import REGISTRY, Counter, Gauge, generate_latest
 from werkzeug.exceptions import BadRequest
 
+from fenetre.auth import (
+    authenticate_config_user,
+    ensure_default_admin_user,
+    hash_password,
+    user_has_password,
+)
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.config import config_load
 from fenetre.gopro import GoPro
@@ -136,16 +142,6 @@ def _admin_auth_enabled() -> bool:
     return _env_bool("FENETRE_ADMIN_AUTH_ENABLED", True)
 
 
-def _admin_credentials() -> tuple[str, str]:
-    username = app.config.get("FENETRE_ADMIN_USERNAME") or os.environ.get(
-        "FENETRE_ADMIN_USERNAME", "admin"
-    )
-    password = app.config.get("FENETRE_ADMIN_PASSWORD") or os.environ.get(
-        "FENETRE_ADMIN_PASSWORD", "admin"
-    )
-    return str(username), str(password)
-
-
 def _auth_failed_response():
     return Response(
         "Authentication required.\n",
@@ -163,9 +159,22 @@ def require_admin_auth():
     if not auth:
         return _auth_failed_response()
 
-    expected_username, expected_password = _admin_credentials()
-    username_ok = hmac.compare_digest(auth.username or "", expected_username)
-    password_ok = hmac.compare_digest(auth.password or "", expected_password)
+    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
+    if config_file_path and authenticate_config_user(
+        config_file_path, auth.username or "", auth.password or ""
+    ):
+        return None
+
+    expected_username = app.config.get("FENETRE_ADMIN_USERNAME") or os.environ.get(
+        "FENETRE_ADMIN_USERNAME"
+    )
+    expected_password = app.config.get("FENETRE_ADMIN_PASSWORD") or os.environ.get(
+        "FENETRE_ADMIN_PASSWORD"
+    )
+    if expected_username is None or expected_password is None:
+        return _auth_failed_response()
+    username_ok = hmac.compare_digest(auth.username or "", str(expected_username))
+    password_ok = hmac.compare_digest(auth.password or "", str(expected_password))
     if not (username_ok and password_ok):
         return _auth_failed_response()
     return None
@@ -221,9 +230,7 @@ def _load_effective_config_with_raw() -> tuple[dict, dict]:
 def _backup_config(config_file_path: str) -> str | None:
     if not os.path.exists(config_file_path):
         return None
-    backup_path = (
-        f"{config_file_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
-    )
+    backup_path = f"{config_file_path}.bak.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     with open(config_file_path, "rb") as src, open(backup_path, "wb") as dst:
         dst.write(src.read())
     return backup_path
@@ -400,9 +407,9 @@ def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, d
         "ptz_access": payload.get("ptz_access", existing.get("ptz_access", "presets")),
     }
     if payload.get("password"):
-        # Store plaintext for now to match existing Basic Auth deployment style.
-        # This config block is groundwork for multi-user admin/PTZ auth.
-        user["password"] = str(payload["password"])
+        user["password_hash"] = hash_password(str(payload["password"]))
+    elif existing.get("password_hash"):
+        user["password_hash"] = existing["password_hash"]
     elif existing.get("password"):
         user["password"] = existing["password"]
     return username, user
@@ -495,6 +502,7 @@ def storage_summary():
 @app.route("/api/users", methods=["GET"])
 def list_users():
     try:
+        ensure_default_admin_user(_config_file_path())
         _, config = _load_effective_config_with_raw()
         users = config.get("users") or {}
         public_users = []
@@ -506,7 +514,7 @@ def list_users():
                     "role": user.get("role", "viewer"),
                     "ptz_cameras": user.get("ptz_cameras", []),
                     "ptz_access": user.get("ptz_access", "presets"),
-                    "has_password": bool(user.get("password")),
+                    "has_password": user_has_password(user),
                 }
             )
         return jsonify(
