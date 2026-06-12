@@ -18,6 +18,8 @@ import requests
 import urllib3
 
 from fenetre.camera_utils import sanitize_url_for_logs
+from fenetre.http_auth import auth_from_camera_config, redact_sensitive_headers
+from fenetre.http_capture import validate_http_snapshot_url
 from fenetre import fenetre as core
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -54,6 +56,7 @@ def patched_get_pic_from_url(
             if "?" in request_url
             else f"{request_url}?_={timestamp}"
         )
+    validate_http_snapshot_url(request_url)
 
     user_agent = (
         ua
@@ -69,20 +72,25 @@ def patched_get_pic_from_url(
     verify_ssl = _bool_config(camera_config.get("verify_ssl"), default=False)
     allow_redirects = _bool_config(camera_config.get("allow_redirects"), default=True)
 
-    response = requests.get(
-        request_url,
-        timeout=timeout,
-        headers=headers,
-        allow_redirects=allow_redirects,
-        verify=verify_ssl,
-    )
+    request_kwargs = {
+        "timeout": timeout,
+        "headers": headers,
+        "allow_redirects": allow_redirects,
+        "verify": verify_ssl,
+    }
+    request_auth = auth_from_camera_config(camera_config)
+    if request_auth is not None:
+        request_kwargs["auth"] = request_auth
+
+    response = requests.get(request_url, **request_kwargs)
     safe_url = sanitize_url_for_logs(url)
     safe_request_url = sanitize_url_for_logs(response.request.url)
+    safe_request_headers = redact_sensitive_headers(response.request.headers)
 
     log_message = (
         f"URL fetch for {safe_url}:"
         f"\n\tRequest URL: {safe_request_url}"
-        f"\n\tRequest Headers: {response.request.headers}"
+        f"\n\tRequest Headers: {safe_request_headers}"
         f"\n\tResponse Status: {response.status_code}"
         f"\n\tResponse Headers: {response.headers}"
         f"\n\tResponse Content-Type: {response.headers.get('content-type', '')}"

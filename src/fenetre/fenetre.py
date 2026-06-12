@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -30,6 +31,8 @@ from PIL import Image
 from skimage.metrics import structural_similarity
 
 from .logging_utils import apply_module_levels, setup_logging, get_camera_logger
+from .http_auth import auth_from_camera_config, redact_sensitive_headers
+from .http_capture import validate_http_snapshot_url
 
 from fenetre.admin_server import (
     metric_camera_directory_size_bytes,
@@ -309,19 +312,26 @@ def get_pic_from_url(
             request_url = f"{request_url}&_={timestamp}"
         else:
             request_url = f"{request_url}?_={timestamp}"
+    validate_http_snapshot_url(request_url)
 
     headers = {"Accept": "image/*,*"}
     if ua:
         requests_version = requests.__version__
         headers = {"User-Agent": f"{ua} v{requests_version}"}
-    r = requests.get(request_url, timeout=timeout, headers=headers)
+    request_kwargs = {"timeout": timeout, "headers": headers}
+    request_auth = auth_from_camera_config(camera_config)
+    if request_auth is not None:
+        request_kwargs["auth"] = request_auth
+
+    r = requests.get(request_url, **request_kwargs)
     safe_url = sanitize_url_for_logs(url)
     safe_request_url = sanitize_url_for_logs(r.request.url)
+    safe_request_headers = redact_sensitive_headers(r.request.headers)
 
     log_message = (
         f"URL fetch for {safe_url}:"
         f"\n\tRequest URL: {safe_request_url}"
-        f"\n\tRequest Headers: {r.request.headers}"
+        f"\n\tRequest Headers: {safe_request_headers}"
         f"\n\tResponse Status: {r.status_code}"
         f"\n\tResponse Headers: {r.headers}"
     )
@@ -343,7 +353,7 @@ def get_pic_from_url(
             f"HTTP Request Failed!\n"
             f"URL: {sanitize_url_for_logs(request_url)}\n"
             f"Status Code: {r.status_code}\n"
-            f"Request Headers: {r.request.headers}\n"
+            f"Request Headers: {safe_request_headers}\n"
             f"Response Headers: {r.headers}\n"
             f"Response Content (first 500 bytes): {r.content[:500]}"
         )
@@ -417,14 +427,14 @@ def get_pic_from_local_command(
 
         with open(log_file_handler.baseFilename, "a") as log_file:
             s = subprocess.run(
-                cmd.split(" "),
+                shlex.split(cmd),
                 stdout=subprocess.PIPE,
                 stderr=log_file,
                 timeout=timeout_s,
             )
     else:
         s = subprocess.run(
-            cmd.split(" "), stdout=subprocess.PIPE, stderr=None, timeout=timeout_s
+            shlex.split(cmd), stdout=subprocess.PIPE, stderr=None, timeout=timeout_s
         )
     return Image.open(BytesIO(s.stdout))
 

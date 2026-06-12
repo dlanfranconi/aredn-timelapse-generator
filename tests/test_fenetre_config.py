@@ -136,6 +136,44 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(cameras_conf["cam1"]["unavailable_command_timeout_s"], 7)
 
+    def test_config_load_camera_http_auth(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1/snapshot.jpg",
+                    "http_auth": {
+                        "type": "basic",
+                        "username": "admin",
+                        "password": "secret",
+                    },
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        self.assertEqual(
+            cameras_conf["cam1"]["http_auth"],
+            {"type": "basic", "username": "admin", "password": "secret"},
+        )
+
+    def test_config_load_camera_http_auth_requires_credentials(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1/snapshot.jpg",
+                    "http_auth": {"type": "basic"},
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        with self.assertRaises(ConfigError):
+            config_load(config_path)
+
     def test_config_load_unavailable_command_timeout_requires_command(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

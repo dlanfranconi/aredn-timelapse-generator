@@ -817,6 +817,32 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             cam_out["capture_method"] = _str(
                 capture_method, f"cameras.{name}.capture_method", errors
             )
+        if cam.get("http_auth") is not None:
+            http_auth = _dict(cam.get("http_auth"), f"cameras.{name}.http_auth", errors)
+            http_auth_out = {}
+            if http_auth:
+                http_auth_out["type"] = _str(
+                    http_auth.get("type"),
+                    f"cameras.{name}.http_auth.type",
+                    errors,
+                    default="basic",
+                    choices={"basic", "digest"},
+                )
+                http_auth_out["username"] = _str(
+                    http_auth.get("username"),
+                    f"cameras.{name}.http_auth.username",
+                    errors,
+                )
+                if http_auth_out["username"] is None:
+                    errors.append(f"cameras.{name}.http_auth.username: required")
+                http_auth_out["password"] = _str(
+                    http_auth.get("password"),
+                    f"cameras.{name}.http_auth.password",
+                    errors,
+                )
+                if http_auth_out["password"] is None:
+                    errors.append(f"cameras.{name}.http_auth.password: required")
+                cam_out["http_auth"] = http_auth_out
 
         if cam.get("description") is not None:
             cam_out["description"] = _str(

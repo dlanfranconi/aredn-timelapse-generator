@@ -7,6 +7,7 @@ from PIL import Image
 from io import BytesIO
 import sys
 from types import SimpleNamespace
+from requests.auth import HTTPBasicAuth
 
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
@@ -421,6 +422,10 @@ class TestFenetre(unittest.TestCase):
         # Mock the response from requests.get
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.headers = {"content-type": "image/jpeg"}
+        mock_response.request = SimpleNamespace(
+            url="http://example.com/image.jpg", headers={"Accept": "image/*,*"}
+        )
         # Create a dummy image for the content
         dummy_image = Image.new("RGB", (100, 100), color="red")
         byte_arr = BytesIO()
@@ -463,6 +468,72 @@ class TestFenetre(unittest.TestCase):
         mock_requests_get.assert_called_with(
             "http://example.com/image.jpg", timeout=10, headers={"Accept": "image/*,*"}
         )
+
+    @patch("fenetre.fenetre.requests.get")
+    def test_get_pic_from_url_supports_http_basic_auth(self, mock_requests_get):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "image/jpeg"}
+        mock_response.request = SimpleNamespace(
+            url="http://example.com/image.jpg",
+            headers={"Authorization": "Basic secret", "Accept": "image/*,*"},
+        )
+        dummy_image = Image.new("RGB", (100, 100), color="red")
+        byte_arr = BytesIO()
+        dummy_image.save(byte_arr, format="JPEG")
+        mock_response.content = byte_arr.getvalue()
+        mock_requests_get.return_value = mock_response
+
+        get_pic_from_url(
+            "http://example.com/image.jpg",
+            10,
+            camera_config={
+                "http_auth": {
+                    "type": "basic",
+                    "username": "admin",
+                    "password": "secret",
+                }
+            },
+            global_config={},
+        )
+
+        _, kwargs = mock_requests_get.call_args
+        self.assertIsInstance(kwargs["auth"], HTTPBasicAuth)
+        self.assertEqual(kwargs["auth"].username, "admin")
+        self.assertEqual(kwargs["auth"].password, "secret")
+
+    @patch("fenetre.fenetre.requests.get")
+    def test_get_pic_from_url_rejects_http_on_rtsp_port(self, mock_requests_get):
+        with self.assertRaisesRegex(RuntimeError, "HTTP on port 554"):
+            get_pic_from_url(
+                "http://10.1.64.69:554/live",
+                10,
+                camera_config={},
+                global_config={},
+            )
+
+        mock_requests_get.assert_not_called()
+
+    @patch("fenetre.fenetre.subprocess.run")
+    def test_get_pic_from_local_command_uses_shell_style_splitting(
+        self, mock_subprocess_run
+    ):
+        dummy_image = Image.new("RGB", (100, 100), color="red")
+        byte_arr = BytesIO()
+        dummy_image.save(byte_arr, format="JPEG")
+        mock_subprocess_run.return_value = SimpleNamespace(stdout=byte_arr.getvalue())
+
+        fenetre_module.global_config = {}
+        fenetre_module.get_pic_from_local_command(
+            'ffmpeg -i "rtsp://example.local/live stream" -frames:v 1 -f image2pipe -',
+            10,
+            "cam1",
+            {},
+        )
+
+        args, kwargs = mock_subprocess_run.call_args
+        self.assertEqual(args[0][2], "rtsp://example.local/live stream")
+        self.assertEqual(kwargs["timeout"], 10)
 
     def test_sanitize_url_for_logs_redacts_credentials(self):
         url = (
