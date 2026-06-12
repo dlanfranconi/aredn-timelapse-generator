@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import base64
+import errno
 
 # Add project root to allow importing admin_server
 import sys
@@ -327,6 +328,22 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertIn("admin", updated_data_yaml["users"])
         self.assertNotIn("password", updated_data_yaml["users"]["admin"])
         self.assertIn("password_hash", updated_data_yaml["users"]["admin"])
+
+    def test_default_admin_bootstrap_falls_back_when_atomic_replace_is_busy(self):
+        def busy_replace(src, dst):
+            raise OSError(errno.EBUSY, "Device or resource busy")
+
+        with patch("fenetre.auth.os.replace", side_effect=busy_replace):
+            created = ensure_default_admin_user(self.temp_config_file.name)
+
+        self.assertTrue(created)
+        self.assertFalse(os.path.exists(f"{self.temp_config_file.name}.tmp"))
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("admin", updated_data_yaml["users"])
+        self.assertTrue(
+            authenticate_config_user(self.temp_config_file.name, "admin", "admin")
+        )
 
     def test_default_admin_bootstrap_does_not_restore_removed_admin(self):
         self.test_config_data["users"] = {}

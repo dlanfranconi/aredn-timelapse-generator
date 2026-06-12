@@ -1,4 +1,5 @@
 import argparse
+import errno
 import getpass
 import hmac
 import os
@@ -36,7 +37,19 @@ def _write_yaml(config_file_path: str, raw_config: dict) -> None:
     tmp_path = f"{config_file_path}.tmp"
     with open(tmp_path, "w") as f:
         yaml.safe_dump(raw_config, f, sort_keys=False)
-    os.replace(tmp_path, config_file_path)
+    try:
+        os.replace(tmp_path, config_file_path)
+    except OSError as exc:
+        if exc.errno not in {errno.EBUSY, errno.EXDEV}:
+            raise
+        # Single-file Docker bind mounts can reject atomic replace. Fall back to
+        # updating the mounted file in place so first-run admin bootstrap works.
+        with open(config_file_path, "w") as f:
+            yaml.safe_dump(raw_config, f, sort_keys=False)
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
 
 
 def hash_password(password: str) -> str:
