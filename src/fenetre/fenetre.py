@@ -91,6 +91,7 @@ mimetypes.add_type("video/mp2t", ".ts")
 
 TIMELAPSE_VIDEO_EXTENSIONS = {"mp4", "webm", "m3u8"}
 DATE_DIR_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_sunrise_sunset_window_cache = {}
 
 _GOPRO_BLE_AVAILABLE = True
 try:
@@ -427,7 +428,9 @@ def get_pic_from_local_command(
     return Image.open(BytesIO(s.stdout))
 
 
-def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
+def is_sunrise_or_sunset(
+    camera_config: Dict, global_config: Dict, camera_name: str = ""
+) -> bool:
     """
     Determines if the current time is within the sunrise or sunset window for a given camera.
     """
@@ -440,35 +443,71 @@ def is_sunrise_or_sunset(camera_config: Dict, global_config: Dict) -> bool:
     if lat is None or lon is None:
         return False
 
+    tz = pytz.timezone(global_config["timezone"])
+    now = datetime.now(tz)
+    cache_key = (
+        camera_name or camera_config.get("name") or "",
+        now.date().isoformat(),
+        global_config["timezone"],
+        lat,
+        lon,
+        sunrise_sunset_config.get("sunrise_offset_start_minutes"),
+        sunrise_sunset_config.get("sunrise_offset_end_minutes"),
+        sunrise_sunset_config.get("sunset_offset_start_minutes"),
+        sunrise_sunset_config.get("sunset_offset_end_minutes"),
+    )
+    cached_windows = _sunrise_sunset_window_cache.get(cache_key)
+    if cached_windows is False:
+        return False
+
     try:
-        tz = pytz.timezone(global_config["timezone"])
-        now = datetime.now(tz)
-        location = LocationInfo(
-            latitude=lat,
-            longitude=lon,
-            timezone=global_config["timezone"],
-        )
-        s = sun(location.observer, date=now.date(), tzinfo=location.timezone)
+        if cached_windows is None:
+            location = LocationInfo(
+                latitude=lat,
+                longitude=lon,
+                timezone=global_config["timezone"],
+            )
+            s = sun(location.observer, date=now.date(), tzinfo=location.timezone)
+            cached_windows = (
+                (
+                    s["sunrise"]
+                    - timedelta(
+                        minutes=sunrise_sunset_config["sunrise_offset_start_minutes"]
+                    ),
+                    s["sunrise"]
+                    + timedelta(
+                        minutes=sunrise_sunset_config["sunrise_offset_end_minutes"]
+                    ),
+                ),
+                (
+                    s["sunset"]
+                    - timedelta(
+                        minutes=sunrise_sunset_config["sunset_offset_start_minutes"]
+                    ),
+                    s["sunset"]
+                    + timedelta(
+                        minutes=sunrise_sunset_config["sunset_offset_end_minutes"]
+                    ),
+                ),
+            )
+            _sunrise_sunset_window_cache[cache_key] = cached_windows
 
-        sunrise_start = s["sunrise"] - timedelta(
-            minutes=sunrise_sunset_config["sunrise_offset_start_minutes"]
-        )
-        sunrise_end = s["sunrise"] + timedelta(
-            minutes=sunrise_sunset_config["sunrise_offset_end_minutes"]
-        )
-        sunset_start = s["sunset"] - timedelta(
-            minutes=sunrise_sunset_config["sunset_offset_start_minutes"]
-        )
-        sunset_end = s["sunset"] + timedelta(
-            minutes=sunrise_sunset_config["sunset_offset_end_minutes"]
-        )
-
+        (sunrise_start, sunrise_end), (sunset_start, sunset_end) = cached_windows
         return (sunrise_start <= now <= sunrise_end) or (
             sunset_start <= now <= sunset_end
         )
 
     except ValueError as e:
-        logger.info(f"Sunrise/sunset unavailable for this date/location: {e}")
+        _sunrise_sunset_window_cache[cache_key] = False
+        camera_label = f" for {camera_name}" if camera_name else ""
+        logger.info(
+            "Sunrise/sunset unavailable%s on %s at %s,%s: %s",
+            camera_label,
+            now.date().isoformat(),
+            lat,
+            lon,
+            e,
+        )
         return False
     except Exception as e:
         logger.error(f"Error calculating sunrise/sunset: {e}")
@@ -693,7 +732,7 @@ def snap(camera_name, camera_config: Dict):
             return
 
         # Let's figure out how long we will be waiting before taking the next picture
-        sunrise_sunset = is_sunrise_or_sunset(camera_config, global_config)
+        sunrise_sunset = is_sunrise_or_sunset(camera_config, global_config, camera_name)
         if sunrise_sunset:
             fast_sunrise_sunset_interval = camera_config.get("sunrise_sunset", {}).get(
                 "interval_s", 10

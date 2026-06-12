@@ -14,6 +14,7 @@ from fenetre.fenetre import (
     enforce_camera_storage_limit,
     get_pic_from_url,
     get_ssim_for_area,
+    is_sunrise_or_sunset,
     is_camera_timelapse_enabled,
     run_camera_unavailable_command,
 )
@@ -107,6 +108,35 @@ class TestFenetre(unittest.TestCase):
                 discover_camera_timelapses("../cam1", tmpdir, {}, {}),
                 [],
             )
+
+    def test_sunrise_sunset_unavailable_is_cached_per_day(self):
+        fenetre_module._sunrise_sunset_window_cache.clear()
+        camera_config = {
+            "lat": 64.50186,
+            "lon": -165.4128,
+            "sunrise_sunset": {
+                "enabled": True,
+                "sunrise_offset_start_minutes": 60,
+                "sunrise_offset_end_minutes": 30,
+                "sunset_offset_start_minutes": 30,
+                "sunset_offset_end_minutes": 60,
+            },
+        }
+        global_conf = {"timezone": "America/Los_Angeles"}
+
+        with patch(
+            "fenetre.fenetre.sun", side_effect=ValueError("polar day")
+        ) as mock_sun:
+            with patch("fenetre.fenetre.logger") as mock_logger:
+                self.assertFalse(
+                    is_sunrise_or_sunset(camera_config, global_conf, "nome")
+                )
+                self.assertFalse(
+                    is_sunrise_or_sunset(camera_config, global_conf, "nome")
+                )
+
+        self.assertEqual(mock_sun.call_count, 1)
+        mock_logger.info.assert_called_once()
 
     def test_storage_prunes_snapshots_before_daily_timelapse(self):
         with tempfile.TemporaryDirectory() as tmpdir:
