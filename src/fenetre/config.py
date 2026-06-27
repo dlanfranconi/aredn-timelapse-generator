@@ -380,6 +380,9 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "base_url",
             "player_url_template",
             "stream_name_prefix",
+            "api_listen",
+            "rtsp_listen",
+            "webrtc_listen",
         },
     )
     go2rtc_out["enabled"] = _bool(
@@ -405,6 +408,24 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.go2rtc.stream_name_prefix",
         errors,
         default="fenetre_",
+    )
+    go2rtc_out["api_listen"] = _str(
+        go2rtc_cfg.get("api_listen"),
+        "global.go2rtc.api_listen",
+        errors,
+        default=":1984",
+    )
+    go2rtc_out["rtsp_listen"] = _str(
+        go2rtc_cfg.get("rtsp_listen"),
+        "global.go2rtc.rtsp_listen",
+        errors,
+        default=":8554",
+    )
+    go2rtc_out["webrtc_listen"] = _str(
+        go2rtc_cfg.get("webrtc_listen"),
+        "global.go2rtc.webrtc_listen",
+        errors,
+        default=":8555",
     )
     out["go2rtc"] = go2rtc_out
 

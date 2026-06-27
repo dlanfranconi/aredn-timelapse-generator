@@ -13,6 +13,7 @@ import yaml
 from fenetre.cameras_metadata import build_cameras_metadata
 from fenetre.config import ConfigError, config_load
 from fenetre.fenetre import _cors_allow_origin_for_request, load_and_apply_configuration
+from fenetre.go2rtc import build_go2rtc_runtime_config, write_go2rtc_runtime_config
 
 
 # Minimal stub for GoProUtilityThread if fenetre.py imports it and it causes issues
@@ -421,6 +422,9 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "base_url": "http://go2rtc.local:1984",
                     "player_url_template": "{base_url}/webrtc.html?src={stream}",
                     "stream_name_prefix": "mesh_",
+                    "api_listen": ":11984",
+                    "rtsp_listen": ":18554",
+                    "webrtc_listen": ":18555",
                 },
             },
             "cameras": {"cam1": {"url": "http://cam1"}},
@@ -436,6 +440,60 @@ class FenetreConfigTestCase(unittest.TestCase):
             "{base_url}/webrtc.html?src={stream}",
         )
         self.assertEqual(global_conf["go2rtc"]["stream_name_prefix"], "mesh_")
+        self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
+        self.assertEqual(global_conf["go2rtc"]["rtsp_listen"], ":18554")
+        self.assertEqual(global_conf["go2rtc"]["webrtc_listen"], ":18555")
+
+    def test_go2rtc_runtime_config_uses_rtsp_sources(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {
+                    "go2rtc": {
+                        "enabled": True,
+                        "stream_name_prefix": "mesh_",
+                        "api_listen": ":11984",
+                        "rtsp_listen": ":18554",
+                        "webrtc_listen": ":18555",
+                    }
+                },
+                "cameras": {
+                    "Ridge Camera": {
+                        "rtsp_url": "rtsp://admin:snapshot@example.test/stream1",
+                        "ptz_rtsp_url": "rtsp://admin:ptz@example.test/stream2",
+                    },
+                    "No RTSP": {"url": "http://snapshot"},
+                },
+            }
+        )
+
+        self.assertEqual(runtime_config["api"]["listen"], ":11984")
+        self.assertEqual(runtime_config["rtsp"]["listen"], ":18554")
+        self.assertEqual(runtime_config["webrtc"]["listen"], ":18555")
+        self.assertEqual(
+            runtime_config["streams"],
+            {"mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2"},
+        )
+
+    def test_go2rtc_runtime_config_writer(self):
+        config_path = self._create_temp_config_file(
+            {
+                "global": {"go2rtc": {"enabled": True}},
+                "cameras": {
+                    "South": {"rtsp_url": "rtsp://admin:secret@example.test/stream"}
+                },
+            }
+        )
+        output_path = os.path.join(self.temp_dir.name, "go2rtc.yaml")
+
+        self.assertTrue(write_go2rtc_runtime_config(config_path, output_path))
+        with open(output_path, "r") as output_file:
+            generated = yaml.safe_load(output_file)
+
+        self.assertEqual(generated["api"]["listen"], ":1984")
+        self.assertEqual(
+            generated["streams"],
+            {"fenetre_South": "rtsp://admin:secret@example.test/stream"},
+        )
 
     def test_config_load_adds_default_sun_path_postprocessing(self):
         test_data = {

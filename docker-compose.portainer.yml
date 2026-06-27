@@ -9,6 +9,13 @@ services:
       - "8888:8888"
       # Admin/configuration GUI
       - "8889:8889"
+      # go2rtc web/API for PTZ live alignment
+      - "1984:1984"
+      # go2rtc RTSP restreaming
+      - "8554:8554"
+      # go2rtc WebRTC
+      - "8555:8555"
+      - "8555:8555/udp"
 
     environment:
       TZ: America/Los_Angeles

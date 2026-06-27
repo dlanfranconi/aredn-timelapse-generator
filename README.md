@@ -170,6 +170,10 @@ docker run --rm \
   --device /dev/dri:/dev/dri \
   -p 8888:8888 \
   -p 8889:8889 \
+  -p 1984:1984 \
+  -p 8554:8554 \
+  -p 8555:8555 \
+  -p 8555:8555/udp \
   -v /srv/fenetre/config.yaml:/srv/fenetre/config.yaml \
   -v /srv/fenetre/data:/srv/fenetre/data \
   -v /srv/fenetre/logs:/srv/fenetre/logs \
@@ -234,6 +238,10 @@ services:
     ports:
       - "8888:8888" # public, view-only site
       - "8889:8889" # admin UI, Basic Auth protected
+      - "1984:1984" # go2rtc web/API for PTZ live alignment
+      - "8554:8554" # go2rtc RTSP restreaming
+      - "8555:8555" # go2rtc WebRTC TCP
+      - "8555:8555/udp" # go2rtc WebRTC UDP
 
     environment:
       TZ: America/Los_Angeles
@@ -291,15 +299,20 @@ cameras:
     snap_interval_s: 60
 ```
 
-For PTZ alignment with go2rtc, configure a global go2rtc base URL and add an RTSP stream to the camera. The public `cameras.json` exposes only the generated stream name and player URL, not the raw RTSP URL. Configure go2rtc with the same stream name, or set `player_url_template` to match your go2rtc routing.
+For PTZ alignment with go2rtc, configure a global go2rtc base URL and add an RTSP stream to the camera. The Docker image includes go2rtc and starts it automatically when `global.go2rtc.enabled: true` and at least one camera has `rtsp_url` or `ptz_rtsp_url`. The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`.
+
+The public `cameras.json` exposes only the generated stream name and player URL, not the raw RTSP URL. The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`, for example `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
 ```yaml
 global:
   go2rtc:
     enabled: true
-    base_url: http://go2rtc.local:1984
+    base_url: http://HOST:1984
     player_url_template: "{base_url}/stream.html?src={stream}"
     stream_name_prefix: fenetre_
+    api_listen: ":1984"
+    rtsp_listen: ":8554"
+    webrtc_listen: ":8555"
 
 cameras:
   Ridge-PTZ:
@@ -310,6 +323,8 @@ cameras:
       enabled: true
       allow_manual_control: true
 ```
+
+Set `FENETRE_GO2RTC=off` on the container to disable the bundled go2rtc process. Set `FENETRE_GO2RTC=on` if the container should fail to start when go2rtc config generation fails. In the default `auto` mode, Fenetre still starts when go2rtc is not configured.
 
 Storage management is configured under `global.storage_management`. Set `work_dir_max_size_GB: 50` for the full deployment and `camera_max_size_GB: 5` for the default per-camera cap. When `prune_snapshots_first: true`, Fenetre removes old snapshots and rolling timelapse artifacts from days that already have a daily timelapse before trimming old daily timelapse files.
 

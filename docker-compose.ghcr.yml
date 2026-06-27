@@ -7,6 +7,10 @@ services:
     ports:
       - "8888:8888"
       - "8889:8889"
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555"
+      - "8555:8555/udp"
 
     environment:
       TZ: America/Los_Angeles

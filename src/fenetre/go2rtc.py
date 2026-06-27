@@ -1,6 +1,9 @@
 import re
+import sys
 from typing import Any, Dict, Optional
 from urllib.parse import quote
+
+import yaml
 
 _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -56,3 +59,66 @@ def build_go2rtc_metadata(
         "stream": stream_name,
         "player_url": player_url,
     }
+
+
+def build_go2rtc_runtime_config(
+    raw_config: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    global_config = raw_config.get("global") or {}
+    config = _go2rtc_config(global_config)
+    if not config.get("enabled"):
+        return None
+
+    cameras = raw_config.get("cameras") or {}
+    streams = {}
+    if isinstance(cameras, dict):
+        for camera_name, camera_config in cameras.items():
+            if not isinstance(camera_config, dict):
+                continue
+            rtsp_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
+                "rtsp_url"
+            )
+            if not rtsp_source:
+                continue
+            streams[go2rtc_stream_name(str(camera_name), global_config)] = rtsp_source
+
+    if not streams:
+        return None
+
+    runtime_config: Dict[str, Any] = {
+        "api": {"listen": str(config.get("api_listen") or ":1984")},
+        "rtsp": {"listen": str(config.get("rtsp_listen") or ":8554")},
+        "webrtc": {"listen": str(config.get("webrtc_listen") or ":8555")},
+        "streams": streams,
+    }
+    return runtime_config
+
+
+def write_go2rtc_runtime_config(config_path: str, output_path: str) -> bool:
+    with open(config_path, "r") as config_file:
+        raw_config = yaml.safe_load(config_file) or {}
+    runtime_config = build_go2rtc_runtime_config(raw_config)
+    if not runtime_config:
+        return False
+    with open(output_path, "w") as output_file:
+        yaml.safe_dump(runtime_config, output_file, sort_keys=False)
+    return True
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(
+            "usage: python -m fenetre.go2rtc <fenetre-config.yaml> <go2rtc-output.yaml>",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        wrote_config = write_go2rtc_runtime_config(sys.argv[1], sys.argv[2])
+    except Exception as exc:
+        print(f"failed to generate go2rtc config: {exc}", file=sys.stderr)
+        return 1
+    return 0 if wrote_config else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
