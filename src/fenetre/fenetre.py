@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import signal
+import secrets
 import subprocess
 import threading
 import time
@@ -61,7 +62,7 @@ from fenetre.archive import (
     list_unarchived_dirs,
     scan_and_publish_metrics,
 )
-from fenetre.auth import ensure_default_admin_user
+from fenetre.auth import authenticate_config_user_record, ensure_default_admin_user
 from fenetre.camera_utils import (
     get_day_night_from_exif,
     format_shutter_speed,
@@ -74,8 +75,10 @@ from fenetre.ptz import (
     PTZBackendUnavailable,
     PTZError,
     PTZLocked,
+    continuous_move,
     goto_preset,
     ptz_status,
+    stop_move,
 )
 from fenetre.timelapse import (
     add_to_timelapse_queue,
@@ -143,6 +146,7 @@ timelapse_queue_file = None
 timelapse_queue_lock = threading.Lock()
 background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
+public_auth_sessions = {}
 daylight_q = deque()
 archive_q = deque()
 frequent_timelapse_q = deque()
@@ -1085,6 +1089,86 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             raise ValueError("Request body is too large")
         return json.loads(self.rfile.read(content_length).decode("utf-8"))
 
+    def _public_session_user(self):
+        auth_header = self.headers.get("Authorization") or ""
+        if not auth_header.lower().startswith("bearer "):
+            return None
+        token = auth_header.split(" ", 1)[1].strip()
+        session = public_auth_sessions.get(token)
+        if not session:
+            return None
+        if session.get("expires_at", 0) <= time.time():
+            public_auth_sessions.pop(token, None)
+            return None
+        return session.get("user")
+
+    def _handle_public_login_api(self):
+        try:
+            payload = self._read_json_body()
+            username = (payload.get("username") or "").strip()
+            password = payload.get("password") or ""
+            if not username or not password:
+                self._send_json(400, {"error": "username and password are required"})
+                return
+            user = authenticate_config_user_record(FLAGS.config, username, password)
+            if not user:
+                self._send_json(401, {"error": "Invalid username or password"})
+                return
+            token = secrets.token_urlsafe(32)
+            public_user = {
+                "username": username,
+                "role": user.get("role", "viewer"),
+                "ptz_access": user.get("ptz_access", "presets"),
+                "ptz_cameras": user.get("ptz_cameras", []),
+            }
+            public_auth_sessions[token] = {
+                "user": public_user,
+                "expires_at": time.time() + 12 * 60 * 60,
+            }
+            self._send_json(200, {"token": token, "user": public_user})
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+
+    def _handle_public_logout_api(self):
+        auth_header = self.headers.get("Authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+            public_auth_sessions.pop(token, None)
+        self._send_json(200, {"ok": True})
+
+    def _handle_public_auth_status_api(self):
+        user = self._public_session_user()
+        self._send_json(200, {"authenticated": bool(user), "user": user})
+
+    def _user_can_control_ptz(self, camera_name: str, ptz_config: Dict, action: str):
+        if not ptz_config.get("enabled"):
+            return False
+        user = self._public_session_user()
+        if (
+            ptz_config.get("public")
+            and action == "preset"
+            and ptz_config.get("allow_presets", True)
+        ):
+            return True
+        if not user:
+            return False
+        allowed_cameras = user.get("ptz_cameras") or []
+        if allowed_cameras and camera_name not in allowed_cameras:
+            return False
+        role = user.get("role", "viewer")
+        access = user.get("ptz_access", "presets")
+        if role == "admin" or access == "admin":
+            return True
+        if action == "preset":
+            return access in {"presets", "manual"}
+        return action == "manual" and access == "manual"
+
+    def _ptz_owner(self):
+        user = self._public_session_user()
+        if user:
+            return user.get("username") or "authenticated"
+        return self.client_address[0] if self.client_address else "public"
+
     def _handle_ptz_status_api(self, parsed_url):
         query = parse_qs(parsed_url.query)
         camera_name = (query.get("camera") or [""])[0]
@@ -1109,18 +1193,14 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
                 return
             ptz_config = camera_config.get("ptz") or {}
-            if not (
-                ptz_config.get("enabled")
-                and ptz_config.get("public")
-                and ptz_config.get("allow_presets", True)
-            ):
-                self._send_json(403, {"error": "Public PTZ presets are not enabled"})
+            if not self._user_can_control_ptz(camera_name, ptz_config, "preset"):
+                self._send_json(403, {"error": "PTZ presets are not allowed"})
                 return
             result = goto_preset(
                 camera_name,
                 camera_config,
                 preset_id,
-                owner=self.client_address[0] if self.client_address else "public",
+                owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
             )
             self._send_json(200, result)
@@ -1134,6 +1214,74 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             logger.error("Unexpected PTZ preset error.", exc_info=True)
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_ptz_move_api(self):
+        try:
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            if not camera_name:
+                self._send_json(400, {"error": "camera is required"})
+                return
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not (
+                ptz_config.get("allow_manual_control", False)
+                and self._user_can_control_ptz(camera_name, ptz_config, "manual")
+            ):
+                self._send_json(403, {"error": "Manual PTZ control is not allowed"})
+                return
+            result = continuous_move(
+                camera_name,
+                camera_config,
+                pan=float(payload.get("pan") or 0),
+                tilt=float(payload.get("tilt") or 0),
+                zoom=float(payload.get("zoom") or 0),
+                owner=self._ptz_owner(),
+                duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            self._send_json(200, result)
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ move error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_ptz_stop_api(self):
+        try:
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            if not camera_name:
+                self._send_json(400, {"error": "camera is required"})
+                return
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not (
+                ptz_config.get("allow_manual_control", False)
+                and self._user_can_control_ptz(camera_name, ptz_config, "manual")
+            ):
+                self._send_json(403, {"error": "Manual PTZ control is not allowed"})
+                return
+            result = stop_move(camera_name, camera_config)
+            self._send_json(200, result)
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ stop error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def do_GET(self):
         parsed_url = urlparse(self.path)
         if parsed_url.path == "/api/timelapses":
@@ -1142,12 +1290,27 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if parsed_url.path == "/api/ptz/status":
             self._handle_ptz_status_api(parsed_url)
             return
+        if parsed_url.path == "/api/auth/status":
+            self._handle_public_auth_status_api()
+            return
         super().do_GET()
 
     def do_POST(self):
         parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/auth/login":
+            self._handle_public_login_api()
+            return
+        if parsed_url.path == "/api/auth/logout":
+            self._handle_public_logout_api()
+            return
         if parsed_url.path == "/api/ptz/preset":
             self._handle_ptz_preset_api()
+            return
+        if parsed_url.path == "/api/ptz/move":
+            self._handle_ptz_move_api()
+            return
+        if parsed_url.path == "/api/ptz/stop":
+            self._handle_ptz_stop_api()
             return
         self.send_error(405, "Method Not Allowed")
 
@@ -1165,7 +1328,8 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
             self.send_header(
-                "Access-Control-Allow-Headers", "Origin, Range, Content-Type, Accept"
+                "Access-Control-Allow-Headers",
+                "Origin, Range, Content-Type, Accept, Authorization",
             )
             self.send_header(
                 "Access-Control-Expose-Headers", "Content-Length, Content-Range"

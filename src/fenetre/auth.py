@@ -96,17 +96,26 @@ def authenticate_config_user(
     config_file_path: str, username: str, password: str
 ) -> bool:
     ensure_default_admin_user(config_file_path)
+    user = authenticate_config_user_record(config_file_path, username, password)
+    return bool(user and user.get("role", "viewer") == "admin")
+
+
+def authenticate_config_user_record(
+    config_file_path: str, username: str, password: str
+) -> dict | None:
     raw_config = _load_raw_config(config_file_path)
     config = _get_effective_config(raw_config)
     users = config.get("users") or {}
     user = users.get(username)
     if not isinstance(user, dict):
-        return False
+        return None
     if user.get("disabled", False):
-        return False
-    if user.get("role", "viewer") != "admin":
-        return False
-    return verify_password(user, password)
+        return None
+    if not verify_password(user, password):
+        return None
+    user = dict(user)
+    user["username"] = username
+    return user
 
 
 def reset_admin_user(config_file_path: str, password: str) -> None:

@@ -187,6 +187,61 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(camera["timelapse_enabled"])
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_with_snapshot_http_auth(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "auth-cam",
+                    "url": "http://camera/snapshot.jpg",
+                    "snapshot_auth_type": "basic",
+                    "snapshot_username": "admin",
+                    "snapshot_password": "secret",
+                    "require_test": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["auth-cam"]
+        self.assertEqual(
+            camera["http_auth"],
+            {"type": "basic", "username": "admin", "password": "secret"},
+        )
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs["camera_config"], camera)
+
+    @patch("fenetre.admin_server._fetch_local_command_bytes")
+    def test_add_camera_with_rtsp_capture_source(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "rtsp-cam",
+                    "capture_source": "rtsp",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "require_test": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["rtsp-cam"]
+        self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
+        self.assertIn("ffmpeg", camera["local_command"])
+        mock_fetch.assert_called_once_with(
+            camera["local_command"], timeout_s=camera["timeout_s"]
+        )
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_allows_blank_description(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
         response = self.app.post(

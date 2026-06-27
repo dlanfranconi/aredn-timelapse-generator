@@ -74,11 +74,35 @@
                     <option value="sunba">Sunba HTTP snapshot</option>
                 </select>
 
+                <label for="newCameraCaptureSource">Capture source</label>
+                <select id="newCameraCaptureSource">
+                    <option value="snapshot">HTTP/HTTPS snapshot</option>
+                    <option value="rtsp">RTSP frame capture</option>
+                </select>
+
                 <label for="newCameraUrl">Snapshot URL</label>
                 <div class="inline-field">
                     <input id="newCameraUrl" type="password" autocomplete="off" placeholder="http://camera/snapshot.jpg">
                     <button id="toggleNewCameraUrlBtn" type="button">Show</button>
                 </div>
+
+                <label for="newCameraSnapshotUsername">Snapshot username</label>
+                <input id="newCameraSnapshotUsername" type="text" autocomplete="off" placeholder="Optional">
+
+                <label for="newCameraSnapshotPassword">Snapshot password</label>
+                <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
+
+                <label for="newCameraSnapshotAuthType">Snapshot auth</label>
+                <select id="newCameraSnapshotAuthType">
+                    <option value="basic">Basic</option>
+                    <option value="digest">Digest</option>
+                </select>
+
+                <label for="newCameraRtspUrl">RTSP URL</label>
+                <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+
+                <label for="newCameraPtzRtspUrl">PTZ alignment RTSP URL</label>
+                <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="Optional low-latency stream">
             </div>
 
             <div class="option-groups">

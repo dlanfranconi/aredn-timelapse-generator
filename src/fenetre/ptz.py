@@ -173,3 +173,83 @@ def goto_preset(
         "preset": preset["id"],
         "session": session,
     }
+
+
+def continuous_move(
+    camera_name: str,
+    camera_config: Dict[str, Any],
+    pan: float = 0,
+    tilt: float = 0,
+    zoom: float = 0,
+    owner: str = "public",
+    duration_s: int = 60,
+) -> Dict[str, Any]:
+    ptz_config = camera_config.get("ptz") or {}
+    if not ptz_configured(ptz_config):
+        raise PTZError("PTZ is not fully configured for this camera.")
+    session = acquire_session(camera_name, owner, duration_s)
+    try:
+        from onvif import ONVIFCamera
+    except ImportError as exc:
+        raise PTZBackendUnavailable(
+            "ONVIF PTZ backend is not installed. Install the ptz optional dependency."
+        ) from exc
+
+    host = ptz_config.get("host") or ptz_config.get("ip")
+    port = int(ptz_config.get("port") or 80)
+    camera = ONVIFCamera(
+        host, port, ptz_config.get("username"), ptz_config.get("password")
+    )
+    media_service = camera.create_media_service()
+    ptz_service = camera.create_ptz_service()
+    profile_token = ptz_config.get("profile_token")
+    if not profile_token:
+        profiles = media_service.GetProfiles()
+        if not profiles:
+            raise PTZError("No ONVIF media profiles were returned.")
+        profile_token = profiles[0].token
+
+    request = ptz_service.create_type("ContinuousMove")
+    request.ProfileToken = profile_token
+    request.Velocity = {
+        "PanTilt": {
+            "x": max(-1, min(1, float(pan))),
+            "y": max(-1, min(1, float(tilt))),
+        },
+        "Zoom": {"x": max(-1, min(1, float(zoom)))},
+    }
+    ptz_service.ContinuousMove(request)
+    return {"ok": True, "camera": camera_name, "session": session}
+
+
+def stop_move(camera_name: str, camera_config: Dict[str, Any]) -> Dict[str, Any]:
+    ptz_config = camera_config.get("ptz") or {}
+    if not ptz_configured(ptz_config):
+        raise PTZError("PTZ is not fully configured for this camera.")
+    try:
+        from onvif import ONVIFCamera
+    except ImportError as exc:
+        raise PTZBackendUnavailable(
+            "ONVIF PTZ backend is not installed. Install the ptz optional dependency."
+        ) from exc
+
+    host = ptz_config.get("host") or ptz_config.get("ip")
+    port = int(ptz_config.get("port") or 80)
+    camera = ONVIFCamera(
+        host, port, ptz_config.get("username"), ptz_config.get("password")
+    )
+    media_service = camera.create_media_service()
+    ptz_service = camera.create_ptz_service()
+    profile_token = ptz_config.get("profile_token")
+    if not profile_token:
+        profiles = media_service.GetProfiles()
+        if not profiles:
+            raise PTZError("No ONVIF media profiles were returned.")
+        profile_token = profiles[0].token
+
+    request = ptz_service.create_type("Stop")
+    request.ProfileToken = profile_token
+    request.PanTilt = True
+    request.Zoom = True
+    ptz_service.Stop(request)
+    return {"ok": True, "camera": camera_name}

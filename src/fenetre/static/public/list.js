@@ -1,6 +1,15 @@
 const themeToggle = document.getElementById('theme-toggle');
 const body = document.body;
 const mapToggleButton = document.getElementById('map-toggle');
+const loginToggle = document.getElementById('login-toggle');
+const loginPanel = document.getElementById('login-panel');
+const loginUsername = document.getElementById('login-username');
+const loginPassword = document.getElementById('login-password');
+const loginSubmit = document.getElementById('login-submit');
+const logoutSubmit = document.getElementById('logout-submit');
+const loginStatus = document.getElementById('login-status');
+let authToken = localStorage.getItem('fenetreAuthToken') || '';
+let authUser = null;
 
 function syncThemeToggleIcon() {
     themeToggle.classList.toggle('dark-mode-active', body.classList.contains('dark-mode'));
@@ -73,6 +82,80 @@ function setMapVisible(visible) {
 
 mapToggleButton.addEventListener('click', () => {
     setMapVisible(!mapVisible);
+});
+
+function authHeaders() {
+    return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+function syncLoginUi() {
+    loginToggle.textContent = authUser ? authUser.username : 'Login';
+    loginSubmit.hidden = Boolean(authUser);
+    logoutSubmit.hidden = !authUser;
+    loginUsername.hidden = Boolean(authUser);
+    loginPassword.hidden = Boolean(authUser);
+    loginStatus.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
+}
+
+async function loadAuthStatus() {
+    if (!authToken) {
+        authUser = null;
+        syncLoginUi();
+        return;
+    }
+    try {
+        const response = await fetch('/api/auth/status', { headers: authHeaders() });
+        const data = await response.json();
+        authUser = data.authenticated ? data.user : null;
+        if (!authUser) {
+            authToken = '';
+            localStorage.removeItem('fenetreAuthToken');
+        }
+    } catch (error) {
+        authUser = null;
+    }
+    syncLoginUi();
+}
+
+loginToggle.addEventListener('click', () => {
+    loginPanel.hidden = !loginPanel.hidden;
+    if (!loginPanel.hidden && !authUser) {
+        loginUsername.focus();
+    }
+});
+
+loginSubmit.addEventListener('click', async () => {
+    loginStatus.textContent = 'Signing in...';
+    try {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: loginUsername.value.trim(), password: loginPassword.value })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `Login failed: ${response.status}`);
+        }
+        authToken = data.token;
+        authUser = data.user;
+        localStorage.setItem('fenetreAuthToken', authToken);
+        loginPassword.value = '';
+        syncLoginUi();
+        updateAllCameras();
+    } catch (error) {
+        loginStatus.textContent = error.message;
+    }
+});
+
+logoutSubmit.addEventListener('click', async () => {
+    if (authToken) {
+        await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
+    authToken = '';
+    authUser = null;
+    localStorage.removeItem('fenetreAuthToken');
+    syncLoginUi();
+    updateAllCameras();
 });
 
 function applyMapTheme(isDark) {
@@ -367,6 +450,15 @@ function createCameraListItem(camera) {
             <div class="ptz-presets" hidden>
                 <select class="select-ptz-preset" aria-label="PTZ preset"></select>
                 <button class="btn-ptz-preset" type="button">Go</button>
+                <div class="ptz-manual" hidden>
+                    <button type="button" data-pan="0" data-tilt="1">Up</button>
+                    <button type="button" data-pan="-1" data-tilt="0">Left</button>
+                    <button type="button" data-stop="1">Stop</button>
+                    <button type="button" data-pan="1" data-tilt="0">Right</button>
+                    <button type="button" data-pan="0" data-tilt="-1">Down</button>
+                    <button type="button" data-zoom="1">Zoom +</button>
+                    <button type="button" data-zoom="-1">Zoom -</button>
+                </div>
                 <span class="ptz-status"></span>
             </div>
         </div>
@@ -389,8 +481,20 @@ function configurePtzPresets(camera, listItem) {
     const wrapper = listItem.querySelector('.ptz-presets');
     const select = listItem.querySelector('.select-ptz-preset');
     const button = listItem.querySelector('.btn-ptz-preset');
+    const manual = listItem.querySelector('.ptz-manual');
     const status = listItem.querySelector('.ptz-status');
-    if (!ptz.enabled || !ptz.public || !ptz.allow_presets || presets.length === 0) {
+    const userAccess = authUser && (authUser.ptz_access || 'presets');
+    const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
+    const userAllowedCamera = authUser && (userCameras.length === 0 || userCameras.includes(camera.title));
+    const canUsePresets = ptz.enabled
+        && ptz.allow_presets
+        && presets.length > 0
+        && (ptz.public || (userAllowedCamera && ['presets', 'manual', 'admin'].includes(userAccess)));
+    const canUseManual = ptz.enabled
+        && ptz.allow_manual_control
+        && userAllowedCamera
+        && ['manual', 'admin'].includes(userAccess);
+    if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
         return;
     }
@@ -403,6 +507,9 @@ function configurePtzPresets(camera, listItem) {
         select.appendChild(option);
     });
     wrapper.hidden = false;
+    select.hidden = !canUsePresets;
+    button.hidden = !canUsePresets;
+    manual.hidden = !canUseManual;
     button.onclick = async () => {
         if (!select.value) {
             return;
@@ -412,7 +519,7 @@ function configurePtzPresets(camera, listItem) {
         try {
             const response = await fetch('/api/ptz/preset', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
                 body: JSON.stringify({ camera: camera.title, preset: select.value })
             });
             const result = await response.json();
@@ -428,6 +535,34 @@ function configurePtzPresets(camera, listItem) {
             button.disabled = false;
         }
     };
+    manual.querySelectorAll('button').forEach(manualButton => {
+        manualButton.onclick = async () => {
+            manual.querySelectorAll('button').forEach(item => { item.disabled = true; });
+            status.textContent = 'Moving...';
+            try {
+                const isStop = manualButton.dataset.stop === '1';
+                const response = await fetch(isStop ? '/api/ptz/stop' : '/api/ptz/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({
+                        camera: camera.title,
+                        pan: Number(manualButton.dataset.pan || 0) * 0.35,
+                        tilt: Number(manualButton.dataset.tilt || 0) * 0.35,
+                        zoom: Number(manualButton.dataset.zoom || 0) * 0.35
+                    })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || `PTZ request failed: ${response.status}`);
+                }
+                status.textContent = isStop ? 'Stopped' : 'Moving';
+            } catch (error) {
+                status.textContent = error.message;
+            } finally {
+                manual.querySelectorAll('button').forEach(item => { item.disabled = false; });
+            }
+        };
+    });
 }
 
 function updateCamera(camera, cameraData) {
@@ -550,5 +685,5 @@ function updateAllCameras() {
         });
 }
 
-updateAllCameras();
+loadAuthStatus().then(updateAllCameras);
 setInterval(updateAllCameras, 60000);

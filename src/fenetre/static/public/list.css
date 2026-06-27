@@ -208,9 +208,51 @@ body.dark-mode #theme-toggle {
     background: #fff;
 }
 
+#login-toggle {
+    height: 40px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    cursor: pointer;
+    background: #fff;
+    color: #333;
+    padding: 0 12px;
+}
+
+#login-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    border-bottom: 1px solid #ddd;
+}
+
+#login-panel[hidden] {
+    display: none;
+}
+
+#login-panel input {
+    height: 30px;
+    max-width: 180px;
+}
+
+#login-panel button {
+    height: 32px;
+}
+
+body.dark-mode #login-panel {
+    border-color: #333;
+}
+
+body.dark-mode #login-panel input {
+    background: #1f1f1f;
+    color: #e0e0e0;
+    border: 1px solid #555;
+}
+
 body.dark-mode #controls button,
 body.dark-mode #map-toggle,
-body.dark-mode #theme-toggle {
+body.dark-mode #theme-toggle,
+body.dark-mode #login-toggle {
     background-color: #333;
     color: #e0e0e0;
     border-color: #555;
@@ -314,6 +356,25 @@ body.dark-mode .camera-metadata {
 }
 .status.online { background-color: #28a745; }
 .status.offline { background-color: #dc3545; }
+
+.ptz-presets {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.ptz-manual {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(64px, auto));
+    gap: 6px;
+}
+
+.ptz-manual button,
+.btn-ptz-preset {
+    min-height: 32px;
+}
 
 .camera-details {
     display: none;

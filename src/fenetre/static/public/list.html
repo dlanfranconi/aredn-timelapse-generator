@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-    <link rel="stylesheet" href="list.css?v=20260611-timelapse-archive2">
+    <link rel="stylesheet" href="list.css?v=20260626-auth-ptz">
 </head>
 <body>
     <div id="main-container">
@@ -67,7 +67,15 @@
                             <path d="M15.5 3.5A8.5 8.5 0 1 0 20.5 17a6.5 6.5 0 0 1-5-13.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                         </svg>
                     </button>
+                    <button id="login-toggle" type="button">Login</button>
                 </div>
+            </div>
+            <div id="login-panel" hidden>
+                <input id="login-username" type="text" autocomplete="username" placeholder="Username">
+                <input id="login-password" type="password" autocomplete="current-password" placeholder="Password">
+                <button id="login-submit" type="button">Login</button>
+                <button id="logout-submit" type="button" hidden>Logout</button>
+                <span id="login-status"></span>
             </div>
             <ul id="camera-list"></ul>
         </div>
@@ -75,6 +83,6 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-    <script src="list.js?v=20260611-timelapse-archive2"></script>
+    <script src="list.js?v=20260626-auth-ptz"></script>
 </body>
 </html>

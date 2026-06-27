@@ -107,7 +107,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraName = document.getElementById('newCameraName');
     const newCameraDescription = document.getElementById('newCameraDescription');
     const newCameraVendor = document.getElementById('newCameraVendor');
+    const newCameraCaptureSource = document.getElementById('newCameraCaptureSource');
     const newCameraUrl = document.getElementById('newCameraUrl');
+    const newCameraSnapshotUsername = document.getElementById('newCameraSnapshotUsername');
+    const newCameraSnapshotPassword = document.getElementById('newCameraSnapshotPassword');
+    const newCameraSnapshotAuthType = document.getElementById('newCameraSnapshotAuthType');
+    const newCameraRtspUrl = document.getElementById('newCameraRtspUrl');
+    const newCameraPtzRtspUrl = document.getElementById('newCameraPtzRtspUrl');
     const toggleNewCameraUrlBtn = document.getElementById('toggleNewCameraUrlBtn');
     const testNewCameraBtn = document.getElementById('testNewCameraBtn');
     const confirmNewCameraBtn = document.getElementById('confirmNewCameraBtn');
@@ -141,7 +147,13 @@ document.addEventListener('DOMContentLoaded', () => {
     saveSiteNameBtn.addEventListener('click', saveSiteName);
     toggleNewCameraUrlBtn.addEventListener('click', toggleNewCameraUrl);
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
+    newCameraCaptureSource.addEventListener('change', resetNewCameraTest);
     newCameraUrl.addEventListener('input', resetNewCameraTest);
+    newCameraSnapshotUsername.addEventListener('input', resetNewCameraTest);
+    newCameraSnapshotPassword.addEventListener('input', resetNewCameraTest);
+    newCameraSnapshotAuthType.addEventListener('change', resetNewCameraTest);
+    newCameraRtspUrl.addEventListener('input', resetNewCameraTest);
+    newCameraPtzRtspUrl.addEventListener('input', resetNewCameraTest);
     newCameraName.addEventListener('input', resetNewCameraTest);
     testNewCameraBtn.addEventListener('click', testNewCameraSnapshot);
     confirmNewCameraBtn.addEventListener('click', confirmNewCameraAdd);
@@ -261,7 +273,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraName', '');
         setInputValue('newCameraDescription', '');
         setSelectValue('newCameraVendor', 'generic');
+        setSelectValue('newCameraCaptureSource', 'snapshot');
         setInputValue('newCameraUrl', '');
+        setInputValue('newCameraSnapshotUsername', '');
+        setInputValue('newCameraSnapshotPassword', '');
+        setSelectValue('newCameraSnapshotAuthType', 'basic');
+        setInputValue('newCameraRtspUrl', '');
+        setInputValue('newCameraPtzRtspUrl', '');
         newCameraUrl.type = 'password';
         toggleNewCameraUrlBtn.textContent = 'Show';
         setCheckboxValue('newCameraPublic', true);
@@ -326,7 +344,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         setInputValue('newCameraName', cameraName);
         setInputValue('newCameraDescription', camera.description || '');
+        setSelectValue('newCameraCaptureSource', camera.local_command ? 'rtsp' : 'snapshot');
         setInputValue('newCameraUrl', camera.url || '');
+        setInputValue('newCameraSnapshotUsername', (camera.http_auth && camera.http_auth.username) || '');
+        setInputValue('newCameraSnapshotPassword', '');
+        setSelectValue('newCameraSnapshotAuthType', (camera.http_auth && camera.http_auth.type) || 'basic');
+        setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
+        setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
         setCheckboxValue('newCameraPublic', camera.public !== false);
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
@@ -369,7 +393,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraPtzProfileToken', ptz.profile_token || '');
         setInputValue('newCameraPtzPresets', ptz.presets ? JSON.stringify(ptz.presets, null, 2) : '');
         syncAllOptionGroups();
-        newCameraLastTest = { url: camera.url || '', name: cameraName };
+        newCameraLastTest = {
+            key: cameraTestKey({
+                name: cameraName,
+                capture_source: camera.local_command ? 'rtsp' : 'snapshot',
+                url: camera.url || '',
+                snapshot_username: (camera.http_auth && camera.http_auth.username) || '',
+                snapshot_password: '',
+                snapshot_auth_type: (camera.http_auth && camera.http_auth.type) || 'basic',
+                rtsp_url: camera.rtsp_url || ''
+            })
+        };
         confirmNewCameraBtn.disabled = false;
     }
 
@@ -611,7 +645,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = {
             name: newCameraName.value.trim(),
             description: newCameraDescription.value.trim(),
+            capture_source: newCameraCaptureSource.value || 'snapshot',
             url: newCameraUrl.value.trim(),
+            snapshot_username: newCameraSnapshotUsername.value.trim(),
+            snapshot_password: newCameraSnapshotPassword.value,
+            snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
+            rtsp_url: newCameraRtspUrl.value.trim(),
+            ptz_rtsp_url: newCameraPtzRtspUrl.value.trim(),
             timeout_s: intValue('newCameraTimeout', 15),
             public: checked('newCameraPublic'),
             cache_bust: checked('newCameraCacheBust'),
@@ -679,9 +719,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!/^[A-Za-z0-9_-]+$/.test(payload.name)) {
             throw new Error('Camera ID can only use letters, numbers, underscores, and dashes.');
         }
-        if (!payload.url) {
+        if (payload.capture_source === 'snapshot' && !payload.url) {
             throw new Error('Snapshot URL is required.');
         }
+        if (payload.capture_source === 'rtsp' && !payload.rtsp_url) {
+            throw new Error('RTSP URL is required.');
+        }
+    }
+
+    function cameraTestKey(payload) {
+        return [
+            payload.name,
+            payload.capture_source,
+            payload.url,
+            payload.snapshot_username,
+            payload.snapshot_password,
+            payload.snapshot_auth_type,
+            payload.rtsp_url
+        ].join('|');
     }
 
     async function testNewCameraSnapshot() {
@@ -693,13 +748,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/camera/test_snapshot', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: payload.url, timeout_s: payload.timeout_s })
+                body: JSON.stringify({
+                    url: payload.url,
+                    timeout_s: payload.timeout_s,
+                    capture_source: payload.capture_source,
+                    snapshot_username: payload.snapshot_username,
+                    snapshot_password: payload.snapshot_password,
+                    snapshot_auth_type: payload.snapshot_auth_type,
+                    rtsp_url: payload.rtsp_url
+                })
             });
             const result = await response.json();
             if (!response.ok || !result.ok) {
                 throw new Error(result.error || `Snapshot test failed with HTTP ${response.status}`);
             }
-            newCameraLastTest = { url: payload.url, name: payload.name };
+            newCameraLastTest = { key: cameraTestKey(payload) };
             newCameraTestResult.innerHTML = '';
             const summary = document.createElement('div');
             summary.textContent = `Snapshot OK: ${result.width}x${result.height}, ${Math.round(result.bytes / 1024)} KB`;
@@ -721,15 +784,19 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const payload = collectNewCameraPayload(true);
             validateNewCameraPayload(payload);
-            const urlChanged = cameraFormMode === 'edit'
+            const captureChanged = cameraFormMode === 'edit'
                 && editingOriginalCamera
-                && payload.url !== (editingOriginalCamera.url || '');
-            if (!newCameraLastTest || newCameraLastTest.url !== payload.url || newCameraLastTest.name !== payload.name) {
-                throw new Error('Test the current camera ID and snapshot URL before saving it.');
+                && (
+                    payload.url !== (editingOriginalCamera.url || '')
+                    || payload.rtsp_url !== (editingOriginalCamera.rtsp_url || '')
+                    || payload.capture_source !== (editingOriginalCamera.local_command ? 'rtsp' : 'snapshot')
+                );
+            if (!newCameraLastTest || newCameraLastTest.key !== cameraTestKey(payload)) {
+                throw new Error('Test the current camera ID and capture source before saving it.');
             }
             const isEdit = cameraFormMode === 'edit' && editingCameraName;
             setStatus(`${isEdit ? 'Updating' : 'Adding'} camera '${payload.name}'...`, 'info');
-            payload.require_test = !isEdit || urlChanged;
+            payload.require_test = !isEdit || captureChanged;
             const response = await fetch(isEdit ? `/api/camera/${encodeURIComponent(editingCameraName)}` : '/api/camera/add', {
                 method: isEdit ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },

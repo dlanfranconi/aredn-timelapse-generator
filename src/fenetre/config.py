@@ -1044,6 +1044,8 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "public",
             "ptz",
             "work_dir_max_size_GB",
+            "rtsp_url",
+            "ptz_rtsp_url",
             "snap_interval_s",
             "activity_interval_s",
             "tuning_file",

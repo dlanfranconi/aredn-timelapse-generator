@@ -3,7 +3,9 @@ import hmac
 import json
 import os
 import re
+import shlex
 import signal
+import subprocess
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -23,6 +25,7 @@ from fenetre.auth import (
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.config import config_load
 from fenetre.gopro import GoPro
+from fenetre.http_auth import auth_from_camera_config
 from fenetre.ptz import set_lock
 from fenetre.ui_utils import copy_public_html_files
 
@@ -264,6 +267,10 @@ def _slugify_camera_name(value: str) -> str:
 
 GUIDED_CAMERA_KEYS = {
     "url",
+    "http_auth",
+    "rtsp_url",
+    "ptz_rtsp_url",
+    "local_command",
     "timeout_s",
     "cache_bust",
     "gather_metrics",
@@ -286,7 +293,37 @@ GUIDED_CAMERA_KEYS = {
 }
 
 
-def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True):
+def _rtsp_snapshot_command(rtsp_url: str) -> str:
+    return (
+        "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp "
+        f"-i {shlex.quote(rtsp_url)} -frames:v 1 -f image2pipe -vcodec mjpeg -"
+    )
+
+
+def _fetch_local_command_bytes(command: str, timeout_s: int = 15):
+    result = subprocess.run(
+        shlex.split(command),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_s,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"local_command failed with exit code {result.returncode}. Check the camera log for command details."
+        )
+    image_bytes = result.stdout
+    image = Image.open(BytesIO(image_bytes))
+    image.verify()
+    reopened = Image.open(BytesIO(image_bytes))
+    return image_bytes, "image/jpeg", reopened.size
+
+
+def _fetch_snapshot_bytes(
+    url: str,
+    timeout_s: int = 15,
+    cache_bust: bool = True,
+    camera_config: dict | None = None,
+):
     request_url = url
     if cache_bust:
         separator = "&" if "?" in request_url else "?"
@@ -295,7 +332,11 @@ def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True
         "Accept": "image/*,*/*;q=0.8",
         "User-Agent": "Fenetre Admin Snapshot Tester",
     }
-    response = requests.get(request_url, timeout=timeout_s, headers=headers)
+    request_kwargs = {"timeout": timeout_s, "headers": headers}
+    request_auth = auth_from_camera_config(camera_config or {})
+    if request_auth is not None:
+        request_kwargs["auth"] = request_auth
+    response = requests.get(request_url, **request_kwargs)
     response.raise_for_status()
     image_bytes = response.content
     image = Image.open(BytesIO(image_bytes))
@@ -314,16 +355,39 @@ def _build_camera_config(
     existing_camera = existing_camera or {}
     name = _slugify_camera_name(payload.get("name"))
     url = (payload.get("url") or "").strip()
-    if not url:
+    source_type = payload.get("capture_source") or ("rtsp" if not url else "snapshot")
+    rtsp_url = (payload.get("rtsp_url") or "").strip()
+    local_command = (payload.get("local_command") or "").strip()
+    if source_type == "snapshot" and not url:
         raise ValueError("Snapshot URL is required.")
+    if source_type == "rtsp" and not (rtsp_url or local_command):
+        raise ValueError("RTSP URL or local_command is required.")
 
     camera = {
-        "url": url,
         "timeout_s": int(payload.get("timeout_s") or 15),
         "cache_bust": bool(payload.get("cache_bust", True)),
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),
     }
+    if url:
+        camera["url"] = url
+        auth_username = (payload.get("snapshot_username") or "").strip()
+        auth_password = payload.get("snapshot_password")
+        existing_auth = existing_camera.get("http_auth") or {}
+        if auth_username or auth_password or existing_auth:
+            camera["http_auth"] = {
+                "type": payload.get("snapshot_auth_type")
+                or existing_auth.get("type")
+                or "basic",
+                "username": auth_username or existing_auth.get("username", ""),
+                "password": auth_password or existing_auth.get("password", ""),
+            }
+    if rtsp_url:
+        camera["rtsp_url"] = rtsp_url
+    if payload.get("ptz_rtsp_url"):
+        camera["ptz_rtsp_url"] = str(payload.get("ptz_rtsp_url")).strip()
+    if source_type == "rtsp":
+        camera["local_command"] = local_command or _rtsp_snapshot_command(rtsp_url)
     description = (payload.get("description") or "").strip()
     if description:
         camera["description"] = description
@@ -715,12 +779,27 @@ def test_snapshot_url():
     try:
         payload = request.get_json(force=True) or {}
         url = (payload.get("url") or "").strip()
+        rtsp_url = (payload.get("rtsp_url") or "").strip()
+        local_command = (payload.get("local_command") or "").strip()
         timeout_s = int(payload.get("timeout_s") or 15)
-        if not url:
+        camera_config = {}
+        if payload.get("snapshot_username") or payload.get("snapshot_password"):
+            camera_config["http_auth"] = {
+                "type": payload.get("snapshot_auth_type") or "basic",
+                "username": payload.get("snapshot_username") or "",
+                "password": payload.get("snapshot_password") or "",
+            }
+        if local_command or rtsp_url:
+            image_bytes, content_type, size = _fetch_local_command_bytes(
+                local_command or _rtsp_snapshot_command(rtsp_url),
+                timeout_s=timeout_s,
+            )
+        elif url:
+            image_bytes, content_type, size = _fetch_snapshot_bytes(
+                url, timeout_s=timeout_s, camera_config=camera_config
+            )
+        else:
             return jsonify({"error": "Snapshot URL is required."}), 400
-        image_bytes, content_type, size = _fetch_snapshot_bytes(
-            url, timeout_s=timeout_s
-        )
         return jsonify(
             {
                 "ok": True,
@@ -749,11 +828,17 @@ def add_camera():
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
         if payload.get("require_test", True):
-            _fetch_snapshot_bytes(
-                camera["url"],
-                timeout_s=camera.get("timeout_s", 15),
-                cache_bust=camera.get("cache_bust", True),
-            )
+            if camera.get("local_command"):
+                _fetch_local_command_bytes(
+                    camera["local_command"], timeout_s=camera.get("timeout_s", 15)
+                )
+            else:
+                _fetch_snapshot_bytes(
+                    camera["url"],
+                    timeout_s=camera.get("timeout_s", 15),
+                    cache_bust=camera.get("cache_bust", True),
+                    camera_config=camera,
+                )
         config["cameras"][name] = camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
@@ -790,11 +875,17 @@ def update_camera(camera_name):
         if name != camera_name and name in cameras:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
         if payload.get("require_test", False):
-            _fetch_snapshot_bytes(
-                camera["url"],
-                timeout_s=camera.get("timeout_s", 15),
-                cache_bust=camera.get("cache_bust", True),
-            )
+            if camera.get("local_command"):
+                _fetch_local_command_bytes(
+                    camera["local_command"], timeout_s=camera.get("timeout_s", 15)
+                )
+            else:
+                _fetch_snapshot_bytes(
+                    camera["url"],
+                    timeout_s=camera.get("timeout_s", 15),
+                    cache_bust=camera.get("cache_bust", True),
+                    camera_config=camera,
+                )
 
         updated_camera = _merge_guided_camera_update(old_camera, camera)
         if name != camera_name:
@@ -874,21 +965,29 @@ def capture_for_ui(camera_name):
             )
         camera_config = config["cameras"][camera_name]
         url = camera_config.get("url")
+        local_command = camera_config.get("local_command")
         gopro_ip = camera_config.get("gopro_ip")
-        if not url and not gopro_ip:
+        if not url and not local_command and not gopro_ip:
             return (
                 jsonify(
                     {
-                        "error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured."
+                        "error": f"Camera '{camera_name}' does not have a URL, local_command, or gopro_ip configured."
                     }
                 ),
                 400,
             )
+        if local_command:
+            image_bytes, content_type, _ = _fetch_local_command_bytes(
+                local_command,
+                camera_config.get("timeout_s", 20),
+            )
+            return send_file(BytesIO(image_bytes), mimetype=content_type)
         if url:
             image_bytes, content_type, _ = _fetch_snapshot_bytes(
                 url,
                 camera_config.get("timeout_s", 20),
                 camera_config.get("cache_bust", False),
+                camera_config=camera_config,
             )
             return send_file(BytesIO(image_bytes), mimetype=content_type)
         gopro_model = camera_config.get("gopro_model") or "hero11"
