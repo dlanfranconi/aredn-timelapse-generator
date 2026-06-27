@@ -12,7 +12,7 @@ from io import BytesIO
 import requests
 import yaml
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 from prometheus_client import REGISTRY, Counter, Gauge, generate_latest
 from werkzeug.exceptions import BadRequest
 
@@ -324,11 +324,22 @@ def _fetch_local_command_bytes(command: str, timeout_s: int = 15):
         timeout=timeout_s,
     )
     if result.returncode != 0:
+        stderr_preview = (result.stderr or b"").decode("utf-8", errors="replace")[-500:]
         raise RuntimeError(
-            f"local_command failed with exit code {result.returncode}. Check the camera log for command details."
+            f"local_command failed with exit code {result.returncode}. "
+            f"stderr_last_500={stderr_preview!r}"
         )
     image_bytes = result.stdout
-    image = Image.open(BytesIO(image_bytes))
+    try:
+        image = Image.open(BytesIO(image_bytes))
+    except UnidentifiedImageError as exc:
+        stderr_preview = (result.stderr or b"").decode("utf-8", errors="replace")[-500:]
+        raise RuntimeError(
+            "local_command did not return a valid image. "
+            f"stdout_bytes={len(image_bytes or b'')}, "
+            f"stdout_first_200={(image_bytes or b'')[:200]!r}, "
+            f"stderr_last_500={stderr_preview!r}"
+        ) from exc
     image.verify()
     reopened = Image.open(BytesIO(image_bytes))
     return image_bytes, "image/jpeg", reopened.size

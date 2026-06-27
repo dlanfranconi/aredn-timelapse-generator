@@ -379,7 +379,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("password", public_cam["ptz"])
         self.assertNotIn("host", public_cam["ptz"])
 
-    def test_cameras_metadata_includes_go2rtc_without_rtsp_source(self):
+    def test_cameras_metadata_upgrades_legacy_go2rtc_stream_player_to_webrtc(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(
             {
@@ -406,7 +406,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(camera["go2rtc"]["stream"], "site_North_Ridge_Camera")
         self.assertEqual(
             camera["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
+            "http://go2rtc.local:1984/webrtc.html?src=site_North_Ridge_Camera",
         )
         encoded = yaml.dump(camera)
         self.assertNotIn("rtsp://", encoded)

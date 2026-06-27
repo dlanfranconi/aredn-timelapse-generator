@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -521,7 +522,11 @@ class TestFenetre(unittest.TestCase):
         dummy_image = Image.new("RGB", (100, 100), color="red")
         byte_arr = BytesIO()
         dummy_image.save(byte_arr, format="JPEG")
-        mock_subprocess_run.return_value = SimpleNamespace(stdout=byte_arr.getvalue())
+        mock_subprocess_run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout=byte_arr.getvalue(),
+            stderr=b"",
+        )
 
         fenetre_module.global_config = {}
         fenetre_module.get_pic_from_local_command(
@@ -534,6 +539,49 @@ class TestFenetre(unittest.TestCase):
         args, kwargs = mock_subprocess_run.call_args
         self.assertEqual(args[0][2], "rtsp://example.local/live stream")
         self.assertEqual(kwargs["timeout"], 10)
+        self.assertEqual(kwargs["stderr"], subprocess.PIPE)
+
+    @patch("fenetre.fenetre.subprocess.run")
+    def test_get_pic_from_local_command_reports_non_image_stdout(
+        self, mock_subprocess_run
+    ):
+        mock_subprocess_run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout=b"not an image",
+            stderr=b"ffmpeg warning text",
+        )
+
+        fenetre_module.global_config = {}
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "did not return a valid image.*stdout_first_200=b'not an image'",
+        ):
+            fenetre_module.get_pic_from_local_command(
+                "ffmpeg -i rtsp://example.local/live -frames:v 1 -f image2pipe -",
+                10,
+                "cam1",
+                {},
+            )
+
+    @patch("fenetre.fenetre.subprocess.run")
+    def test_get_pic_from_local_command_reports_nonzero_exit(self, mock_subprocess_run):
+        mock_subprocess_run.return_value = SimpleNamespace(
+            returncode=1,
+            stdout=b"",
+            stderr=b"401 Unauthorized",
+        )
+
+        fenetre_module.global_config = {}
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "exit code 1.*401 Unauthorized",
+        ):
+            fenetre_module.get_pic_from_local_command(
+                "ffmpeg -i rtsp://example.local/live -frames:v 1 -f image2pipe -",
+                10,
+                "cam1",
+                {},
+            )
 
     def test_sanitize_url_for_logs_redacts_credentials(self):
         url = (

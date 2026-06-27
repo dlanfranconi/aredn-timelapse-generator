@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import glob
+import base64
 import http.server
 import json
 import logging
@@ -28,7 +29,7 @@ from absl import app, flags
 from astral import LocationInfo
 from astral.sun import sun
 import piexif
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from skimage.metrics import structural_similarity
 
 from .logging_utils import apply_module_levels, setup_logging, get_camera_logger
@@ -415,6 +416,7 @@ def get_pic_from_local_command(
     cmd: str, timeout_s: int, camera_name: str, camera_config: Dict
 ) -> Image.Image:
     log_dir = global_config.get("log_dir")
+    stderr_output = b""
     if log_dir:
         camera_logger = get_camera_logger(
             camera_name,
@@ -429,18 +431,46 @@ def get_pic_from_local_command(
                 log_file_handler = handler
                 break
 
-        with open(log_file_handler.baseFilename, "a") as log_file:
-            s = subprocess.run(
-                shlex.split(cmd),
-                stdout=subprocess.PIPE,
-                stderr=log_file,
-                timeout=timeout_s,
-            )
+        s = subprocess.run(
+            shlex.split(cmd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
+        )
+        stderr_output = s.stderr or b""
+        if log_file_handler:
+            with open(log_file_handler.baseFilename, "ab") as log_file:
+                log_file.write(stderr_output)
+                if stderr_output and not stderr_output.endswith(b"\n"):
+                    log_file.write(b"\n")
+        else:
+            logger.warning("No camera log file handler found for %s", camera_name)
     else:
         s = subprocess.run(
-            shlex.split(cmd), stdout=subprocess.PIPE, stderr=None, timeout=timeout_s
+            shlex.split(cmd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
         )
-    return Image.open(BytesIO(s.stdout))
+        stderr_output = s.stderr or b""
+
+    if s.returncode != 0:
+        stderr_preview = stderr_output.decode("utf-8", errors="replace")[-500:]
+        raise RuntimeError(
+            f"local_command failed for {camera_name} with exit code {s.returncode}. "
+            f"stderr_last_500={stderr_preview!r}"
+        )
+    try:
+        return Image.open(BytesIO(s.stdout))
+    except UnidentifiedImageError as exc:
+        stderr_preview = stderr_output.decode("utf-8", errors="replace")[-500:]
+        stdout_preview = (s.stdout or b"")[:200]
+        raise RuntimeError(
+            f"local_command for {camera_name} did not return a valid image. "
+            f"stdout_bytes={len(s.stdout or b'')}, "
+            f"stdout_first_200={stdout_preview!r}, "
+            f"stderr_last_500={stderr_preview!r}"
+        ) from exc
 
 
 def is_sunrise_or_sunset(
@@ -1103,31 +1133,115 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return session.get("user")
 
     def _handle_public_login_api(self):
+        token, public_user = self._create_public_session_from_json_body()
+        if token and public_user:
+            self._send_json(200, {"token": token, "user": public_user})
+
+    def _create_public_session_from_json_body(self):
         try:
             payload = self._read_json_body()
             username = (payload.get("username") or "").strip()
             password = payload.get("password") or ""
-            if not username or not password:
-                self._send_json(400, {"error": "username and password are required"})
-                return
-            user = authenticate_config_user_record(FLAGS.config, username, password)
-            if not user:
-                self._send_json(401, {"error": "Invalid username or password"})
-                return
-            token = secrets.token_urlsafe(32)
-            public_user = {
-                "username": username,
-                "role": user.get("role", "viewer"),
-                "ptz_access": user.get("ptz_access", "presets"),
-                "ptz_cameras": user.get("ptz_cameras", []),
-            }
-            public_auth_sessions[token] = {
-                "user": public_user,
-                "expires_at": time.time() + 12 * 60 * 60,
-            }
-            self._send_json(200, {"token": token, "user": public_user})
+            return self._create_public_session(username, password)
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(400, {"error": str(exc)})
+            return None, None
+
+    def _create_public_session(
+        self, username: str, password: str, send_errors: bool = True
+    ):
+        if not username or not password:
+            if send_errors:
+                self._send_json(400, {"error": "username and password are required"})
+            return None, None
+        user = authenticate_config_user_record(FLAGS.config, username, password)
+        if not user:
+            if send_errors:
+                self._send_json(401, {"error": "Invalid username or password"})
+            return None, None
+        token = secrets.token_urlsafe(32)
+        public_user = {
+            "username": username,
+            "role": user.get("role", "viewer"),
+            "ptz_access": user.get("ptz_access", "presets"),
+            "ptz_cameras": user.get("ptz_cameras", []),
+        }
+        public_auth_sessions[token] = {
+            "user": public_user,
+            "expires_at": time.time() + 12 * 60 * 60,
+        }
+        return token, public_user
+
+    def _send_basic_auth_challenge(self):
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Fenetre Public"')
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"error":"Authentication required"}')
+
+    def _handle_public_basic_login_api(self):
+        auth_header = self.headers.get("Authorization") or ""
+        if not auth_header.lower().startswith("basic "):
+            self._send_basic_auth_challenge()
+            return
+        try:
+            credentials = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+            username, password = credentials.split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            self._send_basic_auth_challenge()
+            return
+        token, public_user = self._create_public_session(
+            username.strip(), password, send_errors=False
+        )
+        if not token or not public_user:
+            self._send_basic_auth_challenge()
+            return
+        self._send_json(200, {"token": token, "user": public_user})
+
+    def _basic_auth_credentials(self):
+        auth_header = self.headers.get("Authorization") or ""
+        if not auth_header.lower().startswith("basic "):
+            return None, None
+        try:
+            credentials = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+            username, password = credentials.split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            return None, None
+        return username.strip(), password
+
+    def _handle_public_login_page(self, parsed_url):
+        username, password = self._basic_auth_credentials()
+        if not username or not password:
+            self._send_basic_auth_challenge()
+            return
+        token, public_user = self._create_public_session(
+            username, password, send_errors=False
+        )
+        if not token or not public_user:
+            self._send_basic_auth_challenge()
+            return
+
+        next_values = parse_qs(parsed_url.query).get("next") or ["/"]
+        next_url = next_values[0] or "/"
+        if not next_url.startswith("/") or next_url.startswith("//"):
+            next_url = "/"
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Fenetre Login</title></head>
+<body>
+<script>
+localStorage.setItem('fenetreAuthToken', {json.dumps(token)});
+window.location.replace({json.dumps(next_url)});
+</script>
+</body>
+</html>
+"""
+        encoded = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def _handle_public_logout_api(self):
         auth_header = self.headers.get("Authorization") or ""
@@ -1300,6 +1414,12 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed_url.path == "/api/auth/status":
             self._handle_public_auth_status_api()
+            return
+        if parsed_url.path == "/api/auth/basic-login":
+            self._handle_public_basic_login_api()
+            return
+        if parsed_url.path == "/login":
+            self._handle_public_login_page(parsed_url)
             return
         super().do_GET()
 

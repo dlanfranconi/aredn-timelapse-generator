@@ -327,6 +327,16 @@ cameras:
     snap_interval_s: 60
 ```
 
+If an RTSP/local-command camera logs `did not return a valid image`, the command ran but stdout was not a JPEG/PNG that Pillow could decode. Fenetre logs the command exit code, the first bytes of stdout, and the last stderr text so you can tell whether ffmpeg returned an auth error, protocol error, empty output, HTML, or another non-image response. To test the generated command manually, run an equivalent one-frame capture inside the container:
+
+```bash
+docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
+  -i 'rtsp://USER:PASSWORD@camera.local:554/stream1' \
+  -frames:v 1 -f image2pipe -vcodec mjpeg - > /tmp/test.jpg"
+```
+
+Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an error, fix the RTSP URL, credentials, stream path, or transport before adding it back to Fenetre.
+
 `rtsp_url` and `ptz_rtsp_url` can point at the same camera stream, but they are separate for deployments that have more than one stream profile:
 
 - `rtsp_url`: the stream Fenetre uses for normal RTSP frame capture and the default go2rtc source.
@@ -366,7 +376,7 @@ cameras:
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. Remove any older `player_url_template: "{base_url}/stream.html?src={stream}"` setting from your config if you want the new WebRTC default.
+The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. Older configs that still have `player_url_template: "{base_url}/stream.html?src={stream}"` are treated as the WebRTC default so the public PTZ alignment view does not use go2rtc's MSE player.
 
 Expose the go2rtc ports in Docker or Compose:
 
@@ -423,7 +433,7 @@ And open the go2rtc UI:
 http://HOST:1984/
 ```
 
-On the public Fenetre page, normal viewers remain view-only. After an authorized PTZ user logs in, manual PTZ controls are shown only for configured PTZ cameras. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds, so idle WebRTC clients do not keep RTSP streams open.
+On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds, so idle WebRTC clients do not keep RTSP streams open.
 
 ![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
 

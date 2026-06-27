@@ -48,6 +48,8 @@ def build_go2rtc_metadata(
     template = str(
         config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
     )
+    if template == "{base_url}/stream.html?src={stream}":
+        template = "{base_url}/webrtc.html?src={stream}"
     encoded_stream = quote(stream_name, safe="")
     try:
         player_url = template.format(

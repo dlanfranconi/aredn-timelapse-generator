@@ -118,13 +118,14 @@ async function loadAuthStatus() {
 }
 
 loginToggle.addEventListener('click', () => {
-    loginPanel.hidden = !loginPanel.hidden;
-    if (!loginPanel.hidden && !authUser) {
-        loginUsername.focus();
+    if (authUser) {
+        loginPanel.hidden = !loginPanel.hidden;
+        return;
     }
+    openBasicLoginPrompt();
 });
 
-loginSubmit.addEventListener('click', async () => {
+async function loginWithJsonCredentials() {
     loginStatus.textContent = 'Signing in...';
     try {
         const response = await fetch('/api/auth/login', {
@@ -141,9 +142,28 @@ loginSubmit.addEventListener('click', async () => {
         localStorage.setItem('fenetreAuthToken', authToken);
         loginPassword.value = '';
         syncLoginUi();
-        updateAllCameras();
+        window.location.reload();
     } catch (error) {
         loginStatus.textContent = error.message;
+    }
+}
+
+async function openBasicLoginPrompt() {
+    loginPanel.hidden = false;
+    loginStatus.textContent = 'Signing in...';
+    const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+}
+
+loginSubmit.addEventListener('click', loginWithJsonCredentials);
+loginUsername.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        loginWithJsonCredentials();
+    }
+});
+loginPassword.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        loginWithJsonCredentials();
     }
 });
 
