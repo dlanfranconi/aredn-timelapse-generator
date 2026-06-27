@@ -134,6 +134,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "log_max_bytes",
         "log_backup_count",
         "ui",
+        "go2rtc",
         "deployment_name",
         "mqtt",
         "profiler",
@@ -368,6 +369,44 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         linked_out = []
     ui_out["linked_deployments"] = linked_out
     out["ui"] = ui_out
+
+    go2rtc_cfg = _dict(cfg.get("go2rtc"), "global.go2rtc", errors)
+    go2rtc_out = {}
+    _warn_unknown_keys(
+        "global.go2rtc",
+        go2rtc_cfg,
+        {
+            "enabled",
+            "base_url",
+            "player_url_template",
+            "stream_name_prefix",
+        },
+    )
+    go2rtc_out["enabled"] = _bool(
+        go2rtc_cfg.get("enabled"),
+        "global.go2rtc.enabled",
+        errors,
+        default=False,
+    )
+    go2rtc_out["base_url"] = _str(
+        go2rtc_cfg.get("base_url"),
+        "global.go2rtc.base_url",
+        errors,
+        default="",
+    )
+    go2rtc_out["player_url_template"] = _str(
+        go2rtc_cfg.get("player_url_template"),
+        "global.go2rtc.player_url_template",
+        errors,
+        default="{base_url}/stream.html?src={stream}",
+    )
+    go2rtc_out["stream_name_prefix"] = _str(
+        go2rtc_cfg.get("stream_name_prefix"),
+        "global.go2rtc.stream_name_prefix",
+        errors,
+        default="fenetre_",
+    )
+    out["go2rtc"] = go2rtc_out
 
     mqtt_cfg = _dict(cfg.get("mqtt"), "global.mqtt", errors)
     mqtt_out = {}

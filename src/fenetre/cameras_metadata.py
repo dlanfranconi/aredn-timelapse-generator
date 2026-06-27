@@ -5,6 +5,7 @@ import math
 import os
 from typing import Dict, Any
 
+from fenetre.go2rtc import build_go2rtc_metadata
 from fenetre.ptz import public_ptz_metadata
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,9 @@ def build_cameras_metadata(
             "public": True,
             "ptz": public_ptz_metadata(cam_conf.get("ptz") or {}),
         }
+        go2rtc_metadata = build_go2rtc_metadata(cam, cam_conf, global_config or {})
+        if go2rtc_metadata:
+            metadata["go2rtc"] = go2rtc_metadata
 
         if cam_conf.get("source") == "external_website":
             metadata["source"] = "external_website"

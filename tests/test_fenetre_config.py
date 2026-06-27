@@ -378,6 +378,65 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("password", public_cam["ptz"])
         self.assertNotIn("host", public_cam["ptz"])
 
+    def test_cameras_metadata_includes_go2rtc_without_rtsp_source(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "url": "http://snapshot",
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                    "ptz_rtsp_url": "rtsp://admin:secret@example.test:554/stream2",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984/",
+                    "player_url_template": "{base_url}/stream.html?src={stream}",
+                    "stream_name_prefix": "site_",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        camera = metadata["cameras"][0]
+        self.assertEqual(camera["go2rtc"]["stream"], "site_North_Ridge_Camera")
+        self.assertEqual(
+            camera["go2rtc"]["player_url"],
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
+        )
+        encoded = yaml.dump(camera)
+        self.assertNotIn("rtsp://", encoded)
+        self.assertNotIn("secret", encoded)
+
+    def test_config_load_go2rtc_global_settings(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984",
+                    "player_url_template": "{base_url}/webrtc.html?src={stream}",
+                    "stream_name_prefix": "mesh_",
+                },
+            },
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        self.assertTrue(global_conf["go2rtc"]["enabled"])
+        self.assertEqual(global_conf["go2rtc"]["base_url"], "http://go2rtc.local:1984")
+        self.assertEqual(
+            global_conf["go2rtc"]["player_url_template"],
+            "{base_url}/webrtc.html?src={stream}",
+        )
+        self.assertEqual(global_conf["go2rtc"]["stream_name_prefix"], "mesh_")
+
     def test_config_load_adds_default_sun_path_postprocessing(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

@@ -459,6 +459,10 @@ function createCameraListItem(camera) {
                     <button type="button" data-zoom="1">Zoom +</button>
                     <button type="button" data-zoom="-1">Zoom -</button>
                 </div>
+                <div class="ptz-live-view" hidden>
+                    <iframe class="ptz-live-frame" title="PTZ live view" loading="lazy" allow="autoplay; fullscreen"></iframe>
+                    <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open live view</a>
+                </div>
                 <span class="ptz-status"></span>
             </div>
         </div>
@@ -482,10 +486,14 @@ function configurePtzPresets(camera, listItem) {
     const select = listItem.querySelector('.select-ptz-preset');
     const button = listItem.querySelector('.btn-ptz-preset');
     const manual = listItem.querySelector('.ptz-manual');
+    const liveView = listItem.querySelector('.ptz-live-view');
+    const liveFrame = listItem.querySelector('.ptz-live-frame');
+    const liveLink = listItem.querySelector('.ptz-live-link');
     const status = listItem.querySelector('.ptz-status');
     const userAccess = authUser && (authUser.ptz_access || 'presets');
     const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
     const userAllowedCamera = authUser && (userCameras.length === 0 || userCameras.includes(camera.title));
+    const livePlayerUrl = camera.go2rtc && camera.go2rtc.enabled ? camera.go2rtc.player_url : '';
     const canUsePresets = ptz.enabled
         && ptz.allow_presets
         && presets.length > 0
@@ -496,6 +504,7 @@ function configurePtzPresets(camera, listItem) {
         && ['manual', 'admin'].includes(userAccess);
     if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
+        liveFrame.removeAttribute('src');
         return;
     }
 
@@ -510,6 +519,17 @@ function configurePtzPresets(camera, listItem) {
     select.hidden = !canUsePresets;
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
+    liveView.hidden = !(canUseManual && livePlayerUrl);
+    if (canUseManual && livePlayerUrl) {
+        liveLink.href = livePlayerUrl;
+    } else {
+        liveFrame.removeAttribute('src');
+    }
+    const loadLiveView = () => {
+        if (canUseManual && livePlayerUrl && liveFrame.src !== livePlayerUrl) {
+            liveFrame.src = livePlayerUrl;
+        }
+    };
     button.onclick = async () => {
         if (!select.value) {
             return;
@@ -537,6 +557,7 @@ function configurePtzPresets(camera, listItem) {
     };
     manual.querySelectorAll('button').forEach(manualButton => {
         manualButton.onclick = async () => {
+            loadLiveView();
             manual.querySelectorAll('button').forEach(item => { item.disabled = true; });
             status.textContent = 'Moving...';
             try {

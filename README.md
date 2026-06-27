@@ -281,6 +281,36 @@ Raspberry Pi camera deployments are better served by the systemd approach above 
 
 For HTTP/HTTPS snapshot cameras, use `snap_interval_s: 60` for one snapshot per minute and `activity_interval_s: 10` for fast capture when SSIM detects changes inside `ssim_area`. Sunrise/sunset windows use `sunrise_sunset.interval_s`, typically `10`.
 
+For cameras without HTTP snapshots, use an RTSP capture source. This stores snapshots by running ffmpeg for one frame:
+
+```yaml
+cameras:
+  Ridge-Cam:
+    capture_source: rtsp
+    rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream1
+    snap_interval_s: 60
+```
+
+For PTZ alignment with go2rtc, configure a global go2rtc base URL and add an RTSP stream to the camera. The public `cameras.json` exposes only the generated stream name and player URL, not the raw RTSP URL. Configure go2rtc with the same stream name, or set `player_url_template` to match your go2rtc routing.
+
+```yaml
+global:
+  go2rtc:
+    enabled: true
+    base_url: http://go2rtc.local:1984
+    player_url_template: "{base_url}/stream.html?src={stream}"
+    stream_name_prefix: fenetre_
+
+cameras:
+  Ridge-PTZ:
+    url: http://ridge-camera.local/snapshot.jpg
+    rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream1
+    ptz_rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream2
+    ptz:
+      enabled: true
+      allow_manual_control: true
+```
+
 Storage management is configured under `global.storage_management`. Set `work_dir_max_size_GB: 50` for the full deployment and `camera_max_size_GB: 5` for the default per-camera cap. When `prune_snapshots_first: true`, Fenetre removes old snapshots and rolling timelapse artifacts from days that already have a daily timelapse before trimming old daily timelapse files.
 
 ## Recommended video encoding options

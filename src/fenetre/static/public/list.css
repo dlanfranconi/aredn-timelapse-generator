@@ -376,6 +376,25 @@ body.dark-mode .camera-metadata {
     min-height: 32px;
 }
 
+.ptz-live-view {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: min(420px, 100%);
+}
+
+.ptz-live-frame {
+    aspect-ratio: 16 / 9;
+    background: #111;
+    border: 1px solid #d6d6d6;
+    border-radius: 4px;
+    width: 100%;
+}
+
+.ptz-live-link {
+    font-size: 0.85em;
+}
+
 .camera-details {
     display: none;
     padding: 15px;
@@ -477,6 +496,9 @@ body.dark-mode .ptz-presets select {
 }
 body.dark-mode .ptz-status {
     color: #bbb;
+}
+body.dark-mode .ptz-live-frame {
+    border-color: #333;
 }
 body.dark-mode .camera-details .links a:hover {
     background-color: #003d80;
