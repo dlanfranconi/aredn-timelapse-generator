@@ -14,6 +14,13 @@ services:
       - "8554:8554"  # go2rtc RTSP restreaming
       - "8555:8555"  # go2rtc WebRTC TCP
       - "8555:8555/udp"  # go2rtc WebRTC UDP
+    environment:
+      TZ: America/Los_Angeles
+      FENETRE_PID_FILE: /tmp/fenetre.pid
+      # auto: start bundled go2rtc only when global.go2rtc.enabled is true
+      # off: never start go2rtc
+      # on: fail container startup if go2rtc config cannot be generated
+      FENETRE_GO2RTC: auto
     devices:
       - /dev/dri:/dev/dri
     volumes:

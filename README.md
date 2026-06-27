@@ -174,6 +174,9 @@ docker run --rm \
   -p 8554:8554 \
   -p 8555:8555 \
   -p 8555:8555/udp \
+  -e TZ=America/Los_Angeles \
+  -e FENETRE_PID_FILE=/tmp/fenetre.pid \
+  -e FENETRE_GO2RTC=auto \
   -v /srv/fenetre/config.yaml:/srv/fenetre/config.yaml \
   -v /srv/fenetre/data:/srv/fenetre/data \
   -v /srv/fenetre/logs:/srv/fenetre/logs \
@@ -246,6 +249,7 @@ services:
     environment:
       TZ: America/Los_Angeles
       FENETRE_PID_FILE: /tmp/fenetre.pid
+      FENETRE_GO2RTC: auto
 
     volumes:
       - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
@@ -289,19 +293,41 @@ Raspberry Pi camera deployments are better served by the systemd approach above 
 
 For HTTP/HTTPS snapshot cameras, use `snap_interval_s: 60` for one snapshot per minute and `activity_interval_s: 10` for fast capture when SSIM detects changes inside `ssim_area`. Sunrise/sunset windows use `sunrise_sunset.interval_s`, typically `10`.
 
-For cameras without HTTP snapshots, use an RTSP capture source. This stores snapshots by running ffmpeg for one frame:
+## Camera credentials, RTSP capture, PTZ, and go2rtc
+
+Use the admin UI at `http://HOST:8889/` for normal camera setup. The camera form has separate fields for snapshot credentials, RTSP stream URLs, and PTZ options, so credentials do not need to be embedded in the HTTP snapshot URL.
+
+![Admin camera setup fields](docs/images/go2rtc-admin-camera.svg)
+
+For cameras that need HTTP Basic or Digest authentication for snapshots, keep the URL clean and set credentials in `http_auth`:
 
 ```yaml
 cameras:
-  Ridge-Cam:
+  Authenticated-Snapshot:
+    url: http://camera.local/snapshot.jpg
+    http_auth:
+      username: admin
+      password: change-me
+      type: auto
+```
+
+For RTSP-only cameras that do not support HTTP/HTTPS snapshots, set `capture_source: rtsp`. Fenetre generates a local ffmpeg one-frame snapshot command from `rtsp_url`:
+
+```yaml
+cameras:
+  RTSP-Only:
     capture_source: rtsp
-    rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream1
+    rtsp_url: rtsp://admin:change-me@camera.local:554/stream1
     snap_interval_s: 60
 ```
 
-For PTZ alignment with go2rtc, configure a global go2rtc base URL and add an RTSP stream to the camera. The Docker image includes go2rtc and starts it automatically when `global.go2rtc.enabled: true` and at least one camera has `rtsp_url` or `ptz_rtsp_url`. The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`.
+For PTZ alignment, the Docker image includes go2rtc and starts it automatically when all of these are true:
 
-The public `cameras.json` exposes only the generated stream name and player URL, not the raw RTSP URL. The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`, for example `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
+- `global.go2rtc.enabled: true`
+- at least one camera has `rtsp_url` or `ptz_rtsp_url`
+- `FENETRE_GO2RTC` is unset, `auto`, `on`, `true`, or `1`
+
+The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. The public `cameras.json` exposes only the generated go2rtc stream name and player URL, not the raw RTSP URL.
 
 ```yaml
 global:
@@ -324,7 +350,52 @@ cameras:
       allow_manual_control: true
 ```
 
-Set `FENETRE_GO2RTC=off` on the container to disable the bundled go2rtc process. Set `FENETRE_GO2RTC=on` if the container should fail to start when go2rtc config generation fails. In the default `auto` mode, Fenetre still starts when go2rtc is not configured.
+The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
+
+Expose the go2rtc ports in Docker or Compose:
+
+```yaml
+ports:
+  - "8888:8888"      # public Fenetre UI
+  - "8889:8889"      # admin UI
+  - "1984:1984"      # go2rtc web/API
+  - "8554:8554"      # go2rtc RTSP restreaming
+  - "8555:8555"      # go2rtc WebRTC TCP
+  - "8555:8555/udp"  # go2rtc WebRTC UDP
+
+environment:
+  TZ: America/Los_Angeles
+  FENETRE_PID_FILE: /tmp/fenetre.pid
+  FENETRE_GO2RTC: auto
+```
+
+`FENETRE_GO2RTC` controls the bundled go2rtc process:
+
+- `auto`: start go2rtc only when the Fenetre config enables it and has RTSP streams.
+- `off`: never start go2rtc.
+- `on`: require go2rtc; fail container startup if config generation fails.
+
+When the container starts correctly, logs include:
+
+```text
+Starting go2rtc with generated config /tmp/fenetre-go2rtc.yaml
+```
+
+You can inspect the generated go2rtc config:
+
+```bash
+docker exec -it fenetre cat /tmp/fenetre-go2rtc.yaml
+```
+
+And open the go2rtc UI:
+
+```text
+http://HOST:1984/
+```
+
+On the public Fenetre page, normal viewers remain view-only. After an authorized PTZ user logs in, manual PTZ controls are shown only for configured PTZ cameras. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open.
+
+![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
 
 Storage management is configured under `global.storage_management`. Set `work_dir_max_size_GB: 50` for the full deployment and `camera_max_size_GB: 5` for the default per-camera cap. When `prune_snapshots_first: true`, Fenetre removes old snapshots and rolling timelapse artifacts from days that already have a daily timelapse before trimming old daily timelapse files.
 

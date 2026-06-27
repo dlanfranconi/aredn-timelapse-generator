@@ -20,6 +20,9 @@ services:
     environment:
       TZ: America/Los_Angeles
       FENETRE_PID_FILE: /tmp/fenetre.pid
+      # auto: start bundled go2rtc only when global.go2rtc.enabled is true.
+      # Use "off" to disable it or "on" to require it at startup.
+      FENETRE_GO2RTC: auto
 
     volumes:
       # Persistent runtime config on the host. The admin UI writes changes here.
