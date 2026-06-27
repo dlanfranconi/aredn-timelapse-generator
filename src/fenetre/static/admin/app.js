@@ -213,6 +213,20 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    function configWriteDetails(result) {
+        if (!result || !result.config_path) {
+            return '';
+        }
+        const details = [`Path: ${result.config_path}`];
+        if (result.mtime) {
+            details.push(`mtime: ${result.mtime}`);
+        }
+        if (result.size_bytes) {
+            details.push(`${result.size_bytes} bytes`);
+        }
+        return ` (${details.join(', ')})`;
+    }
+
     async function loadStorageSummary() {
         storageSummary.textContent = 'Loading storage usage...';
         try {
@@ -513,7 +527,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(result.error || `HTTP error! status: ${response.status}`);
             }
             userPassword.value = '';
-            setStatus(result.message || 'User saved.', 'success');
+            setStatus((result.message || 'User saved.') + configWriteDetails(result), 'success');
             await loadUsers();
         } catch (error) {
             setStatus(`Error saving user: ${error.message}`, 'error');
@@ -534,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 throw new Error(result.error || `HTTP error! status: ${response.status}`);
             }
-            setStatus(result.message || 'User deleted.', 'success');
+            setStatus((result.message || 'User deleted.') + configWriteDetails(result), 'success');
             await loadUsers();
             clearUserForm();
         } catch (error) {
@@ -819,7 +833,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 throw new Error(result.error || `Failed to add camera with HTTP ${response.status}`);
             }
-            setStatus(result.message || `Camera '${payload.name}' saved. Reload the app to make it live.`, 'success');
+            setStatus(
+                (result.message || `Camera '${payload.name}' saved. Reload the app to make it live.`) + configWriteDetails(result),
+                'success'
+            );
             await fetchAndDisplayConfig();
             await loadStorageSummary();
             hideModal(addCameraModal);
@@ -967,7 +984,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 deploymentInput.value = siteName;
             }
             const result = await response.json();
-            setStatus(result.message || 'GUI name saved. Reload the app and sync UI to publish it.', 'success');
+            setStatus(
+                (result.message || 'GUI name saved. Reload the app and sync UI to publish it.') + configWriteDetails(result),
+                'success'
+            );
         } catch (error) {
             console.error('Error saving GUI name:', error);
             setStatus(`Error saving GUI name: ${error.message}`, 'error');
@@ -1292,7 +1312,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (configData.global && configData.global.deployment_name) {
                 siteNameInput.value = configData.global.deployment_name;
             }
-            setStatus(result.message || 'Configuration saved successfully!', 'success');
+            setStatus((result.message || 'Configuration saved successfully!') + configWriteDetails(result), 'success');
         } catch (error) {
             console.error('Error saving config:', error);
             setStatus(`Error saving configuration: ${error.message}`, 'error');

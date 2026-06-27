@@ -83,6 +83,9 @@ class ConfigServerTestCase(unittest.TestCase):
             "Configuration updated successfully (saved as YAML)",
             response.json["message"],
         )
+        self.assertEqual(response.json["config_path"], self.temp_config_file.name)
+        self.assertGreater(response.json["size_bytes"], 0)
+        self.assertIn("mtime", response.json)
 
         with open(self.temp_config_file.name, "r") as f:
             updated_data_yaml = yaml.safe_load(f)

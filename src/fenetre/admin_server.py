@@ -253,7 +253,23 @@ def _write_yaml_for_bind_mount(config_file_path: str, config_data: dict) -> str 
         f.write(rendered)
         f.flush()
         os.fsync(f.fileno())
+    with open(config_file_path, "r") as f:
+        written_config = yaml.safe_load(f) or {}
+    if written_config != config_data:
+        raise IOError(
+            f"Configuration write verification failed for {config_file_path}."
+        )
     return backup_path
+
+
+def _config_write_metadata(config_file_path: str, backup_path: str | None) -> dict:
+    stat = os.stat(config_file_path)
+    return {
+        "config_path": config_file_path,
+        "backup": os.path.basename(backup_path) if backup_path else None,
+        "size_bytes": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+    }
 
 
 def _slugify_camera_name(value: str) -> str:
@@ -640,10 +656,11 @@ def upsert_user():
         users[username] = user
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
         return jsonify(
             {
                 "message": f"User '{username}' saved.",
-                "backup": os.path.basename(backup_path) if backup_path else None,
+                **metadata,
             }
         )
     except ValueError as exc:
@@ -663,10 +680,11 @@ def delete_user(username):
         users.pop(username)
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
         return jsonify(
             {
                 "message": f"User '{username}' removed.",
-                "backup": os.path.basename(backup_path) if backup_path else None,
+                **metadata,
             }
         )
     except Exception as e:
@@ -722,7 +740,15 @@ def update_config():
         message = "Configuration updated successfully (saved as YAML). Reload is required to apply changes."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
-        return jsonify({"message": message}), 200
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
     except BadRequest:
         return (
             jsonify({"error": "Invalid JSON format in request body or empty body."}),
@@ -755,7 +781,7 @@ def update_deployment_name():
             jsonify(
                 {
                     "message": message,
-                    "backup": os.path.basename(backup_path) if backup_path else None,
+                    **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
             200,
@@ -842,12 +868,13 @@ def add_camera():
         config["cameras"][name] = camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
         return (
             jsonify(
                 {
                     "message": f"Camera '{name}' added. Reload the app to make it live.",
                     "camera_name": name,
-                    "backup": os.path.basename(backup_path) if backup_path else None,
+                    **metadata,
                 }
             ),
             200,
@@ -893,11 +920,12 @@ def update_camera(camera_name):
         cameras[name] = updated_camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
         return jsonify(
             {
                 "message": f"Camera '{name}' updated. Reload the app to make it live.",
                 "camera_name": name,
-                "backup": os.path.basename(backup_path) if backup_path else None,
+                **metadata,
             }
         )
     except ValueError as exc:
@@ -924,11 +952,12 @@ def rename_camera():
             cameras[new_name]["description"] = payload.get("description")
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
         return (
             jsonify(
                 {
                     "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.",
-                    "backup": os.path.basename(backup_path) if backup_path else None,
+                    **metadata,
                 }
             ),
             200,
