@@ -48,8 +48,6 @@ def build_go2rtc_metadata(
     template = str(
         config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
     )
-    if template == "{base_url}/stream.html?src={stream}":
-        template = "{base_url}/webrtc.html?src={stream}"
     encoded_stream = quote(stream_name, safe="")
     try:
         player_url = template.format(
@@ -91,10 +89,17 @@ def build_go2rtc_runtime_config(
     if not streams:
         return None
 
+    webrtc_config: Dict[str, Any] = {
+        "listen": str(config.get("webrtc_listen") or ":8555")
+    }
+    candidates = config.get("webrtc_candidates") or []
+    if candidates:
+        webrtc_config["candidates"] = candidates
+
     runtime_config: Dict[str, Any] = {
         "api": {"listen": str(config.get("api_listen") or ":1984")},
         "rtsp": {"listen": str(config.get("rtsp_listen") or ":8554")},
-        "webrtc": {"listen": str(config.get("webrtc_listen") or ":8555")},
+        "webrtc": webrtc_config,
         "streams": streams,
     }
     return runtime_config

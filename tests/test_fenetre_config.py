@@ -379,7 +379,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("password", public_cam["ptz"])
         self.assertNotIn("host", public_cam["ptz"])
 
-    def test_cameras_metadata_upgrades_legacy_go2rtc_stream_player_to_webrtc(self):
+    def test_cameras_metadata_honors_explicit_go2rtc_player_template(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(
             {
@@ -406,7 +406,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(camera["go2rtc"]["stream"], "site_North_Ridge_Camera")
         self.assertEqual(
             camera["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/webrtc.html?src=site_North_Ridge_Camera",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
         )
         encoded = yaml.dump(camera)
         self.assertNotIn("rtsp://", encoded)
@@ -452,6 +452,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "api_listen": ":11984",
                     "rtsp_listen": ":18554",
                     "webrtc_listen": ":18555",
+                    "webrtc_candidates": ["go2rtc.example.test:8555", "stun:8555"],
                     "live_view_idle_timeout_s": 30,
                 },
             },
@@ -471,6 +472,10 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
         self.assertEqual(global_conf["go2rtc"]["rtsp_listen"], ":18554")
         self.assertEqual(global_conf["go2rtc"]["webrtc_listen"], ":18555")
+        self.assertEqual(
+            global_conf["go2rtc"]["webrtc_candidates"],
+            ["go2rtc.example.test:8555", "stun:8555"],
+        )
         self.assertEqual(global_conf["go2rtc"]["live_view_idle_timeout_s"], 30)
 
     def test_go2rtc_runtime_config_uses_rtsp_sources(self):
@@ -483,6 +488,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                         "api_listen": ":11984",
                         "rtsp_listen": ":18554",
                         "webrtc_listen": ":18555",
+                        "webrtc_candidates": ["go2rtc.example.test:18555"],
                     }
                 },
                 "cameras": {
@@ -498,6 +504,9 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(runtime_config["api"]["listen"], ":11984")
         self.assertEqual(runtime_config["rtsp"]["listen"], ":18554")
         self.assertEqual(runtime_config["webrtc"]["listen"], ":18555")
+        self.assertEqual(
+            runtime_config["webrtc"]["candidates"], ["go2rtc.example.test:18555"]
+        )
         self.assertEqual(
             runtime_config["streams"],
             {"mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2"},

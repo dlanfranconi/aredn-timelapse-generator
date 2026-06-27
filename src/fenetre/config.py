@@ -383,6 +383,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "api_listen",
             "rtsp_listen",
             "webrtc_listen",
+            "webrtc_candidates",
             "live_view_idle_timeout_s",
         },
     )
@@ -428,6 +429,27 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default=":8555",
     )
+    candidates_cfg = go2rtc_cfg.get("webrtc_candidates")
+    if candidates_cfg is None:
+        candidates_out = []
+    elif isinstance(candidates_cfg, list):
+        candidates_out = []
+        for idx, candidate in enumerate(candidates_cfg):
+            value = _str(
+                candidate,
+                f"global.go2rtc.webrtc_candidates[{idx}]",
+                errors,
+                default="",
+            )
+            if value:
+                candidates_out.append(value)
+    else:
+        errors.append(
+            "global.go2rtc.webrtc_candidates: expected list, "
+            f"got {type(candidates_cfg).__name__}"
+        )
+        candidates_out = []
+    go2rtc_out["webrtc_candidates"] = candidates_out
     go2rtc_out["live_view_idle_timeout_s"] = _int(
         go2rtc_cfg.get("live_view_idle_timeout_s"),
         "global.go2rtc.live_view_idle_timeout_s",

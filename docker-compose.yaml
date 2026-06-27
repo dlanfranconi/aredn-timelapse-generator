@@ -22,6 +22,8 @@ services:
       # on: fail container startup if go2rtc config cannot be generated
       # Alignment live views default to WebRTC and unload after
       # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
+      # If WebRTC fails while MSE/HLS works, set
+      # global.go2rtc.webrtc_candidates to HOST:8555 in config.yaml.
       FENETRE_GO2RTC: auto
     devices:
       - /dev/dri:/dev/dri

@@ -362,6 +362,10 @@ global:
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
+    # Set this when WebRTC works poorly or fails from browsers outside the container network.
+    # Use the host/IP and port that browser clients can reach.
+    webrtc_candidates:
+      - HOST:8555
     live_view_idle_timeout_s: 60
 
 cameras:
@@ -376,7 +380,13 @@ cameras:
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. Older configs that still have `player_url_template: "{base_url}/stream.html?src={stream}"` are treated as the WebRTC default so the public PTZ alignment view does not use go2rtc's MSE player.
+The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published. If you intentionally prefer MSE for compatibility, set:
+
+```yaml
+global:
+  go2rtc:
+    player_url_template: "{base_url}/stream.html?src={stream}"
+```
 
 Expose the go2rtc ports in Docker or Compose:
 
