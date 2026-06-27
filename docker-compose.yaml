@@ -20,6 +20,8 @@ services:
       # auto: start bundled go2rtc only when global.go2rtc.enabled is true
       # off: never start go2rtc
       # on: fail container startup if go2rtc config cannot be generated
+      # Alignment live views default to WebRTC and unload after
+      # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
       FENETRE_GO2RTC: auto
     devices:
       - /dev/dri:/dev/dri

@@ -22,7 +22,7 @@ COPY pyproject.toml README.md ./
 COPY src/fenetre ./src/fenetre
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -e '.[gopro]' && \
+    pip install --no-cache-dir -e '.[gopro,ptz]' && \
     pip uninstall -y pip setuptools wheel && \
     find "$VIRTUAL_ENV" -type d -name '__pycache__' -prune -exec rm -rf '{}' + && \
     find "$VIRTUAL_ENV" -type f -name '*.py[co]' -delete

@@ -412,6 +412,33 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("rtsp://", encoded)
         self.assertNotIn("secret", encoded)
 
+    def test_cameras_metadata_defaults_go2rtc_player_to_webrtc(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984/",
+                    "stream_name_prefix": "site_",
+                    "live_view_idle_timeout_s": 15,
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        self.assertEqual(
+            metadata["cameras"][0]["go2rtc"]["player_url"],
+            "http://go2rtc.local:1984/webrtc.html?src=site_North_Ridge_Camera",
+        )
+        self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
+
     def test_config_load_go2rtc_global_settings(self):
         test_data = {
             "global": {
@@ -425,6 +452,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "api_listen": ":11984",
                     "rtsp_listen": ":18554",
                     "webrtc_listen": ":18555",
+                    "live_view_idle_timeout_s": 30,
                 },
             },
             "cameras": {"cam1": {"url": "http://cam1"}},
@@ -443,6 +471,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
         self.assertEqual(global_conf["go2rtc"]["rtsp_listen"], ":18554")
         self.assertEqual(global_conf["go2rtc"]["webrtc_listen"], ":18555")
+        self.assertEqual(global_conf["go2rtc"]["live_view_idle_timeout_s"], 30)
 
     def test_go2rtc_runtime_config_uses_rtsp_sources(self):
         runtime_config = build_go2rtc_runtime_config(

@@ -22,6 +22,8 @@ services:
       FENETRE_PID_FILE: /tmp/fenetre.pid
       # auto: start bundled go2rtc only when global.go2rtc.enabled is true.
       # Use "off" to disable it or "on" to require it at startup.
+      # Alignment live views default to WebRTC and unload after
+      # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
       FENETRE_GO2RTC: auto
 
     volumes:

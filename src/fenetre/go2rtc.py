@@ -41,9 +41,12 @@ def build_go2rtc_metadata(
     if not rtsp_source:
         return None
 
+    idle_timeout_s = config.get("live_view_idle_timeout_s")
+    if idle_timeout_s is None:
+        idle_timeout_s = 60
     stream_name = go2rtc_stream_name(camera_name, global_config)
     template = str(
-        config.get("player_url_template") or "{base_url}/stream.html?src={stream}"
+        config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
     )
     encoded_stream = quote(stream_name, safe="")
     try:
@@ -53,11 +56,12 @@ def build_go2rtc_metadata(
             stream_name=stream_name,
         )
     except (IndexError, KeyError, ValueError):
-        player_url = f"{base_url}/stream.html?src={encoded_stream}"
+        player_url = f"{base_url}/webrtc.html?src={encoded_stream}"
     return {
         "enabled": True,
         "stream": stream_name,
         "player_url": player_url,
+        "idle_timeout_s": int(idle_timeout_s),
     }
 
 

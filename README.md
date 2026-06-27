@@ -45,6 +45,7 @@ This is mostly written in Python and it's been tested on Linux but it could run 
     - `gopro`: Bluetooth and network helpers for GoPro cameras.
     - `picamera2`: Raspberry Pi camera support through `picamera2`.
     - `pyexiv2`: optional EXIF support through `pyexiv2`.
+    - `ptz`: ONVIF PTZ camera control support through `onvif-zeep`.
 
     For a development machine, install the dev extra:
     ```bash
@@ -54,6 +55,11 @@ This is mostly written in Python and it's been tested on Linux but it could run 
     If you plan to control GoPro cameras over Bluetooth, install the GoPro extra:
     ```bash
     pip install -e '.[gopro]'
+    ```
+
+    If you plan to control ONVIF PTZ cameras, install the PTZ extra:
+    ```bash
+    pip install -e '.[ptz]'
     ```
 
     If you plan to capture from a Raspberry Pi camera with `capture_method: picamera2`, install the Picamera2 extra:
@@ -70,7 +76,7 @@ This is mostly written in Python and it's been tested on Linux but it could run 
 
     Extras can be combined in one install command:
     ```bash
-    pip install -e '.[dev,gopro,picamera2,pyexiv2]'
+    pip install -e '.[dev,gopro,picamera2,pyexiv2,ptz]'
     ```
 
     Production deployments should usually install only the base package unless a specific camera or workflow requires an extra. The base install does not install Raspberry Pi camera libraries.
@@ -332,6 +338,8 @@ For PTZ alignment, the Docker image includes go2rtc and starts it automatically 
 - at least one camera has `rtsp_url` or `ptz_rtsp_url`
 - `FENETRE_GO2RTC` is unset, `auto`, `on`, `true`, or `1`
 
+The Docker image also includes the `ptz` Python extra, so ONVIF PTZ control is available without a separate dependency install. If you run Fenetre outside Docker, install `pip install -e '.[ptz]'` for ONVIF controls.
+
 The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. The public `cameras.json` exposes only the generated go2rtc stream name and player URL, not the raw RTSP URL.
 
 ```yaml
@@ -339,11 +347,12 @@ global:
   go2rtc:
     enabled: true
     base_url: http://HOST:1984
-    player_url_template: "{base_url}/stream.html?src={stream}"
+    player_url_template: "{base_url}/webrtc.html?src={stream}"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
+    live_view_idle_timeout_s: 60
 
 cameras:
   Ridge-PTZ:
@@ -356,6 +365,8 @@ cameras:
 ```
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
+
+The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. Remove any older `player_url_template: "{base_url}/stream.html?src={stream}"` setting from your config if you want the new WebRTC default.
 
 Expose the go2rtc ports in Docker or Compose:
 
@@ -412,7 +423,7 @@ And open the go2rtc UI:
 http://HOST:1984/
 ```
 
-On the public Fenetre page, normal viewers remain view-only. After an authorized PTZ user logs in, manual PTZ controls are shown only for configured PTZ cameras. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open.
+On the public Fenetre page, normal viewers remain view-only. After an authorized PTZ user logs in, manual PTZ controls are shown only for configured PTZ cameras. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds, so idle WebRTC clients do not keep RTSP streams open.
 
 ![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
 

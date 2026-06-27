@@ -383,6 +383,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "api_listen",
             "rtsp_listen",
             "webrtc_listen",
+            "live_view_idle_timeout_s",
         },
     )
     go2rtc_out["enabled"] = _bool(
@@ -401,7 +402,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}",
+        default="{base_url}/webrtc.html?src={stream}",
     )
     go2rtc_out["stream_name_prefix"] = _str(
         go2rtc_cfg.get("stream_name_prefix"),
@@ -426,6 +427,13 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.go2rtc.webrtc_listen",
         errors,
         default=":8555",
+    )
+    go2rtc_out["live_view_idle_timeout_s"] = _int(
+        go2rtc_cfg.get("live_view_idle_timeout_s"),
+        "global.go2rtc.live_view_idle_timeout_s",
+        errors,
+        default=60,
+        min_value=0,
     )
     out["go2rtc"] = go2rtc_out
 

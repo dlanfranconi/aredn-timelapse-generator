@@ -493,7 +493,13 @@ function configurePtzPresets(camera, listItem) {
     const userAccess = authUser && (authUser.ptz_access || 'presets');
     const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
     const userAllowedCamera = authUser && (userCameras.length === 0 || userCameras.includes(camera.title));
-    const livePlayerUrl = camera.go2rtc && camera.go2rtc.enabled ? camera.go2rtc.player_url : '';
+    const go2rtc = camera.go2rtc || {};
+    const livePlayerUrl = go2rtc.enabled ? go2rtc.player_url : '';
+    const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
+        ? Number(go2rtc.idle_timeout_s)
+        : 60;
+    const liveIdleTimeoutMs = liveIdleTimeoutS > 0 ? liveIdleTimeoutS * 1000 : 0;
+    let liveIdleTimer = null;
     const canUsePresets = ptz.enabled
         && ptz.allow_presets
         && presets.length > 0
@@ -505,6 +511,10 @@ function configurePtzPresets(camera, listItem) {
         && ['manual', 'admin'].includes(userAccess);
     if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
+        if (liveIdleTimer) {
+            clearTimeout(liveIdleTimer);
+            liveIdleTimer = null;
+        }
         liveFrame.removeAttribute('src');
         return;
     }
@@ -524,11 +534,32 @@ function configurePtzPresets(camera, listItem) {
     if (canUseManual && livePlayerUrl) {
         liveLink.href = livePlayerUrl;
     } else {
+        if (liveIdleTimer) {
+            clearTimeout(liveIdleTimer);
+            liveIdleTimer = null;
+        }
         liveFrame.removeAttribute('src');
     }
+    const unloadLiveView = () => {
+        liveFrame.removeAttribute('src');
+        liveIdleTimer = null;
+        status.textContent = '';
+    };
+    const scheduleLiveViewUnload = () => {
+        if (liveIdleTimer) {
+            clearTimeout(liveIdleTimer);
+            liveIdleTimer = null;
+        }
+        if (liveIdleTimeoutMs > 0) {
+            liveIdleTimer = setTimeout(unloadLiveView, liveIdleTimeoutMs);
+        }
+    };
     const loadLiveView = () => {
         if (canUseManual && livePlayerUrl && liveFrame.src !== livePlayerUrl) {
             liveFrame.src = livePlayerUrl;
+        }
+        if (canUseManual && livePlayerUrl) {
+            scheduleLiveViewUnload();
         }
     };
     button.onclick = async () => {
