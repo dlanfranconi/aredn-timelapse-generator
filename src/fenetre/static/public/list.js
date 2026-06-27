@@ -497,7 +497,8 @@ function configurePtzPresets(camera, listItem) {
     const canUsePresets = ptz.enabled
         && ptz.allow_presets
         && presets.length > 0
-        && (ptz.public || (userAllowedCamera && ['presets', 'manual', 'admin'].includes(userAccess)));
+        && userAllowedCamera
+        && ['presets', 'manual', 'admin'].includes(userAccess);
     const canUseManual = ptz.enabled
         && ptz.allow_manual_control
         && userAllowedCamera

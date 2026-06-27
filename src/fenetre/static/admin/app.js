@@ -115,6 +115,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraRtspUrl = document.getElementById('newCameraRtspUrl');
     const newCameraPtzRtspUrl = document.getElementById('newCameraPtzRtspUrl');
     const toggleNewCameraUrlBtn = document.getElementById('toggleNewCameraUrlBtn');
+    const toggleNewCameraSnapshotPasswordBtn = document.getElementById('toggleNewCameraSnapshotPasswordBtn');
+    const toggleNewCameraRtspUrlBtn = document.getElementById('toggleNewCameraRtspUrlBtn');
+    const toggleNewCameraPtzRtspUrlBtn = document.getElementById('toggleNewCameraPtzRtspUrlBtn');
     const testNewCameraBtn = document.getElementById('testNewCameraBtn');
     const confirmNewCameraBtn = document.getElementById('confirmNewCameraBtn');
     const newCameraTestResult = document.getElementById('newCameraTestResult');
@@ -145,7 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
     userForm.addEventListener('submit', saveUser);
     deleteUserBtn.addEventListener('click', deleteUser);
     saveSiteNameBtn.addEventListener('click', saveSiteName);
-    toggleNewCameraUrlBtn.addEventListener('click', toggleNewCameraUrl);
+    toggleNewCameraUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraUrl, toggleNewCameraUrlBtn));
+    toggleNewCameraSnapshotPasswordBtn.addEventListener('click', () => toggleSensitiveInput(newCameraSnapshotPassword, toggleNewCameraSnapshotPasswordBtn));
+    toggleNewCameraRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn));
+    toggleNewCameraPtzRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn));
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
     newCameraCaptureSource.addEventListener('change', resetNewCameraTest);
     newCameraUrl.addEventListener('input', resetNewCameraTest);
@@ -280,8 +286,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setSelectValue('newCameraSnapshotAuthType', 'basic');
         setInputValue('newCameraRtspUrl', '');
         setInputValue('newCameraPtzRtspUrl', '');
-        newCameraUrl.type = 'password';
-        toggleNewCameraUrlBtn.textContent = 'Show';
+        resetSensitiveInput(newCameraUrl, toggleNewCameraUrlBtn);
+        resetSensitiveInput(newCameraSnapshotPassword, toggleNewCameraSnapshotPasswordBtn);
+        resetSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn);
+        resetSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn);
         setCheckboxValue('newCameraPublic', true);
         setCheckboxValue('newCameraCacheBust', true);
         setCheckboxValue('newCameraMozjpeg', true);
@@ -588,10 +596,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function toggleNewCameraUrl() {
-        const showing = newCameraUrl.type !== 'password';
-        newCameraUrl.type = showing ? 'password' : 'text';
-        toggleNewCameraUrlBtn.textContent = showing ? 'Show' : 'Hide';
+    function resetSensitiveInput(input, toggle) {
+        input.type = 'password';
+        toggle.textContent = 'Show';
+    }
+
+    function toggleSensitiveInput(input, toggle) {
+        const showing = input.type !== 'password';
+        input.type = showing ? 'password' : 'text';
+        toggle.textContent = showing ? 'Show' : 'Hide';
     }
 
     function applyNewCameraTemplate() {

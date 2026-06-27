@@ -321,6 +321,11 @@ cameras:
     snap_interval_s: 60
 ```
 
+`rtsp_url` and `ptz_rtsp_url` can point at the same camera stream, but they are separate for deployments that have more than one stream profile:
+
+- `rtsp_url`: the stream Fenetre uses for normal RTSP frame capture and the default go2rtc source.
+- `ptz_rtsp_url`: an optional stream used for PTZ alignment/live view. Use this when the camera has a lower-latency or lower-resolution substream that is better for aiming the camera. If it is set, go2rtc uses this stream for the generated live-view stream. If it is empty, go2rtc falls back to `rtsp_url`.
+
 For PTZ alignment, the Docker image includes go2rtc and starts it automatically when all of these are true:
 
 - `global.go2rtc.enabled: true`
@@ -380,6 +385,20 @@ When the container starts correctly, logs include:
 ```text
 Starting go2rtc with generated config /tmp/fenetre-go2rtc.yaml
 ```
+
+If `http://HOST:1984/` gives `connection refused`, go2rtc did not start or the port is not published. Check the container logs first:
+
+```bash
+docker logs fenetre | grep -i go2rtc
+```
+
+In `auto` mode, this message means go2rtc intentionally stayed off because the mounted `/srv/fenetre/config.yaml` did not enable it or did not have any RTSP streams:
+
+```text
+go2rtc not started; set global.go2rtc.enabled and at least one camera rtsp_url or ptz_rtsp_url to enable it
+```
+
+After editing `global.go2rtc` or camera RTSP fields, restart the container so the bundled go2rtc config is regenerated.
 
 You can inspect the generated go2rtc config:
 

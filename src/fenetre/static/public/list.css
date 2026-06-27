@@ -13,6 +13,10 @@ body.dark-mode {
     color: #e0e0e0;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 #main-container {
     display: flex;
     height: 100%;

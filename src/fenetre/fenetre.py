@@ -1144,12 +1144,6 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if not ptz_config.get("enabled"):
             return False
         user = self._public_session_user()
-        if (
-            ptz_config.get("public")
-            and action == "preset"
-            and ptz_config.get("allow_presets", True)
-        ):
-            return True
         if not user:
             return False
         allowed_cameras = user.get("ptz_cameras") or []
@@ -1188,12 +1182,16 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not camera_name or not preset_id:
                 self._send_json(400, {"error": "camera and preset are required"})
                 return
+            logger.info(
+                "PTZ preset request camera=%s preset=%s", camera_name, preset_id
+            )
             camera_config = cameras_config.get(camera_name)
             if not camera_config:
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
                 return
             ptz_config = camera_config.get("ptz") or {}
             if not self._user_can_control_ptz(camera_name, ptz_config, "preset"):
+                logger.warning("PTZ preset denied camera=%s", camera_name)
                 self._send_json(403, {"error": "PTZ presets are not allowed"})
                 return
             result = goto_preset(
@@ -1221,6 +1219,13 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not camera_name:
                 self._send_json(400, {"error": "camera is required"})
                 return
+            logger.info(
+                "PTZ move request camera=%s pan=%s tilt=%s zoom=%s",
+                camera_name,
+                payload.get("pan"),
+                payload.get("tilt"),
+                payload.get("zoom"),
+            )
             camera_config = cameras_config.get(camera_name)
             if not camera_config:
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
@@ -1230,6 +1235,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 ptz_config.get("allow_manual_control", False)
                 and self._user_can_control_ptz(camera_name, ptz_config, "manual")
             ):
+                logger.warning("PTZ move denied camera=%s", camera_name)
                 self._send_json(403, {"error": "Manual PTZ control is not allowed"})
                 return
             result = continuous_move(
@@ -1259,6 +1265,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not camera_name:
                 self._send_json(400, {"error": "camera is required"})
                 return
+            logger.info("PTZ stop request camera=%s", camera_name)
             camera_config = cameras_config.get(camera_name)
             if not camera_config:
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
@@ -1268,6 +1275,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 ptz_config.get("allow_manual_control", False)
                 and self._user_can_control_ptz(camera_name, ptz_config, "manual")
             ):
+                logger.warning("PTZ stop denied camera=%s", camera_name)
                 self._send_json(403, {"error": "Manual PTZ control is not allowed"})
                 return
             result = stop_move(camera_name, camera_config)

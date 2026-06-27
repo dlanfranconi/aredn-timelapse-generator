@@ -90,7 +90,10 @@
                 <input id="newCameraSnapshotUsername" type="text" autocomplete="off" placeholder="Optional">
 
                 <label for="newCameraSnapshotPassword">Snapshot password</label>
-                <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
+                <div class="inline-field">
+                    <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
+                    <button id="toggleNewCameraSnapshotPasswordBtn" type="button">Show</button>
+                </div>
 
                 <label for="newCameraSnapshotAuthType">Snapshot auth</label>
                 <select id="newCameraSnapshotAuthType">
@@ -99,10 +102,16 @@
                 </select>
 
                 <label for="newCameraRtspUrl">RTSP URL</label>
-                <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+                <div class="inline-field">
+                    <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+                    <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                </div>
 
                 <label for="newCameraPtzRtspUrl">PTZ alignment RTSP URL</label>
-                <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="Optional low-latency stream">
+                <div class="inline-field">
+                    <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="Optional low-latency stream">
+                    <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
+                </div>
             </div>
 
             <div class="option-groups">
@@ -276,6 +285,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js"></script>
+    <script src="/static/admin/app.js?v=20260627-camera-secrets"></script>
 </body>
 </html>
