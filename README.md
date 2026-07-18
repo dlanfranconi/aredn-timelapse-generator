@@ -305,6 +305,8 @@ Use the admin UI at `http://HOST:8889/` for normal camera setup. The camera form
 
 ![Admin camera setup fields](docs/images/go2rtc-admin-camera.svg)
 
+The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, and TP-Link. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them.
+
 For cameras that need HTTP Basic or Digest authentication for snapshots, keep the URL clean and set credentials in `http_auth`:
 
 ```yaml
@@ -318,6 +320,18 @@ cameras:
 ```
 
 Some embedded camera CGI endpoints reject unknown query parameters. If a snapshot URL works in a browser but the admin snapshot test fails with a 404 containing `_fenetre_test=...`, disable cache busting for that camera by unchecking `Cache bust` in the admin form or setting `cache_bust: false`.
+
+Sunba cameras commonly use:
+
+```yaml
+url: http://CAMERA_IP:HTTP_PORT/images/snapshot.jpg
+http_auth:
+  type: basic
+  username: admin
+  password: change-me
+```
+
+If a vendor snapshot endpoint only accepts credentials as URL query parameters, use that vendor's legacy CGI template and understand that the camera password will be stored in the snapshot URL.
 
 For RTSP-only cameras that do not support HTTP/HTTPS snapshots, set `capture_source: rtsp`. Fenetre generates a local ffmpeg one-frame snapshot command from `rtsp_url`:
 

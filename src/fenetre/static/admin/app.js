@@ -107,6 +107,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraName = document.getElementById('newCameraName');
     const newCameraDescription = document.getElementById('newCameraDescription');
     const newCameraVendor = document.getElementById('newCameraVendor');
+    const newCameraSnapshotTemplate = document.getElementById('newCameraSnapshotTemplate');
+    const newCameraRtspTemplate = document.getElementById('newCameraRtspTemplate');
     const newCameraCaptureSource = document.getElementById('newCameraCaptureSource');
     const newCameraUrl = document.getElementById('newCameraUrl');
     const newCameraSnapshotUsername = document.getElementById('newCameraSnapshotUsername');
@@ -131,6 +133,91 @@ document.addEventListener('DOMContentLoaded', () => {
     let cameraFormMode = 'add';
     let editingCameraName = null;
     let editingOriginalCamera = null;
+    const CAMERA_TEMPLATE_GROUPS = {
+        generic: {
+            snapshots: [
+                { id: 'generic-snapshot', label: 'Generic /snapshot.jpg', url: 'http://CAMERA_IP:HTTP_PORT/snapshot.jpg', auth: 'basic' },
+                { id: 'generic-images-snapshot', label: 'Generic /images/snapshot.jpg', url: 'http://CAMERA_IP:HTTP_PORT/images/snapshot.jpg', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'generic-stream1', label: 'Generic stream1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream1' },
+                { id: 'generic-11', label: 'Generic /11', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/11' }
+            ]
+        },
+        reolink: {
+            snapshots: [
+                { id: 'reolink-api', label: 'Reolink API Snap', url: 'http://CAMERA_IP:HTTP_PORT/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=USERNAME&password=PASSWORD', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'reolink-main', label: 'Main stream', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/h264Preview_01_main' },
+                { id: 'reolink-sub', label: 'Sub stream', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/h264Preview_01_sub' }
+            ]
+        },
+        sunba: {
+            snapshots: [
+                { id: 'sunba-images', label: 'Sunba /images/snapshot.jpg', url: 'http://CAMERA_IP:HTTP_PORT/images/snapshot.jpg', auth: 'basic' },
+                { id: 'sunba-cgi-legacy', label: 'Sunba legacy CGI', url: 'http://CAMERA_IP:HTTP_PORT/cgi-bin/snapshot.cgi?chn=0&u=USERNAME&p=PASSWORD', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'sunba-11', label: 'Main stream /11', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/11' },
+                { id: 'sunba-12', label: 'Sub stream /12', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/12' }
+            ]
+        },
+        hikvision: {
+            snapshots: [
+                { id: 'hikvision-picture', label: 'Hikvision picture', url: 'http://CAMERA_IP:HTTP_PORT/ISAPI/Streaming/channels/101/picture', auth: 'digest' }
+            ],
+            rtsp: [
+                { id: 'hikvision-main', label: 'Channel 101 main', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/Streaming/Channels/101' },
+                { id: 'hikvision-sub', label: 'Channel 102 sub', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/Streaming/Channels/102' }
+            ]
+        },
+        ubiquiti: {
+            snapshots: [
+                { id: 'ubiquiti-snap', label: 'Ubiquiti snap.jpeg', url: 'http://CAMERA_IP:HTTP_PORT/snap.jpeg', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'ubiquiti-s0', label: 'Stream s0', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/s0' },
+                { id: 'ubiquiti-s1', label: 'Stream s1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/s1' },
+                { id: 'ubiquiti-s2', label: 'Stream s2', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/s2' }
+            ]
+        },
+        dahua: {
+            snapshots: [
+                { id: 'dahua-snapshot', label: 'Dahua channel 1 snapshot', url: 'http://CAMERA_IP:HTTP_PORT/cgi-bin/snapshot.cgi?channel=1', auth: 'digest' }
+            ],
+            rtsp: [
+                { id: 'dahua-main', label: 'Channel 1 main', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=0' },
+                { id: 'dahua-sub', label: 'Channel 1 sub', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=1' }
+            ]
+        },
+        amcrest: {
+            snapshots: [
+                { id: 'amcrest-snapshot', label: 'Amcrest channel 1 snapshot', url: 'http://CAMERA_IP:HTTP_PORT/cgi-bin/snapshot.cgi?channel=1', auth: 'digest' }
+            ],
+            rtsp: [
+                { id: 'amcrest-main', label: 'Channel 1 main', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=0' },
+                { id: 'amcrest-sub', label: 'Channel 1 sub', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=1' }
+            ]
+        },
+        axis: {
+            snapshots: [
+                { id: 'axis-jpg', label: 'Axis jpg image', url: 'http://CAMERA_IP:HTTP_PORT/axis-cgi/jpg/image.cgi', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'axis-media', label: 'Axis media stream', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/axis-media/media.amp' }
+            ]
+        },
+        tplink: {
+            snapshots: [
+                { id: 'tplink-snapshot', label: 'TP-Link snapshot.jpg', url: 'http://CAMERA_IP:HTTP_PORT/stream/snapshot.jpg', auth: 'basic' }
+            ],
+            rtsp: [
+                { id: 'tplink-stream1', label: 'Stream 1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream1' },
+                { id: 'tplink-stream2', label: 'Stream 2', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream2' }
+            ]
+        }
+    };
 
     loadConfigBtn.addEventListener('click', fetchAndDisplayConfig);
     saveConfigBtn.addEventListener('click', saveConfiguration);
@@ -155,13 +242,21 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleNewCameraRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn));
     toggleNewCameraPtzRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn));
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
+    newCameraSnapshotTemplate.addEventListener('change', () => applySelectedSnapshotTemplate({ force: true }));
+    newCameraRtspTemplate.addEventListener('change', () => applySelectedRtspTemplate({ force: true }));
     newCameraCaptureSource.addEventListener('change', () => {
         syncCaptureStreamFields();
         resetNewCameraTest();
     });
     newCameraUrl.addEventListener('input', resetNewCameraTest);
-    newCameraSnapshotUsername.addEventListener('input', resetNewCameraTest);
-    newCameraSnapshotPassword.addEventListener('input', resetNewCameraTest);
+    newCameraSnapshotUsername.addEventListener('input', () => {
+        applySelectedRtspTemplate();
+        resetNewCameraTest();
+    });
+    newCameraSnapshotPassword.addEventListener('input', () => {
+        applySelectedRtspTemplate();
+        resetNewCameraTest();
+    });
     newCameraSnapshotAuthType.addEventListener('change', resetNewCameraTest);
     newCameraRtspUrl.addEventListener('input', resetNewCameraTest);
     newCameraPtzRtspUrl.addEventListener('input', resetNewCameraTest);
@@ -359,6 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraPtzPassword', '');
         setInputValue('newCameraPtzProfileToken', '');
         setInputValue('newCameraPtzPresets', '');
+        applyNewCameraTemplate();
         resetNewCameraTest();
         syncAllOptionGroups();
     }
@@ -674,16 +770,69 @@ document.addEventListener('DOMContentLoaded', () => {
         toggle.textContent = showing ? 'Show' : 'Hide';
     }
 
-    function applyNewCameraTemplate() {
-        const templates = {
-            generic: 'http://camera.example/snapshot.jpg',
-            reolink: 'http://CAMERA_IP/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=USERNAME&password=PASSWORD',
-            sunba: 'http://CAMERA_IP/cgi-bin/snapshot.cgi?chn=0&u=USERNAME&p=PASSWORD'
-        };
-        if (!newCameraUrl.value || Object.values(templates).includes(newCameraUrl.value)) {
-            newCameraUrl.value = templates[newCameraVendor.value] || templates.generic;
+    function allTemplateUrls(kind) {
+        return Object.values(CAMERA_TEMPLATE_GROUPS).flatMap(group => (
+            (group[kind] || []).flatMap(template => [template.url, renderCameraTemplateUrl(template.url)])
+        ));
+    }
+
+    function renderCameraTemplateUrl(templateUrl) {
+        return templateUrl
+            .replaceAll('USERNAME', encodeURIComponent(newCameraSnapshotUsername.value.trim() || 'USERNAME'))
+            .replaceAll('PASSWORD', encodeURIComponent(newCameraSnapshotPassword.value || 'PASSWORD'));
+    }
+
+    function selectedTemplate(select, kind) {
+        const group = CAMERA_TEMPLATE_GROUPS[newCameraVendor.value] || CAMERA_TEMPLATE_GROUPS.generic;
+        const templates = group[kind] || [];
+        return templates.find(template => template.id === select.value) || templates[0] || null;
+    }
+
+    function populateTemplateSelect(select, templates) {
+        select.innerHTML = '';
+        templates.forEach(template => {
+            const option = document.createElement('option');
+            option.value = template.id;
+            option.textContent = template.label;
+            select.appendChild(option);
+        });
+    }
+
+    function syncTemplateSelects() {
+        const group = CAMERA_TEMPLATE_GROUPS[newCameraVendor.value] || CAMERA_TEMPLATE_GROUPS.generic;
+        populateTemplateSelect(newCameraSnapshotTemplate, group.snapshots || []);
+        populateTemplateSelect(newCameraRtspTemplate, group.rtsp || []);
+    }
+
+    function applySelectedSnapshotTemplate({ force = false } = {}) {
+        const template = selectedTemplate(newCameraSnapshotTemplate, 'snapshots');
+        if (!template) return;
+        const knownSnapshotUrls = allTemplateUrls('snapshots');
+        if (force || !newCameraUrl.value || knownSnapshotUrls.includes(newCameraUrl.value)) {
+            newCameraUrl.value = renderCameraTemplateUrl(template.url);
+            if (template.auth) {
+                newCameraSnapshotAuthType.value = template.auth;
+            }
+            resetSensitiveInput(newCameraUrl, toggleNewCameraUrlBtn);
+            resetNewCameraTest();
         }
-        resetNewCameraTest();
+    }
+
+    function applySelectedRtspTemplate({ force = false } = {}) {
+        const template = selectedTemplate(newCameraRtspTemplate, 'rtsp');
+        if (!template) return;
+        const knownRtspUrls = allTemplateUrls('rtsp');
+        if (force || !newCameraRtspUrl.value || knownRtspUrls.includes(newCameraRtspUrl.value)) {
+            newCameraRtspUrl.value = renderCameraTemplateUrl(template.url);
+            resetSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn);
+            resetNewCameraTest();
+        }
+    }
+
+    function applyNewCameraTemplate() {
+        syncTemplateSelects();
+        applySelectedSnapshotTemplate();
+        applySelectedRtspTemplate();
     }
 
     function resetNewCameraTest() {
