@@ -209,6 +209,33 @@ def goto_preset(
     }
 
 
+def discover_presets(
+    camera_name: str,
+    camera_config: Dict[str, Any],
+    owner: str = "public",
+    duration_s: int = 60,
+) -> Dict[str, Any]:
+    ptz_config = camera_config.get("ptz") or {}
+    if not ptz_configured(ptz_config):
+        raise PTZError("PTZ is not fully configured for this camera.")
+
+    session = acquire_session(camera_name, owner, duration_s)
+    ptz_service, profile_token = _onvif_services_and_profile_token(ptz_config)
+    try:
+        raw_presets = ptz_service.GetPresets({"ProfileToken": profile_token})
+    except Exception as exc:
+        raise PTZError(f"Could not read ONVIF presets. Original error: {exc}") from exc
+
+    presets = []
+    for index, preset in enumerate(raw_presets or []):
+        token = str(getattr(preset, "token", "") or index).strip()
+        name = str(getattr(preset, "Name", "") or token).strip()
+        if not token or not name:
+            continue
+        presets.append({"id": token, "name": name, "token": token})
+    return {"ok": True, "camera": camera_name, "presets": presets, "session": session}
+
+
 def continuous_move(
     camera_name: str,
     camera_config: Dict[str, Any],
@@ -235,6 +262,34 @@ def continuous_move(
     }
     ptz_service.ContinuousMove(request)
     return {"ok": True, "camera": camera_name, "session": session}
+
+
+def nudge_move(
+    camera_name: str,
+    camera_config: Dict[str, Any],
+    pan: float = 0,
+    tilt: float = 0,
+    zoom: float = 0,
+    move_duration_s: float = 0.25,
+    owner: str = "public",
+    duration_s: int = 60,
+) -> Dict[str, Any]:
+    move_duration_s = max(0.05, min(2.0, float(move_duration_s or 0.25)))
+    result = continuous_move(
+        camera_name,
+        camera_config,
+        pan=pan,
+        tilt=tilt,
+        zoom=zoom,
+        owner=owner,
+        duration_s=duration_s,
+    )
+    try:
+        time.sleep(move_duration_s)
+    finally:
+        stop_move(camera_name, camera_config)
+    result["move_duration_s"] = move_duration_s
+    return result
 
 
 def stop_move(camera_name: str, camera_config: Dict[str, Any]) -> Dict[str, Any]:

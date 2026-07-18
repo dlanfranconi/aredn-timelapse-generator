@@ -76,8 +76,10 @@ from fenetre.ptz import (
     PTZBackendUnavailable,
     PTZError,
     PTZLocked,
-    continuous_move,
+    discover_presets,
     goto_preset,
+    normalize_presets,
+    nudge_move,
     ptz_status,
     stop_move,
 )
@@ -1328,6 +1330,64 @@ window.location.replace({json.dumps(next_url)});
             logger.error("Unexpected PTZ preset error.", exc_info=True)
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_ptz_presets_api(self, parsed_url):
+        try:
+            query = parse_qs(parsed_url.query)
+            camera_name = (query.get("camera") or [""])[0].strip()
+            if not camera_name:
+                self._send_json(400, {"error": "camera query parameter is required"})
+                return
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not self._user_can_control_ptz(camera_name, ptz_config, "preset"):
+                logger.warning("PTZ preset discovery denied camera=%s", camera_name)
+                self._send_json(403, {"error": "PTZ presets are not allowed"})
+                return
+            configured_presets = ptz_config.get("presets") or []
+            if configured_presets:
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "camera": camera_name,
+                        "presets": [
+                            {"id": preset["id"], "name": preset["name"]}
+                            for preset in normalize_presets(ptz_config)
+                        ],
+                        "source": "config",
+                    },
+                )
+                return
+            result = discover_presets(
+                camera_name,
+                camera_config,
+                owner=self._ptz_owner(),
+                duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            self._send_json(
+                200,
+                {
+                    **result,
+                    "presets": [
+                        {"id": preset["id"], "name": preset["name"]}
+                        for preset in result.get("presets", [])
+                    ],
+                    "source": "onvif",
+                },
+            )
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ presets error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def _handle_ptz_move_api(self):
         try:
             payload = self._read_json_body()
@@ -1374,12 +1434,17 @@ window.location.replace({json.dumps(next_url)});
                     },
                 )
                 return
-            result = continuous_move(
+            speed = max(0.05, min(1.0, float(payload.get("speed") or 0.35)))
+            move_duration_ms = max(
+                50, min(2000, int(payload.get("move_duration_ms") or 250))
+            )
+            result = nudge_move(
                 camera_name,
                 camera_config,
-                pan=float(payload.get("pan") or 0),
-                tilt=float(payload.get("tilt") or 0),
-                zoom=float(payload.get("zoom") or 0),
+                pan=float(payload.get("pan") or 0) * speed,
+                tilt=float(payload.get("tilt") or 0) * speed,
+                zoom=float(payload.get("zoom") or 0) * speed,
+                move_duration_s=move_duration_ms / 1000,
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
             )
@@ -1433,6 +1498,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/ptz/status":
             self._handle_ptz_status_api(parsed_url)
+            return
+        if parsed_url.path == "/api/ptz/presets":
+            self._handle_ptz_presets_api(parsed_url)
             return
         if parsed_url.path == "/api/auth/status":
             self._handle_public_auth_status_api()

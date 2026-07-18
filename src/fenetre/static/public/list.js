@@ -471,6 +471,17 @@ function createCameraListItem(camera) {
                 <select class="select-ptz-preset" aria-label="PTZ preset"></select>
                 <button class="btn-ptz-preset" type="button">Go</button>
                 <div class="ptz-manual" hidden>
+                    <label class="ptz-speed-control">Speed
+                        <input class="input-ptz-speed" type="range" min="0.05" max="1" step="0.05" value="0.35">
+                    </label>
+                    <label class="ptz-duration-control">Nudge
+                        <select class="select-ptz-duration" aria-label="PTZ nudge duration">
+                            <option value="150">Short</option>
+                            <option value="250" selected>Medium</option>
+                            <option value="500">Long</option>
+                            <option value="1000">Very long</option>
+                        </select>
+                    </label>
                     <button type="button" data-pan="0" data-tilt="1">Up</button>
                     <button type="button" data-pan="-1" data-tilt="0">Left</button>
                     <button type="button" data-stop="1">Stop</button>
@@ -480,8 +491,9 @@ function createCameraListItem(camera) {
                     <button type="button" data-zoom="-1">Zoom -</button>
                 </div>
                 <div class="ptz-live-view" hidden>
+                    <button class="btn-ptz-live-start" type="button">Start alignment view</button>
                     <iframe class="ptz-live-frame" title="PTZ live view" loading="lazy" allow="autoplay; fullscreen"></iframe>
-                    <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open live view</a>
+                    <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open full live view</a>
                 </div>
                 <span class="ptz-status"></span>
             </div>
@@ -502,12 +514,18 @@ function createCameraListItem(camera) {
 function configurePtzPresets(camera, listItem) {
     const ptz = camera.ptz || {};
     const presets = Array.isArray(ptz.presets) ? ptz.presets : [];
+    const cachedPresets = Array.isArray(listItem._ptzDiscoveredPresets)
+        ? listItem._ptzDiscoveredPresets
+        : presets;
     const wrapper = listItem.querySelector('.ptz-presets');
     const select = listItem.querySelector('.select-ptz-preset');
     const button = listItem.querySelector('.btn-ptz-preset');
     const manual = listItem.querySelector('.ptz-manual');
+    const speedInput = listItem.querySelector('.input-ptz-speed');
+    const durationSelect = listItem.querySelector('.select-ptz-duration');
     const liveView = listItem.querySelector('.ptz-live-view');
     const liveFrame = listItem.querySelector('.ptz-live-frame');
+    const liveStartButton = listItem.querySelector('.btn-ptz-live-start');
     const liveLink = listItem.querySelector('.ptz-live-link');
     const status = listItem.querySelector('.ptz-status');
     const userAccess = authUser && (authUser.ptz_access || 'presets');
@@ -517,14 +535,15 @@ function configurePtzPresets(camera, listItem) {
     );
     const go2rtc = camera.go2rtc || {};
     const livePlayerUrl = go2rtc.enabled ? go2rtc.player_url : '';
+    const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_player_url || go2rtc.player_url) : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
         : 60;
     const liveIdleTimeoutMs = liveIdleTimeoutS > 0 ? liveIdleTimeoutS * 1000 : 0;
     let liveIdleTimer = null;
+    let presetsLoaded = cachedPresets.length > 0;
     const canUsePresets = ptz.enabled
         && ptz.allow_presets
-        && presets.length > 0
         && userAllowedCamera
         && ['presets', 'manual', 'admin'].includes(userAccess);
     const canUseManual = ptz.enabled
@@ -537,35 +556,42 @@ function configurePtzPresets(camera, listItem) {
             clearTimeout(liveIdleTimer);
             liveIdleTimer = null;
         }
-        liveFrame.removeAttribute('src');
+        liveFrame.src = 'about:blank';
         return;
     }
 
-    select.innerHTML = '';
-    presets.forEach(preset => {
-        const option = document.createElement('option');
-        option.value = preset.id;
-        option.textContent = preset.name;
-        select.appendChild(option);
-    });
+    const populatePresets = discoveredPresets => {
+        select.innerHTML = '';
+        discoveredPresets.forEach(preset => {
+            const option = document.createElement('option');
+            option.value = preset.id;
+            option.textContent = preset.name;
+            select.appendChild(option);
+        });
+        select.disabled = discoveredPresets.length === 0;
+        button.disabled = discoveredPresets.length === 0;
+    };
+    populatePresets(cachedPresets);
     wrapper.hidden = false;
     select.hidden = !canUsePresets;
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
     liveView.hidden = !(canUseManual && livePlayerUrl);
     if (canUseManual && livePlayerUrl) {
-        liveLink.href = livePlayerUrl;
+        liveLink.href = fullLivePlayerUrl;
     } else {
         if (liveIdleTimer) {
             clearTimeout(liveIdleTimer);
             liveIdleTimer = null;
         }
-        liveFrame.removeAttribute('src');
+        liveFrame.src = 'about:blank';
     }
     const unloadLiveView = () => {
-        liveFrame.removeAttribute('src');
+        liveFrame.src = 'about:blank';
         liveIdleTimer = null;
-        status.textContent = '';
+        if (status.textContent === 'Alignment view loaded') {
+            status.textContent = '';
+        }
     };
     const scheduleLiveViewUnload = () => {
         if (liveIdleTimer) {
@@ -579,11 +605,48 @@ function configurePtzPresets(camera, listItem) {
     const loadLiveView = () => {
         if (canUseManual && livePlayerUrl && liveFrame.src !== livePlayerUrl) {
             liveFrame.src = livePlayerUrl;
+            status.textContent = 'Alignment view loaded';
         }
         if (canUseManual && livePlayerUrl) {
             scheduleLiveViewUnload();
         }
     };
+    liveFrame.onload = scheduleLiveViewUnload;
+    liveFrame.onclick = loadLiveView;
+    liveStartButton.onclick = loadLiveView;
+    liveView.onclick = event => {
+        if (event.target === liveView) {
+            loadLiveView();
+        }
+    };
+    if (canUsePresets && !presetsLoaded) {
+        select.innerHTML = '<option value="">Loading presets...</option>';
+        select.disabled = true;
+        button.disabled = true;
+        fetch(`/api/ptz/presets?camera=${encodeURIComponent(camera.title)}`, {
+            headers: authHeaders()
+        })
+            .then(async response => {
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || `Preset discovery failed: ${response.status}`);
+                }
+                presetsLoaded = true;
+                listItem._ptzDiscoveredPresets = Array.isArray(result.presets) ? result.presets : [];
+                populatePresets(listItem._ptzDiscoveredPresets);
+                if (!select.options.length) {
+                    select.innerHTML = '<option value="">No presets found</option>';
+                    select.disabled = true;
+                    button.disabled = true;
+                }
+            })
+            .catch(error => {
+                select.innerHTML = '<option value="">Preset discovery failed</option>';
+                select.disabled = true;
+                button.disabled = true;
+                status.textContent = error.message;
+            });
+    }
     button.onclick = async () => {
         if (!select.value) {
             return;
@@ -621,16 +684,18 @@ function configurePtzPresets(camera, listItem) {
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({
                         camera: camera.title,
-                        pan: Number(manualButton.dataset.pan || 0) * 0.35,
-                        tilt: Number(manualButton.dataset.tilt || 0) * 0.35,
-                        zoom: Number(manualButton.dataset.zoom || 0) * 0.35
+                        pan: Number(manualButton.dataset.pan || 0),
+                        tilt: Number(manualButton.dataset.tilt || 0),
+                        zoom: Number(manualButton.dataset.zoom || 0),
+                        speed: Number(speedInput.value || 0.35),
+                        move_duration_ms: Number(durationSelect.value || 250)
                     })
                 });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || `PTZ request failed: ${response.status}`);
                 }
-                status.textContent = isStop ? 'Stopped' : 'Moving';
+                status.textContent = isStop ? 'Stopped' : 'Nudged';
             } catch (error) {
                 status.textContent = error.message;
             } finally {

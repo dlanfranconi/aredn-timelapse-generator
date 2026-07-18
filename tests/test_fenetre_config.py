@@ -405,8 +405,15 @@ class FenetreConfigTestCase(unittest.TestCase):
         camera = metadata["cameras"][0]
         self.assertEqual(camera["go2rtc"]["stream"], "site_North_Ridge_Camera")
         self.assertEqual(
+            camera["go2rtc"]["full_stream"], "site_North_Ridge_Camera_full"
+        )
+        self.assertEqual(
             camera["go2rtc"]["player_url"],
             "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
+        )
+        self.assertEqual(
+            camera["go2rtc"]["full_player_url"],
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full",
         )
         encoded = yaml.dump(camera)
         self.assertNotIn("rtsp://", encoded)
@@ -509,7 +516,10 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             runtime_config["streams"],
-            {"mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2"},
+            {
+                "mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2",
+                "mesh_Ridge_Camera_full": "rtsp://admin:snapshot@example.test/stream1",
+            },
         )
 
     def test_go2rtc_runtime_config_writer(self):

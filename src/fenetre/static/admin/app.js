@@ -407,8 +407,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncCaptureStreamFields() {
         const captureSource = newCameraCaptureSource.value || 'snapshot';
         const ptzEnabled = checked('newCameraPtzEnabled');
-        const showRtspCapture = captureSource === 'rtsp';
+        const showRtspCapture = captureSource === 'rtsp' || ptzEnabled;
         const showPtzRtsp = captureSource !== 'rtsp' && ptzEnabled;
+        const rtspLabel = document.querySelector('label[for="newCameraRtspUrl"]');
+        if (rtspLabel) {
+            rtspLabel.textContent = captureSource === 'rtsp'
+                ? 'RTSP capture URL'
+                : 'Full live RTSP URL';
+        }
         newCameraRtspRow.hidden = !showRtspCapture;
         newCameraPtzRtspRow.hidden = !showPtzRtsp;
         newCameraRtspUrl.disabled = !showRtspCapture;
@@ -505,7 +511,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraSnapshotPassword', '');
         setSelectValue('newCameraSnapshotAuthType', (camera.http_auth && camera.http_auth.type) || 'basic');
         setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
-        setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || (!camera.local_command ? (camera.rtsp_url || '') : ''));
+        setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
         setCheckboxValue('newCameraPublic', camera.public !== false);
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
@@ -894,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot_username: newCameraSnapshotUsername.value.trim(),
             snapshot_password: newCameraSnapshotPassword.value,
             snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
-            rtsp_url: newCameraCaptureSource.value === 'rtsp' ? newCameraRtspUrl.value.trim() : '',
+            rtsp_url: newCameraCaptureSource.value === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
             ptz_rtsp_url: newCameraCaptureSource.value !== 'rtsp' && checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
             public: checked('newCameraPublic'),

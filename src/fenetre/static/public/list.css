@@ -375,8 +375,22 @@ body.dark-mode .camera-metadata {
     gap: 6px;
 }
 
+.ptz-speed-control,
+.ptz-duration-control {
+    align-items: center;
+    display: flex;
+    font-size: 0.85em;
+    gap: 6px;
+    grid-column: span 3;
+}
+
+.input-ptz-speed {
+    min-width: 160px;
+}
+
 .ptz-manual button,
-.btn-ptz-preset {
+.btn-ptz-preset,
+.btn-ptz-live-start {
     min-height: 32px;
 }
 

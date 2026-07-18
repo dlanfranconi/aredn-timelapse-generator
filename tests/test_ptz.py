@@ -6,16 +6,20 @@ from fenetre.ptz import (
     PTZError,
     PTZLocked,
     acquire_session,
+    discover_presets,
     goto_preset,
+    nudge_move,
     normalize_presets,
     public_ptz_metadata,
     set_lock,
+    _sessions,
 )
 
 
 class PTZTestCase(unittest.TestCase):
     def tearDown(self):
         set_lock("cam1", False)
+        _sessions.clear()
 
     def test_public_metadata_redacts_onvif_connection(self):
         metadata = public_ptz_metadata(
@@ -121,3 +125,66 @@ class PTZTestCase(unittest.TestCase):
                 "Could not connect to ONVIF service at 10.1.64.69:8899",
             ):
                 goto_preset("cam1", camera_config, "home")
+
+    def test_discover_presets_reads_onvif_presets(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        ptz.GetPresets.return_value = [
+            MagicMock(token="1", Name="Home"),
+            MagicMock(token="2", Name="Launch Pad"),
+        ]
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            result = discover_presets("cam1", camera_config, "operator")
+
+        self.assertEqual(
+            result["presets"],
+            [
+                {"id": "1", "name": "Home", "token": "1"},
+                {"id": "2", "name": "Launch Pad", "token": "2"},
+            ],
+        )
+        ptz.GetPresets.assert_called_once_with({"ProfileToken": "profile-1"})
+
+    def test_nudge_move_stops_after_bounded_duration(self):
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+            }
+        }
+
+        with patch("fenetre.ptz.continuous_move") as mock_move, patch(
+            "fenetre.ptz.stop_move"
+        ) as mock_stop, patch("fenetre.ptz.time.sleep") as mock_sleep:
+            mock_move.return_value = {"ok": True, "camera": "cam1"}
+            result = nudge_move(
+                "cam1",
+                camera_config,
+                pan=1,
+                move_duration_s=5,
+                owner="operator",
+            )
+
+        mock_move.assert_called_once()
+        mock_sleep.assert_called_once_with(2.0)
+        mock_stop.assert_called_once_with("cam1", camera_config)
+        self.assertEqual(result["move_duration_s"], 2.0)

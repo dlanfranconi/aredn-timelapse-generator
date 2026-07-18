@@ -27,6 +27,25 @@ def go2rtc_stream_name(camera_name: str, global_config: Dict[str, Any]) -> str:
     return f"{prefix}{sanitize_stream_name(camera_name)}"
 
 
+def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> str:
+    return f"{go2rtc_stream_name(camera_name, global_config)}_full"
+
+
+def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
+    template = str(
+        config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
+    )
+    encoded_stream = quote(stream_name, safe="")
+    try:
+        return template.format(
+            base_url=base_url,
+            stream=encoded_stream,
+            stream_name=stream_name,
+        )
+    except (IndexError, KeyError, ValueError):
+        return f"{base_url}/webrtc.html?src={encoded_stream}"
+
+
 def build_go2rtc_metadata(
     camera_name: str,
     camera_config: Dict[str, Any],
@@ -37,30 +56,26 @@ def build_go2rtc_metadata(
     if not config.get("enabled") or not base_url:
         return None
 
-    rtsp_source = camera_config.get("ptz_rtsp_url") or camera_config.get("rtsp_url")
-    if not rtsp_source:
+    alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
+        "rtsp_url"
+    )
+    full_source = camera_config.get("rtsp_url") or alignment_source
+    if not alignment_source:
         return None
 
     idle_timeout_s = config.get("live_view_idle_timeout_s")
     if idle_timeout_s is None:
         idle_timeout_s = 60
     stream_name = go2rtc_stream_name(camera_name, global_config)
-    template = str(
-        config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
-    )
-    encoded_stream = quote(stream_name, safe="")
-    try:
-        player_url = template.format(
-            base_url=base_url,
-            stream=encoded_stream,
-            stream_name=stream_name,
-        )
-    except (IndexError, KeyError, ValueError):
-        player_url = f"{base_url}/webrtc.html?src={encoded_stream}"
+    full_stream_name = stream_name
+    if full_source and full_source != alignment_source:
+        full_stream_name = go2rtc_full_stream_name(camera_name, global_config)
     return {
         "enabled": True,
         "stream": stream_name,
-        "player_url": player_url,
+        "full_stream": full_stream_name,
+        "player_url": _player_url(config, base_url, stream_name),
+        "full_player_url": _player_url(config, base_url, full_stream_name),
         "idle_timeout_s": int(idle_timeout_s),
     }
 
@@ -79,12 +94,18 @@ def build_go2rtc_runtime_config(
         for camera_name, camera_config in cameras.items():
             if not isinstance(camera_config, dict):
                 continue
-            rtsp_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
+            alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
                 "rtsp_url"
             )
-            if not rtsp_source:
+            if not alignment_source:
                 continue
-            streams[go2rtc_stream_name(str(camera_name), global_config)] = rtsp_source
+            stream_name = go2rtc_stream_name(str(camera_name), global_config)
+            streams[stream_name] = alignment_source
+            full_source = camera_config.get("rtsp_url")
+            if full_source and full_source != alignment_source:
+                streams[go2rtc_full_stream_name(str(camera_name), global_config)] = (
+                    full_source
+                )
 
     if not streams:
         return None
