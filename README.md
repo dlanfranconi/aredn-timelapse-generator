@@ -317,6 +317,8 @@ cameras:
       type: auto
 ```
 
+Some embedded camera CGI endpoints reject unknown query parameters. If a snapshot URL works in a browser but the admin snapshot test fails with a 404 containing `_fenetre_test=...`, disable cache busting for that camera by unchecking `Cache bust` in the admin form or setting `cache_bust: false`.
+
 For RTSP-only cameras that do not support HTTP/HTTPS snapshots, set `capture_source: rtsp`. Fenetre generates a local ffmpeg one-frame snapshot command from `rtsp_url`:
 
 ```yaml

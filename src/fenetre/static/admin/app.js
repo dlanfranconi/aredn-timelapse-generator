@@ -779,6 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     url: payload.url,
                     timeout_s: payload.timeout_s,
                     capture_source: payload.capture_source,
+                    cache_bust: payload.cache_bust,
                     snapshot_username: payload.snapshot_username,
                     snapshot_password: payload.snapshot_password,
                     snapshot_auth_type: payload.snapshot_auth_type,

@@ -819,6 +819,7 @@ def test_snapshot_url():
         rtsp_url = (payload.get("rtsp_url") or "").strip()
         local_command = (payload.get("local_command") or "").strip()
         timeout_s = int(payload.get("timeout_s") or 15)
+        cache_bust = bool(payload.get("cache_bust", True))
         camera_config = {}
         if payload.get("snapshot_username") or payload.get("snapshot_password"):
             camera_config["http_auth"] = {
@@ -833,7 +834,10 @@ def test_snapshot_url():
             )
         elif url:
             image_bytes, content_type, size = _fetch_snapshot_bytes(
-                url, timeout_s=timeout_s, camera_config=camera_config
+                url,
+                timeout_s=timeout_s,
+                cache_bust=cache_bust,
+                camera_config=camera_config,
             )
         else:
             return jsonify({"error": "Snapshot URL is required."}), 400

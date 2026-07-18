@@ -218,6 +218,26 @@ class ConfigServerTestCase(unittest.TestCase):
         mock_fetch.assert_called_once()
         self.assertEqual(mock_fetch.call_args.kwargs["camera_config"], camera)
 
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_snapshot_test_respects_cache_bust_false(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+
+        response = self.app.post(
+            "/api/camera/test_snapshot",
+            data=json.dumps(
+                {
+                    "url": "http://camera/cgi-bin/snapshot.cgi?chn=0&u=admin&p=pw",
+                    "timeout_s": 12,
+                    "cache_bust": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_fetch.assert_called_once()
+        self.assertFalse(mock_fetch.call_args.kwargs["cache_bust"])
+
     @patch("fenetre.admin_server._fetch_local_command_bytes")
     def test_add_camera_with_rtsp_capture_source(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
