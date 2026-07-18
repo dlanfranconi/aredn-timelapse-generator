@@ -566,7 +566,7 @@ function configurePtzPresets(camera, listItem) {
     const userAccess = authUser && (authUser.ptz_access || 'presets');
     const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
     const userAllowedCamera = authUser && (
-        authUser.role === 'superadmin' || userCameras.includes(camera.title)
+        ['superadmin', 'superuser'].includes(authUser.role) || userCameras.includes(camera.title)
     );
     const go2rtc = camera.go2rtc || {};
     const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';

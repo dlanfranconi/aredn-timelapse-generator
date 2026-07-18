@@ -19,7 +19,9 @@ from prometheus_client import REGISTRY, Counter, Gauge, generate_latest
 from werkzeug.exceptions import BadRequest
 
 from fenetre.auth import (
+    ADMIN_ROLES,
     authenticate_config_user_record,
+    effective_user_role,
     ensure_default_admin_user,
     hash_password,
     user_has_password,
@@ -167,7 +169,7 @@ def _has_superadmin(users: dict) -> bool:
     return any(
         isinstance(user, dict)
         and not user.get("disabled", False)
-        and user.get("role") == "superadmin"
+        and effective_user_role(user) == "superadmin"
         for user in (users or {}).values()
     )
 
@@ -176,18 +178,19 @@ def _current_user_can_manage_users(config: dict) -> bool:
     user = _current_admin_user()
     if not user:
         return not _admin_auth_enabled()
-    if user.get("role") == "superadmin":
+    role = effective_user_role(user)
+    if role == "superadmin":
         return True
     # Backward compatibility: allow the existing admin account to promote a
     # superadmin until one exists, then reserve user permission edits for
     # superadmins.
-    return user.get("role") == "admin" and not _has_superadmin(
-        config.get("users") or {}
-    )
+    return role == "admin" and not _has_superadmin(config.get("users") or {})
 
 
 @app.before_request
 def require_admin_auth():
+    if request.path == "/logout":
+        return None
     if not _admin_auth_enabled():
         return None
 
@@ -201,7 +204,7 @@ def require_admin_auth():
         user = authenticate_config_user_record(
             config_file_path, auth.username or "", auth.password or ""
         )
-        if user and user.get("role", "viewer") in {"admin", "superadmin"}:
+        if user and effective_user_role(user) in ADMIN_ROLES:
             request.fenetre_admin_user = user
             return None
 
@@ -776,8 +779,11 @@ def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, d
 
     existing = dict(existing or {})
     role = payload.get("role") or existing.get("role") or "viewer"
+    role = effective_user_role({"role": role})
     if role not in {"viewer", "operator", "admin", "superadmin"}:
-        raise ValueError("role must be viewer, operator, admin, or superadmin.")
+        raise ValueError(
+            "role must be viewer, operator, admin, superadmin, or superuser."
+        )
     ptz_access = payload.get("ptz_access", existing.get("ptz_access", "presets"))
     if ptz_access not in {"none", "presets", "manual", "admin"}:
         raise ValueError("ptz_access must be none, presets, manual, or admin.")
@@ -893,7 +899,7 @@ def list_users():
                 {
                     "username": username,
                     "disabled": bool(user.get("disabled", False)),
-                    "role": user.get("role", "viewer"),
+                    "role": effective_user_role(user),
                     "ptz_cameras": user.get("ptz_cameras", []),
                     "ptz_access": user.get("ptz_access", "presets"),
                     "has_password": user_has_password(user),
@@ -1086,12 +1092,28 @@ def serve_ui_page():
 
 @app.route("/logout")
 def admin_logout():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fenetre Admin Logout</title>
+</head>
+<body>
+    <p>Logged out of Fenetre admin. Redirecting to the login prompt...</p>
+    <script>
+        window.setTimeout(() => window.location.replace('/'), 500);
+    </script>
+</body>
+</html>
+"""
     return Response(
-        "Logged out of Fenetre admin. Reload this page to sign in again.\n",
-        401,
+        html,
+        200,
         {
-            "WWW-Authenticate": 'Basic realm="Fenetre Admin", charset="UTF-8"',
+            "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-store",
+            "Clear-Site-Data": '"cache", "cookies", "storage"',
         },
     )
 

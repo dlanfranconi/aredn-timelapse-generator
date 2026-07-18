@@ -65,7 +65,11 @@ from fenetre.archive import (
     list_unarchived_dirs,
     scan_and_publish_metrics,
 )
-from fenetre.auth import authenticate_config_user_record, ensure_default_admin_user
+from fenetre.auth import (
+    authenticate_config_user_record,
+    effective_user_role,
+    ensure_default_admin_user,
+)
 from fenetre.camera_utils import (
     get_day_night_from_exif,
     format_shutter_speed,
@@ -1446,7 +1450,7 @@ window.location.replace({json.dumps(next_url)});
         if not user:
             return False
         allowed_cameras = user.get("ptz_cameras") or []
-        role = user.get("role", "viewer")
+        role = effective_user_role(user)
         if role == "superadmin":
             return True
         if camera_name not in allowed_cameras:

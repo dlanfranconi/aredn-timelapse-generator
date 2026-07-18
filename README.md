@@ -516,6 +516,8 @@ PTZ user roles are:
 - `operator`: intended for public-page PTZ operation on assigned cameras.
 - `viewer`: view-only unless explicitly given PTZ access.
 
+`superuser` is accepted as a backwards-compatible alias for `superadmin`.
+
 For non-superadmin users, the **Manage Users** camera access table controls exactly which cameras they can move or send to presets. Manual movement also requires the camera's **Allow manual movement** PTZ option; otherwise the public page returns "Manual PTZ control is disabled for this camera" even if the user is logged in.
 New cameras are not added to any non-superadmin user's PTZ camera list automatically; a superadmin must grant access. When a camera is deleted from the config, Fenetre removes that camera name from every user's PTZ access list during the config save.
 

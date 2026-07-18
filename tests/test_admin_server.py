@@ -14,6 +14,7 @@ import yaml
 
 from fenetre.auth import (
     authenticate_config_user,
+    authenticate_config_user_record,
     ensure_default_admin_user,
     hash_password,
     reset_admin_user,
@@ -122,12 +123,12 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         self.assertFalse(updated_data_yaml["global"]["ui"]["public_site"])
 
-    def test_admin_logout_returns_basic_auth_challenge(self):
+    def test_admin_logout_returns_no_store_redirect_page(self):
         response = self.app.get("/logout")
 
-        self.assertEqual(response.status_code, 401)
-        self.assertIn("Basic", response.headers["WWW-Authenticate"])
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("Clear-Site-Data", response.headers)
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_with_guided_options(self, mock_fetch):
@@ -701,6 +702,31 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(
             authenticate_config_user(self.temp_config_file.name, "admin", "changed")
         )
+
+    def test_admin_auth_accepts_superuser_role_alias(self):
+        self.test_config_data["users"] = {
+            "normal": {
+                "role": "superuser",
+                "password_hash": hash_password("secret"),
+                "ptz_access": "admin",
+                "ptz_cameras": [],
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        token = base64.b64encode(b"normal:secret").decode("ascii")
+        response = self.app.get("/config", headers={"Authorization": f"Basic {token}"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            authenticate_config_user(self.temp_config_file.name, "normal", "secret")
+        )
+        user = authenticate_config_user_record(
+            self.temp_config_file.name, "normal", "secret"
+        )
+        self.assertEqual(user["role"], "superadmin")
 
     def test_update_config_invalid_json(self):
         invalid_json_string = '{"global": {"setting": "value"}, "broken": [1,2,'

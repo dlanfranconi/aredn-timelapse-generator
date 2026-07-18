@@ -10,6 +10,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
+ADMIN_ROLES = {"admin", "superadmin"}
+
+
+def effective_user_role(user: dict | None) -> str:
+    if not isinstance(user, dict):
+        return "viewer"
+    role = user.get("role", "viewer")
+    if role == "superuser":
+        return "superadmin"
+    return role or "viewer"
 
 
 def _load_raw_config(config_file_path: str) -> dict:
@@ -97,7 +107,7 @@ def authenticate_config_user(
 ) -> bool:
     ensure_default_admin_user(config_file_path)
     user = authenticate_config_user_record(config_file_path, username, password)
-    return bool(user and user.get("role", "viewer") in {"admin", "superadmin"})
+    return bool(user and effective_user_role(user) in ADMIN_ROLES)
 
 
 def authenticate_config_user_record(
@@ -115,6 +125,7 @@ def authenticate_config_user_record(
         return None
     user = dict(user)
     user["username"] = username
+    user["role"] = effective_user_role(user)
     return user
 
 
