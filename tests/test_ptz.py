@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from fenetre.ptz import (
     PTZBackendUnavailable,
+    PTZError,
     PTZLocked,
     acquire_session,
     goto_preset,
@@ -97,3 +98,26 @@ class PTZTestCase(unittest.TestCase):
         self.assertEqual(request.ProfileToken, "profile-1")
         self.assertEqual(request.PresetToken, "1")
         ptz.GotoPreset.assert_called_once_with(request)
+
+    def test_goto_preset_reports_onvif_connection_error_with_host_and_port(self):
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.side_effect = ConnectionRefusedError(
+            "Connection refused"
+        )
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "10.1.64.69",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "presets": [{"id": "home", "name": "Home", "token": "1"}],
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            with self.assertRaisesRegex(
+                PTZError,
+                "Could not connect to ONVIF service at 10.1.64.69:8899",
+            ):
+                goto_preset("cam1", camera_config, "home")

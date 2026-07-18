@@ -378,6 +378,8 @@ cameras:
       allow_manual_control: true
 ```
 
+RTSP/go2rtc live view and ONVIF PTZ are separate camera services. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, or `8080`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
+
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
 The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published. If you intentionally prefer MSE for compatibility, set:
