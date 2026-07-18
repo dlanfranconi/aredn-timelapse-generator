@@ -452,7 +452,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function selectedPtzCameras() {
-        return Array.from(userPtzCameras.selectedOptions).map(option => option.value);
+        return Array.from(userPtzCameras.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(input => input.value);
     }
 
     function renderUserList() {
@@ -474,13 +475,40 @@ document.addEventListener('DOMContentLoaded', () => {
     function populateUserCameraOptions(selected = []) {
         const selectedSet = new Set(selected);
         userPtzCameras.innerHTML = '';
+        if (!(usersPayload.cameras || []).length) {
+            const note = document.createElement('div');
+            note.className = 'camera-access-note';
+            note.textContent = 'No cameras configured.';
+            userPtzCameras.appendChild(note);
+            return;
+        }
         (usersPayload.cameras || []).forEach(cameraName => {
-            const option = document.createElement('option');
-            option.value = cameraName;
-            option.textContent = cameraName;
-            option.selected = selectedSet.has(cameraName);
-            userPtzCameras.appendChild(option);
+            const label = document.createElement('label');
+            label.className = 'camera-access-row';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = cameraName;
+            checkbox.checked = selectedSet.has(cameraName);
+            checkbox.disabled = usersPayload.can_manage_users === false;
+            const name = document.createElement('span');
+            name.textContent = cameraName;
+            label.appendChild(checkbox);
+            label.appendChild(name);
+            userPtzCameras.appendChild(label);
         });
+    }
+
+    function syncUserManagerPermissions() {
+        const canManage = usersPayload.can_manage_users !== false;
+        userForm.querySelectorAll('input, select, button').forEach(control => {
+            control.disabled = !canManage;
+        });
+        userPtzCameras.querySelectorAll('input').forEach(control => {
+            control.disabled = !canManage;
+        });
+        newUserBtn.disabled = !canManage;
+        saveUserBtn.disabled = !canManage;
+        deleteUserBtn.disabled = !canManage || !userUsername.value.trim();
     }
 
     function clearUserForm() {
@@ -492,6 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateUserCameraOptions([]);
         deleteUserBtn.disabled = true;
         userUsername.disabled = false;
+        syncUserManagerPermissions();
         userUsername.focus();
     }
 
@@ -504,6 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateUserCameraOptions(user.ptz_cameras || []);
         deleteUserBtn.disabled = false;
         userUsername.disabled = false;
+        syncUserManagerPermissions();
     }
 
     async function loadUsers() {
@@ -516,6 +546,7 @@ document.addEventListener('DOMContentLoaded', () => {
         usersPayload = data;
         renderUserList();
         populateUserCameraOptions([]);
+        syncUserManagerPermissions();
     }
 
     async function openUserManager() {

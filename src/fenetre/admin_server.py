@@ -17,7 +17,7 @@ from prometheus_client import REGISTRY, Counter, Gauge, generate_latest
 from werkzeug.exceptions import BadRequest
 
 from fenetre.auth import (
-    authenticate_config_user,
+    authenticate_config_user_record,
     ensure_default_admin_user,
     hash_password,
     user_has_password,
@@ -153,6 +153,34 @@ def _auth_failed_response():
     )
 
 
+def _current_admin_user():
+    user = getattr(request, "fenetre_admin_user", None)
+    return user if isinstance(user, dict) else None
+
+
+def _has_superadmin(users: dict) -> bool:
+    return any(
+        isinstance(user, dict)
+        and not user.get("disabled", False)
+        and user.get("role") == "superadmin"
+        for user in (users or {}).values()
+    )
+
+
+def _current_user_can_manage_users(config: dict) -> bool:
+    user = _current_admin_user()
+    if not user:
+        return not _admin_auth_enabled()
+    if user.get("role") == "superadmin":
+        return True
+    # Backward compatibility: allow the existing admin account to promote a
+    # superadmin until one exists, then reserve user permission edits for
+    # superadmins.
+    return user.get("role") == "admin" and not _has_superadmin(
+        config.get("users") or {}
+    )
+
+
 @app.before_request
 def require_admin_auth():
     if not _admin_auth_enabled():
@@ -163,10 +191,14 @@ def require_admin_auth():
         return _auth_failed_response()
 
     config_file_path = app.config.get("FENETRE_CONFIG_FILE")
-    if config_file_path and authenticate_config_user(
-        config_file_path, auth.username or "", auth.password or ""
-    ):
-        return None
+    if config_file_path:
+        ensure_default_admin_user(config_file_path)
+        user = authenticate_config_user_record(
+            config_file_path, auth.username or "", auth.password or ""
+        )
+        if user and user.get("role", "viewer") in {"admin", "superadmin"}:
+            request.fenetre_admin_user = user
+            return None
 
     expected_username = app.config.get("FENETRE_ADMIN_USERNAME") or os.environ.get(
         "FENETRE_ADMIN_USERNAME"
@@ -180,6 +212,12 @@ def require_admin_auth():
     password_ok = hmac.compare_digest(auth.password or "", str(expected_password))
     if not (username_ok and password_ok):
         return _auth_failed_response()
+    request.fenetre_admin_user = {
+        "username": auth.username or "env-admin",
+        "role": "superadmin",
+        "ptz_access": "admin",
+        "ptz_cameras": [],
+    }
     return None
 
 
@@ -528,12 +566,18 @@ def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, d
         raise ValueError("username can only use letters, numbers, _, ., @, and -.")
 
     existing = dict(existing or {})
+    role = payload.get("role") or existing.get("role") or "viewer"
+    if role not in {"viewer", "operator", "admin", "superadmin"}:
+        raise ValueError("role must be viewer, operator, admin, or superadmin.")
+    ptz_access = payload.get("ptz_access", existing.get("ptz_access", "presets"))
+    if ptz_access not in {"none", "presets", "manual", "admin"}:
+        raise ValueError("ptz_access must be none, presets, manual, or admin.")
     user = {
         "disabled": bool(payload.get("disabled", existing.get("disabled", False))),
-        "role": payload.get("role") or existing.get("role") or "viewer",
+        "role": role,
         "ptz_cameras": payload.get("ptz_cameras", existing.get("ptz_cameras", []))
         or [],
-        "ptz_access": payload.get("ptz_access", existing.get("ptz_access", "presets")),
+        "ptz_access": ptz_access,
     }
     if payload.get("password"):
         user["password_hash"] = hash_password(str(payload["password"]))
@@ -650,6 +694,7 @@ def list_users():
             {
                 "users": public_users,
                 "cameras": sorted((config.get("cameras") or {}).keys()),
+                "can_manage_users": _current_user_can_manage_users(config),
             }
         )
     except Exception as e:
@@ -662,6 +707,8 @@ def upsert_user():
         payload = request.get_json(force=True) or {}
         config_file_path = _config_file_path()
         raw_config, config = _load_effective_config_with_raw()
+        if not _current_user_can_manage_users(config):
+            return jsonify({"error": "Only superadmins can manage users."}), 403
         users = config.setdefault("users", {})
         username, user = _normalize_user(payload, users.get(payload.get("username")))
         users[username] = user
@@ -685,6 +732,8 @@ def delete_user(username):
     try:
         config_file_path = _config_file_path()
         raw_config, config = _load_effective_config_with_raw()
+        if not _current_user_can_manage_users(config):
+            return jsonify({"error": "Only superadmins can manage users."}), 403
         users = config.setdefault("users", {})
         if username not in users:
             return jsonify({"error": f"User '{username}' was not found."}), 404

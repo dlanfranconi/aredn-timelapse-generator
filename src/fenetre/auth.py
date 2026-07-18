@@ -79,7 +79,7 @@ def ensure_default_admin_user(config_file_path: str) -> bool:
 
     config["users"] = {
         DEFAULT_ADMIN_USERNAME: {
-            "role": "admin",
+            "role": "superadmin",
             "disabled": False,
             "ptz_access": "admin",
             "ptz_cameras": [],
@@ -97,7 +97,7 @@ def authenticate_config_user(
 ) -> bool:
     ensure_default_admin_user(config_file_path)
     user = authenticate_config_user_record(config_file_path, username, password)
-    return bool(user and user.get("role", "viewer") == "admin")
+    return bool(user and user.get("role", "viewer") in {"admin", "superadmin"})
 
 
 def authenticate_config_user_record(
@@ -125,7 +125,7 @@ def reset_admin_user(config_file_path: str, password: str) -> None:
     existing = dict(users.get(DEFAULT_ADMIN_USERNAME) or {})
     existing.update(
         {
-            "role": "admin",
+            "role": "superadmin",
             "disabled": False,
             "ptz_access": "admin",
             "ptz_cameras": existing.get("ptz_cameras", []),

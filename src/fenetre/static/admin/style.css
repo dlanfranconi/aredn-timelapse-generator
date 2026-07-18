@@ -248,6 +248,33 @@ h1 {
     box-sizing: border-box;
 }
 
+.camera-access-table {
+    display: grid;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.camera-access-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.camera-access-row span {
+    overflow-wrap: anywhere;
+}
+
+.camera-access-note {
+    color: #666;
+    font-size: 0.9rem;
+}
+
 .modal[hidden] {
     display: none;
 }

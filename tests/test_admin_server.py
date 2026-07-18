@@ -15,6 +15,7 @@ import yaml
 from fenetre.auth import (
     authenticate_config_user,
     ensure_default_admin_user,
+    hash_password,
     reset_admin_user,
 )
 from fenetre.admin_server import app as flask_app
@@ -398,7 +399,7 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json["users"]), 1)
         self.assertEqual(listed.json["users"][0]["username"], "admin")
-        self.assertEqual(listed.json["users"][0]["role"], "admin")
+        self.assertEqual(listed.json["users"][0]["role"], "superadmin")
         self.assertTrue(listed.json["users"][0]["has_password"])
 
         with open(self.temp_config_file.name, "r") as f:
@@ -450,7 +451,42 @@ class ConfigServerTestCase(unittest.TestCase):
         with open(self.temp_config_file.name, "r") as f:
             updated_data_yaml = yaml.safe_load(f)
         self.assertIn("admin", updated_data_yaml["users"])
-        self.assertEqual(updated_data_yaml["users"]["admin"]["role"], "admin")
+        self.assertEqual(updated_data_yaml["users"]["admin"]["role"], "superadmin")
+
+    def test_superadmin_is_required_to_manage_users_after_bootstrap(self):
+        self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        denied = self.app.post(
+            "/api/users",
+            data=json.dumps({"username": "operator", "role": "operator"}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        root_token = base64.b64encode(b"root:rootpw").decode("ascii")
+        allowed = self.app.post(
+            "/api/users",
+            data=json.dumps({"username": "operator", "role": "operator"}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {root_token}"},
+        )
+        self.assertEqual(allowed.status_code, 200)
 
     def test_ptz_lock_endpoint_updates_runtime_lock(self):
         response = self.app.post(

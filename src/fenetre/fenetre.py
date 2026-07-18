@@ -1261,11 +1261,13 @@ window.location.replace({json.dumps(next_url)});
         if not user:
             return False
         allowed_cameras = user.get("ptz_cameras") or []
-        if allowed_cameras and camera_name not in allowed_cameras:
-            return False
         role = user.get("role", "viewer")
+        if role == "superadmin":
+            return True
+        if camera_name not in allowed_cameras:
+            return False
         access = user.get("ptz_access", "presets")
-        if role == "admin" or access == "admin":
+        if access == "admin":
             return True
         if action == "preset":
             return access in {"presets", "manual"}
@@ -1345,12 +1347,32 @@ window.location.replace({json.dumps(next_url)});
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
                 return
             ptz_config = camera_config.get("ptz") or {}
-            if not (
-                ptz_config.get("allow_manual_control", False)
-                and self._user_can_control_ptz(camera_name, ptz_config, "manual")
-            ):
+            if not ptz_config.get("allow_manual_control", False):
+                logger.warning(
+                    "PTZ move denied camera=%s reason=manual-control-disabled",
+                    camera_name,
+                )
+                self._send_json(
+                    403,
+                    {
+                        "error": (
+                            "Manual PTZ control is disabled for this camera. "
+                            "Enable Allow manual movement in the camera PTZ settings."
+                        )
+                    },
+                )
+                return
+            if not self._user_can_control_ptz(camera_name, ptz_config, "manual"):
                 logger.warning("PTZ move denied camera=%s", camera_name)
-                self._send_json(403, {"error": "Manual PTZ control is not allowed"})
+                self._send_json(
+                    403,
+                    {
+                        "error": (
+                            "Manual PTZ control is not allowed for this user/camera. "
+                            "A superadmin must grant this user manual PTZ access to the camera."
+                        )
+                    },
+                )
                 return
             result = continuous_move(
                 camera_name,

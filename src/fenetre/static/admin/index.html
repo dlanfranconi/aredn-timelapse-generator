@@ -255,17 +255,19 @@
                             <option value="viewer">Viewer</option>
                             <option value="operator">Operator</option>
                             <option value="admin">Admin</option>
+                            <option value="superadmin">Superadmin</option>
                         </select>
 
                         <label for="userPtzAccess">PTZ access</label>
                         <select id="userPtzAccess">
+                            <option value="none">No PTZ</option>
                             <option value="presets">Presets only</option>
                             <option value="manual">Manual controls</option>
                             <option value="admin">Admin controls</option>
                         </select>
 
                         <label for="userPtzCameras">PTZ cameras</label>
-                        <select id="userPtzCameras" multiple size="8"></select>
+                        <div id="userPtzCameras" class="camera-access-table"></div>
 
                         <label class="checkbox-line"><input id="userDisabled" type="checkbox"> Disabled</label>
                         <div class="user-actions">

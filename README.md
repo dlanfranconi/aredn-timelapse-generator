@@ -272,7 +272,7 @@ The config mount is intentionally read-write because the admin UI updates the
 YAML file and writes timestamped backups beside it.
 
 The admin UI on port `8889` requires HTTP Basic Auth. On first setup, Fenetre
-creates a config-backed admin user with username `admin` and password `admin`.
+creates a config-backed superadmin user with username `admin` and password `admin`.
 This bootstrap only happens when the config has no `users:` block yet, so
 upgrading the container will not restore an admin user you removed or overwrite
 a password you changed.
@@ -450,6 +450,15 @@ http://HOST:1984/
 ```
 
 On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds, so idle WebRTC clients do not keep RTSP streams open.
+
+PTZ user roles are:
+
+- `superadmin`: can manage users and control every PTZ camera.
+- `admin`: can open the admin UI, but PTZ control is limited to the cameras and PTZ access level assigned by a superadmin.
+- `operator`: intended for public-page PTZ operation on assigned cameras.
+- `viewer`: view-only unless explicitly given PTZ access.
+
+For non-superadmin users, the **Manage Users** camera access table controls exactly which cameras they can move or send to presets. Manual movement also requires the camera's **Allow manual movement** PTZ option; otherwise the public page returns "Manual PTZ control is disabled for this camera" even if the user is logged in.
 
 ![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
 

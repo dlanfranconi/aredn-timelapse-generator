@@ -512,7 +512,9 @@ function configurePtzPresets(camera, listItem) {
     const status = listItem.querySelector('.ptz-status');
     const userAccess = authUser && (authUser.ptz_access || 'presets');
     const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
-    const userAllowedCamera = authUser && (userCameras.length === 0 || userCameras.includes(camera.title));
+    const userAllowedCamera = authUser && (
+        authUser.role === 'superadmin' || userCameras.includes(camera.title)
+    );
     const go2rtc = camera.go2rtc || {};
     const livePlayerUrl = go2rtc.enabled ? go2rtc.player_url : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
