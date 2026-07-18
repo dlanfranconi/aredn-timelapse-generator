@@ -410,12 +410,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const captureSource = newCameraCaptureSource.value || 'snapshot';
         const ptzEnabled = checked('newCameraPtzEnabled');
         const showRtspCapture = captureSource === 'rtsp' || ptzEnabled;
-        const showPtzRtsp = captureSource !== 'rtsp' && ptzEnabled;
+        const showPtzRtsp = ptzEnabled;
         const rtspLabel = document.querySelector('label[for="newCameraRtspUrl"]');
+        const ptzRtspLabel = document.querySelector('label[for="newCameraPtzRtspUrl"]');
         if (rtspLabel) {
             rtspLabel.textContent = captureSource === 'rtsp'
-                ? 'RTSP capture URL'
+                ? 'RTSP capture/full live URL'
                 : 'Full live RTSP URL';
+        }
+        if (ptzRtspLabel) {
+            ptzRtspLabel.textContent = 'PTZ live RTSP URL (optional substream)';
         }
         newCameraRtspRow.hidden = !showRtspCapture;
         newCameraPtzRtspRow.hidden = !showPtzRtsp;
@@ -564,7 +568,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 snapshot_username: (camera.http_auth && camera.http_auth.username) || '',
                 snapshot_password: '',
                 snapshot_auth_type: (camera.http_auth && camera.http_auth.type) || 'basic',
-                rtsp_url: camera.rtsp_url || ''
+                rtsp_url: camera.rtsp_url || '',
+                ptz_rtsp_url: camera.ptz_rtsp_url || ''
             })
         };
         confirmNewCameraBtn.disabled = false;
@@ -903,7 +908,7 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot_password: newCameraSnapshotPassword.value,
             snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
             rtsp_url: newCameraCaptureSource.value === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
-            ptz_rtsp_url: newCameraCaptureSource.value !== 'rtsp' && checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
+            ptz_rtsp_url: checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
             public: checked('newCameraPublic'),
             cache_bust: checked('newCameraCacheBust'),
@@ -1095,6 +1100,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 && (
                     payload.url !== (editingOriginalCamera.url || '')
                     || payload.rtsp_url !== (editingOriginalCamera.rtsp_url || '')
+                    || payload.ptz_rtsp_url !== (editingOriginalCamera.ptz_rtsp_url || '')
                     || payload.capture_source !== (editingOriginalCamera.local_command ? 'rtsp' : 'snapshot')
                 );
             if (!newCameraLastTest || newCameraLastTest.key !== cameraTestKey(payload)) {

@@ -491,7 +491,6 @@ function createCameraListItem(camera) {
                     <button type="button" data-zoom="-1">Zoom -</button>
                 </div>
                 <div class="ptz-live-view" hidden>
-                    <button class="btn-ptz-live-start" type="button">Start alignment view</button>
                     <button class="ptz-live-preview" type="button" aria-label="Start PTZ alignment preview">
                         <span class="ptz-live-placeholder">Tap to start alignment view</span>
                         <img class="ptz-live-image" alt="PTZ alignment preview">
@@ -532,7 +531,6 @@ function configurePtzPresets(camera, listItem) {
     const liveImage = listItem.querySelector('.ptz-live-image');
     const liveFrame = listItem.querySelector('.ptz-live-frame');
     const livePlaceholder = listItem.querySelector('.ptz-live-placeholder');
-    const liveStartButton = listItem.querySelector('.btn-ptz-live-start');
     const liveLink = listItem.querySelector('.ptz-live-link');
     const status = listItem.querySelector('.ptz-status');
     const userAccess = authUser && (authUser.ptz_access || 'presets');
@@ -650,7 +648,6 @@ function configurePtzPresets(camera, listItem) {
         status.textContent = 'Alignment preview failed';
     };
     livePreview.onclick = loadLiveView;
-    liveStartButton.onclick = loadLiveView;
     liveView.onclick = event => {
         if (event.target === liveView) {
             loadLiveView();

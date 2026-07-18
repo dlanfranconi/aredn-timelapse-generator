@@ -359,7 +359,7 @@ Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an e
 `rtsp_url` and `ptz_rtsp_url` are used for different workflows:
 
 - `rtsp_url`: the stream Fenetre uses when the camera is RTSP-only and has no HTTP/HTTPS snapshot endpoint. This same stream is also the go2rtc live-view fallback.
-- `ptz_rtsp_url`: an optional low-latency or lower-resolution stream used for the embedded PTZ alignment view. If it is empty, go2rtc falls back to `rtsp_url`.
+- `ptz_rtsp_url`: an optional low-latency or lower-resolution stream used for the embedded PTZ alignment view. If it is empty, go2rtc falls back to `rtsp_url`. The admin camera form shows this field whenever PTZ is enabled, including RTSP capture cameras, so RTSP-only cameras can use a main stream for captures and an optional substream for alignment.
 
 For an RTSP-only camera, set only `rtsp_url`; do not duplicate the same URL into `ptz_rtsp_url`. RTSP video URLs should normally use the camera's RTSP service, usually port `554`, for example `rtsp://user:password@camera.local:554/stream1`. For a snapshot camera with PTZ controls, keep the snapshot URL in `url`, set `ptz_rtsp_url` to a low-res/substream for aiming, and optionally set `rtsp_url` to the high-res/main stream for the **Open full live view** link. If both RTSP fields are set and differ, Fenetre creates two go2rtc streams: one alignment stream and one `_full` stream.
 
@@ -469,11 +469,11 @@ And open the go2rtc UI:
 http://HOST:1984/
 ```
 
-The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a snapshot camera also has a PTZ live RTSP URL, the same test captures one frame from that stream too and reports it separately.
+The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a camera also has a PTZ live RTSP URL, including RTSP capture cameras with an optional low-resolution alignment substream, the same test captures one frame from that stream too and reports it separately.
 
 On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
 
-The embedded alignment view is loaded lazily when you press **Start alignment view** or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
+The embedded alignment view is loaded lazily when you tap the preview box or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
 
 PTZ user roles are:
 
