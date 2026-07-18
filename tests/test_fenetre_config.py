@@ -443,7 +443,7 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/webrtc.html?src=site_North_Ridge_Camera",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
         )
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["preview_url"],

@@ -432,6 +432,15 @@ body.dark-mode .camera-metadata {
     display: none;
 }
 
+.ptz-live-frame {
+    aspect-ratio: 16 / 9;
+    background: #111;
+    border: 1px solid #d6d6d6;
+    border-radius: 4px;
+    min-height: 150px;
+    width: 100%;
+}
+
 .ptz-live-placeholder {
     font-size: 0.9em;
     padding: 12px;

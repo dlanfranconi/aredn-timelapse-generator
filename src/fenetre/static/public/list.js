@@ -496,6 +496,7 @@ function createCameraListItem(camera) {
                         <span class="ptz-live-placeholder">Tap to start alignment view</span>
                         <img class="ptz-live-image" alt="PTZ alignment preview">
                     </button>
+                    <iframe class="ptz-live-frame" title="PTZ alignment preview" loading="lazy" allow="autoplay; fullscreen" hidden></iframe>
                     <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open full live view</a>
                 </div>
                 <span class="ptz-status"></span>
@@ -529,6 +530,7 @@ function configurePtzPresets(camera, listItem) {
     const liveView = listItem.querySelector('.ptz-live-view');
     const livePreview = listItem.querySelector('.ptz-live-preview');
     const liveImage = listItem.querySelector('.ptz-live-image');
+    const liveFrame = listItem.querySelector('.ptz-live-frame');
     const livePlaceholder = listItem.querySelector('.ptz-live-placeholder');
     const liveStartButton = listItem.querySelector('.btn-ptz-live-start');
     const liveLink = listItem.querySelector('.ptz-live-link');
@@ -540,6 +542,7 @@ function configurePtzPresets(camera, listItem) {
     );
     const go2rtc = camera.go2rtc || {};
     const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';
+    const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
     const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_player_url || go2rtc.player_url) : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
@@ -562,7 +565,10 @@ function configurePtzPresets(camera, listItem) {
             liveIdleTimer = null;
         }
         liveImage.removeAttribute('src');
+        liveFrame.src = 'about:blank';
+        liveFrame.hidden = true;
         livePreview.classList.remove('loaded');
+        livePreview.hidden = false;
         return;
     }
 
@@ -591,10 +597,16 @@ function configurePtzPresets(camera, listItem) {
             liveIdleTimer = null;
         }
         liveImage.removeAttribute('src');
+        liveFrame.src = 'about:blank';
+        liveFrame.hidden = true;
         livePreview.classList.remove('loaded');
+        livePreview.hidden = false;
     }
     const unloadLiveView = () => {
         liveImage.removeAttribute('src');
+        liveFrame.src = 'about:blank';
+        liveFrame.hidden = true;
+        livePreview.hidden = false;
         livePreview.classList.remove('loaded');
         livePlaceholder.textContent = 'Tap to start alignment view';
         liveIdleTimer = null;
@@ -612,9 +624,16 @@ function configurePtzPresets(camera, listItem) {
         }
     };
     const loadLiveView = () => {
-        if (canUseManual && livePreviewUrl && liveImage.src !== livePreviewUrl) {
+        if (canUseManual && livePreviewUrl && previewUsesImage && liveImage.src !== livePreviewUrl) {
             livePlaceholder.textContent = 'Loading alignment view...';
             liveImage.src = livePreviewUrl;
+            status.textContent = 'Alignment view loaded';
+        }
+        if (canUseManual && livePreviewUrl && !previewUsesImage && liveFrame.src !== livePreviewUrl) {
+            livePreview.hidden = true;
+            liveFrame.hidden = false;
+            liveFrame.src = livePreviewUrl;
+            liveFrame.classList.add('loaded');
             status.textContent = 'Alignment view loaded';
         }
         if (canUseManual && livePreviewUrl) {
@@ -637,7 +656,8 @@ function configurePtzPresets(camera, listItem) {
             loadLiveView();
         }
     };
-    if (canUsePresets && !presetsLoaded) {
+    if (canUsePresets && !presetsLoaded && !listItem._ptzPresetDiscoveryAttempted) {
+        listItem._ptzPresetDiscoveryAttempted = true;
         select.innerHTML = '<option value="">Loading presets...</option>';
         select.disabled = true;
         button.disabled = true;

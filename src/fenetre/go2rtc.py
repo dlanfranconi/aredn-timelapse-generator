@@ -33,14 +33,14 @@ def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> 
 
 def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(
-        config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
+        config.get("player_url_template") or "{base_url}/stream.html?src={stream}"
     )
     return _stream_url_from_template(config, base_url, stream_name, template)
 
 
 def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(
-        config.get("preview_url_template") or "{base_url}/api/stream.mjpeg?src={stream}"
+        config.get("preview_url_template") or "{base_url}/stream.html?src={stream}"
     )
     return _stream_url_from_template(config, base_url, stream_name, template)
 
@@ -56,7 +56,7 @@ def _stream_url_from_template(
             stream_name=stream_name,
         )
     except (IndexError, KeyError, ValueError):
-        return f"{base_url}/webrtc.html?src={encoded_stream}"
+        return f"{base_url}/stream.html?src={encoded_stream}"
 
 
 def build_go2rtc_metadata(

@@ -378,8 +378,8 @@ global:
   go2rtc:
     enabled: true
     base_url: http://HOST:1984
-    player_url_template: "{base_url}/webrtc.html?src={stream}"
-    preview_url_template: "{base_url}/api/stream.mjpeg?src={stream}"
+    player_url_template: "{base_url}/stream.html?src={stream}"
+    preview_url_template: "{base_url}/stream.html?src={stream}"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"
@@ -404,13 +404,15 @@ RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should us
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is WebRTC: `{base_url}/webrtc.html?src={stream}`. If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published. If you intentionally prefer MSE for compatibility, set:
+The default go2rtc player is the compatibility player: `{base_url}/stream.html?src={stream}`. If you intentionally prefer WebRTC and it works in your network, set:
 
 ```yaml
 global:
   go2rtc:
-    player_url_template: "{base_url}/stream.html?src={stream}"
+    player_url_template: "{base_url}/webrtc.html?src={stream}"
 ```
+
+If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published.
 
 Expose the go2rtc ports in Docker or Compose:
 
@@ -469,9 +471,9 @@ http://HOST:1984/
 
 The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a snapshot camera also has a PTZ live RTSP URL, the same test captures one frame from that stream too and reports it separately.
 
-On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover ONVIF presets on demand for authorized users.
+On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
 
-The embedded alignment view is loaded lazily when you press **Start alignment view** or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview uses go2rtc's MJPEG endpoint via `preview_url_template`, which is more reliable inside mobile browsers than embedding the full go2rtc player. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
+The embedded alignment view is loaded lazily when you press **Start alignment view** or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
 
 PTZ user roles are:
 
