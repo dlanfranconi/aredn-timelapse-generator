@@ -77,29 +77,47 @@ def _camera_timelapse_enabled(cam_conf: Dict[str, Any]) -> bool:
     return True
 
 
+def camera_visibility(cam_conf: Dict[str, Any]) -> str:
+    visibility = cam_conf.get("visibility")
+    if visibility in {"public", "authenticated", "hidden"}:
+        return visibility
+    if cam_conf.get("hidden") is True:
+        return "hidden"
+    if cam_conf.get("public", True) is False:
+        return "authenticated"
+    return "public"
+
+
 def build_cameras_metadata(
     cameras_configs: Dict[str, Dict[str, Any]],
     global_config: Dict[str, Any],
     timelapse_config: Dict[str, Any],
     json_filepath: str,
+    include_private: bool = False,
+    include_hidden: bool = False,
+    include_removed: bool = True,
 ) -> Dict[str, Any]:
     updated_cameras_metadata = {"cameras": [], "global": {}}
     ui_public = dict((global_config or {}).get("ui", {}))
     default_privacy_radius = ui_public.get("map_privacy_radius_m") or 0.0
     default_privacy_jitter = ui_public.get("map_privacy_jitter_m")
 
-    old_camera_list = _load_existing_cameras(json_filepath)
-    for camera_metadata in old_camera_list:
-        if camera_metadata.get("title") not in cameras_configs:
-            logger.warning(
-                "Camera %s is not configured anymore. Delete it from %s manually if you want to.",
-                camera_metadata.get("title"),
-                json_filepath,
-            )
-            updated_cameras_metadata["cameras"].append(camera_metadata)
+    if include_removed:
+        old_camera_list = _load_existing_cameras(json_filepath)
+        for camera_metadata in old_camera_list:
+            if camera_metadata.get("title") not in cameras_configs:
+                logger.warning(
+                    "Camera %s is not configured anymore. Delete it from %s manually if you want to.",
+                    camera_metadata.get("title"),
+                    json_filepath,
+                )
+                updated_cameras_metadata["cameras"].append(camera_metadata)
 
     for cam, cam_conf in cameras_configs.items():
-        if cam_conf.get("public", True) is False:
+        visibility = camera_visibility(cam_conf)
+        if visibility == "hidden" and not include_hidden:
+            continue
+        if visibility == "authenticated" and not include_private:
             continue
 
         metadata = {
@@ -107,7 +125,8 @@ def build_cameras_metadata(
             "url": f"list.html?camera={cam}",
             "fullscreen_url": f"fullscreen.html?camera={cam}",
             "timelapse_enabled": _camera_timelapse_enabled(cam_conf),
-            "public": True,
+            "public": visibility == "public",
+            "visibility": visibility,
             "ptz": public_ptz_metadata(cam_conf.get("ptz") or {}),
         }
         go2rtc_metadata = build_go2rtc_metadata(cam, cam_conf, global_config or {})

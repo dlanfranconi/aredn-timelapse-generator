@@ -29,7 +29,8 @@
             <h2>Site</h2>
             <label for="siteNameInput">GUI name</label>
             <input id="siteNameInput" type="text" autocomplete="off" placeholder="fenetre.cam">
-            <button id="saveSiteNameBtn" type="button" disabled>Save GUI name</button>
+            <label><input id="sitePublicInput" type="checkbox" checked> Public website</label>
+            <button id="saveSiteNameBtn" type="button" disabled>Save site settings</button>
         </section>
 
         <section class="quick-settings storage-summary">
@@ -133,7 +134,12 @@
             <div class="option-groups">
                 <fieldset class="option-group enabled">
                     <legend>Required Capture</legend>
-                    <label><input id="newCameraPublic" type="checkbox" checked> Show on public page</label>
+                    <label for="newCameraVisibility">Main page visibility</label>
+                    <select id="newCameraVisibility">
+                        <option value="public">Public</option>
+                        <option value="authenticated">Logged-in users</option>
+                        <option value="hidden">Hidden</option>
+                    </select>
                     <label><input id="newCameraCacheBust" type="checkbox" checked> Cache bust URL</label>
                     <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
                     <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>

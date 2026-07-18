@@ -59,6 +59,36 @@ class TestFenetre(unittest.TestCase):
                     "public, max-age=31536000, immutable",
                 )
 
+    def test_public_camera_visibility_respects_private_site_and_camera_flags(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        old_global_config = getattr(fenetre_module, "global_config", {})
+        old_cameras_config = getattr(fenetre_module, "cameras_config", {})
+        try:
+            fenetre_module.global_config = {
+                "deployment_name": "Private Site",
+                "ui": {"public_site": False},
+            }
+            fenetre_module.cameras_config = {
+                "public-cam": {"url": "http://public", "visibility": "public"},
+                "auth-cam": {"url": "http://auth", "public": False},
+                "hidden-cam": {"url": "http://hidden", "visibility": "hidden"},
+            }
+
+            self.assertFalse(handler._camera_visible_to_public_user("public-cam", None))
+            self.assertTrue(
+                handler._camera_visible_to_public_user(
+                    "auth-cam", {"username": "viewer"}
+                )
+            )
+            self.assertFalse(
+                handler._camera_visible_to_public_user(
+                    "hidden-cam", {"username": "viewer"}
+                )
+            )
+        finally:
+            fenetre_module.global_config = old_global_config
+            fenetre_module.cameras_config = old_cameras_config
+
     def test_discover_camera_timelapses_reports_existing_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             day_dir = os.path.join(tmpdir, "photos", "cam1", "2026-05-02")

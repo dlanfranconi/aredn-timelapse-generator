@@ -99,6 +99,21 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(cameras_conf["cam1"]["url"], "http://cam1")
         self.assertTrue(admin_server_conf["enabled"])
 
+    def test_config_load_public_site_flag(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "ui": {"public_site": False},
+            },
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        self.assertFalse(global_conf["ui"]["public_site"])
+
     def test_config_load_storage_management_defaults(self):
         test_data = {
             "global": {
@@ -369,6 +384,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         public_cam = metadata["cameras"][0]
         self.assertEqual(public_cam["description"], "Ridgeline view")
         self.assertTrue(public_cam["public"])
+        self.assertEqual(public_cam["visibility"], "public")
         self.assertTrue(public_cam["ptz"]["enabled"])
         self.assertTrue(public_cam["ptz"]["public"])
         self.assertTrue(public_cam["ptz"]["allow_presets"])
@@ -378,6 +394,39 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertNotIn("password", public_cam["ptz"])
         self.assertNotIn("host", public_cam["ptz"])
+
+    def test_cameras_metadata_can_include_authenticated_only_cameras(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        cameras = {
+            "public-cam": {"url": "http://public", "visibility": "public"},
+            "auth-cam": {"url": "http://auth", "public": False},
+            "hidden-cam": {"url": "http://hidden", "visibility": "hidden"},
+        }
+
+        public_metadata = build_cameras_metadata(
+            cameras,
+            {"ui": {}},
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+            include_removed=False,
+        )
+        private_metadata = build_cameras_metadata(
+            cameras,
+            {"ui": {}},
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+            include_private=True,
+            include_removed=False,
+        )
+
+        self.assertEqual(
+            [cam["title"] for cam in public_metadata["cameras"]], ["public-cam"]
+        )
+        self.assertEqual(
+            [cam["title"] for cam in private_metadata["cameras"]],
+            ["public-cam", "auth-cam"],
+        )
+        self.assertEqual(private_metadata["cameras"][1]["visibility"], "authenticated")
 
     def test_cameras_metadata_honors_explicit_go2rtc_player_template(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")

@@ -447,9 +447,33 @@ def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
         go2rtc_config["enabled"] = True
 
 
-def _preserve_users_if_omitted(new_config: dict, existing_config: dict) -> None:
-    if "users" not in new_config and isinstance(existing_config.get("users"), dict):
-        new_config["users"] = existing_config["users"]
+def _merge_persistent_users(new_config: dict, existing_config: dict) -> None:
+    existing_users = existing_config.get("users")
+    if not isinstance(existing_users, dict):
+        return
+
+    submitted_users = new_config.get("users")
+    if not isinstance(submitted_users, dict):
+        new_config["users"] = yaml.safe_load(yaml.safe_dump(existing_users)) or {}
+        return
+
+    merged_users = yaml.safe_load(yaml.safe_dump(existing_users)) or {}
+    for username, submitted_user in submitted_users.items():
+        if not isinstance(submitted_user, dict):
+            continue
+        existing_user = merged_users.get(username)
+        if not isinstance(existing_user, dict):
+            merged_users[username] = submitted_user
+            continue
+
+        merged_user = dict(existing_user)
+        merged_user.update(submitted_user)
+        for password_key in ("password_hash", "password"):
+            if not submitted_user.get(password_key) and existing_user.get(password_key):
+                merged_user[password_key] = existing_user[password_key]
+        merged_users[username] = merged_user
+
+    new_config["users"] = merged_users
 
 
 def _cleanup_user_camera_access(config: dict) -> dict:
@@ -513,6 +537,8 @@ GUIDED_CAMERA_KEYS = {
     "description",
     "disabled",
     "public",
+    "visibility",
+    "hidden",
     "ptz",
     "timelapse_enabled",
     "work_dir_max_size_GB",
@@ -640,7 +666,18 @@ def _build_camera_config(
 
     if payload.get("disabled"):
         camera["disabled"] = True
-    camera["public"] = bool(payload.get("public", True))
+    visibility = payload.get("visibility")
+    if visibility not in {"public", "authenticated", "hidden"}:
+        if payload.get("hidden"):
+            visibility = "hidden"
+        elif payload.get("public", True) is False:
+            visibility = "authenticated"
+        else:
+            visibility = "public"
+    camera["visibility"] = visibility
+    camera["public"] = visibility == "public"
+    if visibility == "hidden":
+        camera["hidden"] = True
     if payload.get("ptz_enabled"):
         presets = payload.get("ptz_presets") or []
         if isinstance(presets, str):
@@ -978,7 +1015,7 @@ def update_config():
         raw_config = _load_raw_config()
         existing_config = _get_effective_config(raw_config)
         previous_config = yaml.safe_load(yaml.safe_dump(existing_config)) or {}
-        _preserve_users_if_omitted(new_config_json, existing_config)
+        _merge_persistent_users(new_config_json, existing_config)
         user_access_removed = _cleanup_user_camera_access(new_config_json)
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
@@ -1020,9 +1057,17 @@ def update_deployment_name():
         if not isinstance(config["global"], dict):
             return jsonify({"error": "Config key 'global' must be a mapping."}), 400
         config["global"]["deployment_name"] = deployment_name
+        if "public_site" in payload:
+            ui_config = config["global"].setdefault("ui", {})
+            if not isinstance(ui_config, dict):
+                return (
+                    jsonify({"error": "Config key 'global.ui' must be a mapping."}),
+                    400,
+                )
+            ui_config["public_site"] = bool(payload.get("public_site"))
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        message = "GUI name updated. Reload and sync UI to publish the change."
+        message = "Site settings updated. Reload and sync UI to publish the change."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
         return (

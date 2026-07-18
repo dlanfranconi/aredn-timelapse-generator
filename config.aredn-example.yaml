@@ -21,6 +21,9 @@ global:
   deployment_name: Fenetre Skywatch
   ui:
     landing_page: list
+    # true: anyone can view public cameras on port 8888.
+    # false: port 8888 shows a login landing page before camera data is served.
+    public_site: true
     show_map_by_default: false
 
 http_server:
@@ -75,6 +78,11 @@ cameras:
     url: http://192.168.1.50/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=admin&password=PASSWORD
 
     timeout_s: 15
+    # public: shown to everyone when public_site is true.
+    # authenticated: shown only after login.
+    # hidden: kept in config/admin but removed from the main camera page.
+    visibility: public
+    public: true
     cache_bust: true
     gather_metrics: true
     mozjpeg_optimize: true

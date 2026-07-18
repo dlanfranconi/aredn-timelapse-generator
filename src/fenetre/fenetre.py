@@ -15,13 +15,14 @@ import subprocess
 import threading
 import time
 import sys
+from http.cookies import CookieError, SimpleCookie
 from collections import deque
 from datetime import date, datetime, timedelta
 from functools import partial
 from logging.handlers import RotatingFileHandler
 from threading import Thread
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pytz
 import requests
@@ -29,6 +30,7 @@ from absl import app, flags
 from astral import LocationInfo
 from astral.sun import sun
 import piexif
+import yaml
 from PIL import Image, UnidentifiedImageError
 from skimage.metrics import structural_similarity
 
@@ -92,7 +94,11 @@ from fenetre.timelapse import (
     remove_from_timelapse_queue,
 )
 from fenetre.ui_utils import copy_public_html_files
-from fenetre.cameras_metadata import write_cameras_metadata
+from fenetre.cameras_metadata import (
+    build_cameras_metadata,
+    camera_visibility,
+    write_cameras_metadata,
+)
 from fenetre.mqtt import MQTTManager
 from fenetre import profiler
 
@@ -150,6 +156,8 @@ timelapse_queue_lock = threading.Lock()
 background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
 public_auth_sessions = {}
+public_config_cache = {}
+public_config_cache_lock = threading.Lock()
 daylight_q = deque()
 archive_q = deque()
 frequent_timelapse_q = deque()
@@ -178,6 +186,62 @@ def derive_global_config(global_cfg: Dict) -> Dict:
     global_cfg = dict(global_cfg)
     global_cfg["pic_dir"] = os.path.join(global_cfg.get("work_dir", "."), "photos")
     return global_cfg
+
+
+def load_public_config_snapshot() -> Tuple[Dict, Dict, Dict]:
+    fallback = (
+        globals().get("cameras_config", {}),
+        globals().get("global_config", {}),
+        globals().get("timelapse_config", {}),
+    )
+    try:
+        config_path = FLAGS.config
+        mtime = os.path.getmtime(config_path)
+    except Exception:
+        return fallback
+
+    with public_config_cache_lock:
+        if (
+            public_config_cache.get("path") == config_path
+            and public_config_cache.get("mtime") == mtime
+            and public_config_cache.get("snapshot") is not None
+        ):
+            return public_config_cache["snapshot"]
+
+        try:
+            with open(config_path, "r") as config_file:
+                raw_config = yaml.safe_load(config_file) or {}
+            if (
+                isinstance(raw_config, dict)
+                and "config" in raw_config
+                and len(raw_config.keys()) == 1
+            ):
+                raw_config = raw_config.get("config") or {}
+            if not isinstance(raw_config, dict):
+                raise ValueError("config root is not a mapping")
+
+            file_cameras = raw_config.get("cameras")
+            if not isinstance(file_cameras, dict):
+                file_cameras = fallback[0]
+
+            file_global = dict(fallback[1] or {})
+            raw_global = raw_config.get("global")
+            if isinstance(raw_global, dict):
+                file_global.update(raw_global)
+            file_global = derive_global_config(file_global)
+
+            file_timelapse = raw_config.get("timelapse")
+            if not isinstance(file_timelapse, dict):
+                file_timelapse = fallback[2]
+
+            snapshot = (file_cameras, file_global, file_timelapse)
+            public_config_cache.update(
+                {"path": config_path, "mtime": mtime, "snapshot": snapshot}
+            )
+            return snapshot
+        except Exception as exc:
+            logger.warning("Could not read current public config: %s", exc)
+            return fallback
 
 
 def run_serialized_background_job(job_name: str, func: Callable, *args, **kwargs):
@@ -1084,25 +1148,115 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _deployment_name(self) -> str:
+        _, current_global_config, _ = load_public_config_snapshot()
+        return current_global_config.get("deployment_name") or "fenetre.cam"
+
+    def _ui_config(self) -> Dict:
+        _, current_global_config, _ = load_public_config_snapshot()
+        ui_config = current_global_config.get("ui") or {}
+        return ui_config if isinstance(ui_config, dict) else {}
+
+    def _site_is_public(self) -> bool:
+        return self._ui_config().get("public_site", True) is not False
+
+    def _send_public_auth_required(self):
+        self._send_json(
+            401,
+            {
+                "error": "Authentication required",
+                "public_site": False,
+                "deployment_name": self._deployment_name(),
+            },
+        )
+
+    def _camera_visible_to_public_user(
+        self, camera_name: str, user: Optional[Dict] = None
+    ) -> bool:
+        current_cameras_config, _, _ = load_public_config_snapshot()
+        camera_config = current_cameras_config.get(camera_name)
+        if not camera_config:
+            return False
+        visibility = camera_visibility(camera_config)
+        if visibility == "hidden":
+            return False
+        if not self._site_is_public() and not user:
+            return False
+        if visibility == "authenticated" and not user:
+            return False
+        return True
+
+    def _path_camera_name(self, path: str) -> Optional[str]:
+        parts = [unquote(part) for part in path.split("/") if part]
+        if len(parts) >= 2 and parts[0] == "photos":
+            return parts[1]
+        return None
+
+    def _camera_timelapse_enabled(self, camera_config: Dict) -> bool:
+        if camera_config.get("disabled", False):
+            return False
+        if camera_config.get("generate_timelapse") is False:
+            return False
+        if camera_config.get("timelapse_enabled") is False:
+            return False
+        camera_timelapse = camera_config.get("timelapse")
+        if (
+            isinstance(camera_timelapse, dict)
+            and camera_timelapse.get("enabled") is False
+        ):
+            return False
+        return True
+
+    def _handle_cameras_api(self):
+        user = self._public_session_user()
+        if not self._site_is_public() and not user:
+            self._send_public_auth_required()
+            return
+        current_cameras_config, current_global_config, current_timelapse_config = (
+            load_public_config_snapshot()
+        )
+        json_filepath = os.path.join(
+            current_global_config.get("work_dir", "."), "cameras.json"
+        )
+        metadata = build_cameras_metadata(
+            current_cameras_config,
+            current_global_config or {},
+            current_timelapse_config or {},
+            json_filepath,
+            include_private=bool(user),
+            include_hidden=False,
+            include_removed=False,
+        )
+        self._send_json(200, metadata)
+
     def _handle_timelapses_api(self, parsed_url):
         query = parse_qs(parsed_url.query)
         camera_name = (query.get("camera") or [""])[0]
         if not camera_name:
             self._send_json(400, {"error": "camera query parameter is required"})
             return
-        if camera_name not in cameras_config:
+        current_cameras_config, current_global_config, current_timelapse_config = (
+            load_public_config_snapshot()
+        )
+        camera_config = current_cameras_config.get(camera_name)
+        if not camera_config:
             self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
             return
-        timelapse_enabled = is_camera_timelapse_enabled(camera_name)
+        if not self._camera_visible_to_public_user(
+            camera_name, self._public_session_user()
+        ):
+            self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+            return
+        timelapse_enabled = self._camera_timelapse_enabled(camera_config)
 
         if not timelapse_enabled:
             timelapses = []
         else:
             timelapses = discover_camera_timelapses(
                 camera_name,
-                global_config.get("work_dir", "."),
-                timelapse_config.get("daily_timelapse", {}) or {},
-                timelapse_config.get("frequent_timelapse", {}) or {},
+                current_global_config.get("work_dir", "."),
+                current_timelapse_config.get("daily_timelapse", {}) or {},
+                current_timelapse_config.get("frequent_timelapse", {}) or {},
             )
         self._send_json(
             200,
@@ -1123,9 +1277,20 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _public_session_user(self):
         auth_header = self.headers.get("Authorization") or ""
-        if not auth_header.lower().startswith("bearer "):
+        token = ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            cookies = SimpleCookie()
+            try:
+                cookies.load(self.headers.get("Cookie") or "")
+            except CookieError:
+                cookies = SimpleCookie()
+            cookie_token = cookies.get("fenetreAuthToken")
+            if cookie_token:
+                token = cookie_token.value
+        if not token:
             return None
-        token = auth_header.split(" ", 1)[1].strip()
         session = public_auth_sessions.get(token)
         if not session:
             return None
@@ -1233,6 +1398,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 <body>
 <script>
 localStorage.setItem('fenetreAuthToken', {json.dumps(token)});
+document.cookie = 'fenetreAuthToken=' + encodeURIComponent({json.dumps(token)}) + '; Path=/; SameSite=Lax';
 window.location.replace({json.dumps(next_url)});
 </script>
 </body>
@@ -1250,11 +1416,27 @@ window.location.replace({json.dumps(next_url)});
         if auth_header.lower().startswith("bearer "):
             token = auth_header.split(" ", 1)[1].strip()
             public_auth_sessions.pop(token, None)
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get("Cookie") or "")
+        except CookieError:
+            cookies = SimpleCookie()
+        cookie_token = cookies.get("fenetreAuthToken")
+        if cookie_token:
+            public_auth_sessions.pop(cookie_token.value, None)
         self._send_json(200, {"ok": True})
 
     def _handle_public_auth_status_api(self):
         user = self._public_session_user()
-        self._send_json(200, {"authenticated": bool(user), "user": user})
+        self._send_json(
+            200,
+            {
+                "authenticated": bool(user),
+                "user": user,
+                "public_site": self._site_is_public(),
+                "deployment_name": self._deployment_name(),
+            },
+        )
 
     def _user_can_control_ptz(self, camera_name: str, ptz_config: Dict, action: str):
         if not ptz_config.get("enabled"):
@@ -1493,6 +1675,9 @@ window.location.replace({json.dumps(next_url)});
 
     def do_GET(self):
         parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/cameras":
+            self._handle_cameras_api()
+            return
         if parsed_url.path == "/api/timelapses":
             self._handle_timelapses_api(parsed_url)
             return
@@ -1510,6 +1695,18 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/login":
             self._handle_public_login_page(parsed_url)
+            return
+        user = self._public_session_user()
+        if (
+            parsed_url.path == "/cameras.json"
+            and not self._site_is_public()
+            and not user
+        ):
+            self._send_public_auth_required()
+            return
+        camera_name = self._path_camera_name(parsed_url.path)
+        if camera_name and not self._camera_visible_to_public_user(camera_name, user):
+            self.send_error(404, "File not found")
             return
         super().do_GET()
 

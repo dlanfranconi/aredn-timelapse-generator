@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ssim_area: { type: 'text', default: '0,0,1920,1080' },
         ssim_setpoint: { type: 'number', default: 0.90, step: 0.01 }, // For float input
         disabled: { type: 'checkbox', default: false },
+        visibility: { type: 'text', default: 'public' },
         public: { type: 'checkbox', default: true },
         mozjpeg_optimize: { type: 'checkbox', default: false },
         postprocessing: { type: 'array', default: [] } // Special handling: this will use the postprocessing logic
@@ -70,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Order for common fields (can be refined)
     const commonCameraFieldsOrder = [
         'description', 'snap_interval_s', 'activity_interval_s', 'timeout_s', 'sky_area', 'ssim_area', 'ssim_setpoint',
-        'disabled', 'public', 'mozjpeg_optimize', 'postprocessing'
+        'disabled', 'visibility', 'public', 'mozjpeg_optimize', 'postprocessing'
     ];
 
     // NOTE: The duplicate declaration of commonCameraFieldsOrder that was here has been removed.
@@ -103,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userPtzCameras = document.getElementById('userPtzCameras');
     const userDisabled = document.getElementById('userDisabled');
     const siteNameInput = document.getElementById('siteNameInput');
+    const sitePublicInput = document.getElementById('sitePublicInput');
     const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
     const newCameraName = document.getElementById('newCameraName');
     const newCameraDescription = document.getElementById('newCameraDescription');
@@ -110,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraSnapshotTemplate = document.getElementById('newCameraSnapshotTemplate');
     const newCameraRtspTemplate = document.getElementById('newCameraRtspTemplate');
     const newCameraCaptureSource = document.getElementById('newCameraCaptureSource');
+    const newCameraVisibility = document.getElementById('newCameraVisibility');
     const newCameraUrl = document.getElementById('newCameraUrl');
     const newCameraSnapshotUsername = document.getElementById('newCameraSnapshotUsername');
     const newCameraSnapshotPassword = document.getElementById('newCameraSnapshotPassword');
@@ -448,7 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resetSensitiveInput(newCameraSnapshotPassword, toggleNewCameraSnapshotPasswordBtn);
         resetSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn);
         resetSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn);
-        setCheckboxValue('newCameraPublic', true);
+        setSelectValue('newCameraVisibility', 'public');
         setCheckboxValue('newCameraCacheBust', true);
         setCheckboxValue('newCameraMozjpeg', true);
         setCheckboxValue('newCameraTimelapse', true);
@@ -486,6 +489,19 @@ document.addEventListener('DOMContentLoaded', () => {
         syncAllOptionGroups();
     }
 
+    function visibilityForCamera(camera) {
+        if (['public', 'authenticated', 'hidden'].includes(camera.visibility)) {
+            return camera.visibility;
+        }
+        if (camera.hidden === true) {
+            return 'hidden';
+        }
+        if (camera.public === false) {
+            return 'authenticated';
+        }
+        return 'public';
+    }
+
     function inferSunWindow(sunConfig = {}) {
         const values = [
             sunConfig.sunrise_offset_start_minutes,
@@ -519,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
         setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
-        setCheckboxValue('newCameraPublic', camera.public !== false);
+        setSelectValue('newCameraVisibility', visibilityForCamera(camera));
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
         setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
         setCheckboxValue('newCameraTimelapse', camera.timelapse_enabled !== false && camera.generate_timelapse !== false);
@@ -744,6 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const config = await response.json();
             loadedConfigData = config.config || config;
             siteNameInput.value = (loadedConfigData.global && loadedConfigData.global.deployment_name) || 'fenetre.cam';
+            sitePublicInput.checked = (((loadedConfigData.global || {}).ui || {}).public_site !== false);
             saveSiteNameBtn.disabled = false;
             populateCameraEditOptions();
             renderConfigForm(config, configFormContainer, '');
@@ -898,6 +915,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 format: '%Y-%m-%d %H:%M:%S %Z'
             });
         }
+        const visibility = newCameraVisibility.value || 'public';
 
         const payload = {
             name: newCameraName.value.trim(),
@@ -910,7 +928,9 @@ document.addEventListener('DOMContentLoaded', () => {
             rtsp_url: newCameraCaptureSource.value === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
             ptz_rtsp_url: checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
-            public: checked('newCameraPublic'),
+            public: visibility === 'public',
+            visibility,
+            hidden: visibility === 'hidden',
             cache_bust: checked('newCameraCacheBust'),
             gather_metrics: true,
             mozjpeg_optimize: checked('newCameraMozjpeg'),
@@ -1239,7 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function saveSiteName() {
         if (!loadedConfigData) {
-            setStatus('Load the configuration before saving the GUI name.', 'error');
+            setStatus('Load the configuration before saving site settings.', 'error');
             return;
         }
         const siteName = siteNameInput.value.trim();
@@ -1251,13 +1271,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!updatedConfig.global) {
             updatedConfig.global = {};
         }
+        if (!updatedConfig.global.ui || typeof updatedConfig.global.ui !== 'object') {
+            updatedConfig.global.ui = {};
+        }
         updatedConfig.global.deployment_name = siteName;
-        setStatus('Saving GUI name...', 'info');
+        updatedConfig.global.ui.public_site = sitePublicInput.checked;
+        setStatus('Saving site settings...', 'info');
         try {
             const response = await fetch('/api/global/deployment_name', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deployment_name: siteName }),
+                body: JSON.stringify({
+                    deployment_name: siteName,
+                    public_site: sitePublicInput.checked,
+                }),
             });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
@@ -1268,14 +1295,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (deploymentInput) {
                 deploymentInput.value = siteName;
             }
+            const publicSiteInput = document.getElementById('config.global.ui.public_site');
+            if (publicSiteInput) {
+                publicSiteInput.checked = sitePublicInput.checked;
+            }
             const result = await response.json();
             setStatus(
-                (result.message || 'GUI name saved. Reload the app and sync UI to publish it.') + configWriteDetails(result),
+                (result.message || 'Site settings saved. Reload the app and sync UI to publish them.') + configWriteDetails(result),
                 'success'
             );
         } catch (error) {
-            console.error('Error saving GUI name:', error);
-            setStatus(`Error saving GUI name: ${error.message}`, 'error');
+            console.error('Error saving site settings:', error);
+            setStatus(`Error saving site settings: ${error.message}`, 'error');
         }
     }
 
@@ -1597,6 +1628,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (configData.global && configData.global.deployment_name) {
                 siteNameInput.value = configData.global.deployment_name;
             }
+            sitePublicInput.checked = (((configData.global || {}).ui || {}).public_site !== false);
             setStatus((result.message || 'Configuration saved successfully!') + configWriteDetails(result), 'success');
         } catch (error) {
             console.error('Error saving config:', error);

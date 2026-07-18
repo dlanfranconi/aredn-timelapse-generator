@@ -276,9 +276,9 @@ creates a config-backed superadmin user with username `admin` and password `admi
 This bootstrap only happens when the config has no `users:` block yet, so
 upgrading the container will not restore an admin user you removed or overwrite
 a password you changed.
-Admin UI config writes preserve an existing `users:` block if the submitted
-config omits it, so upgrading or saving with an older/newer editor does not
-reset users or their assigned camera access.
+Admin UI config writes preserve the existing `users:` block and password hashes
+during generic config saves, even if an older browser tab submits stale or empty
+user data. Use **Manage Users** to intentionally add, change, or delete users.
 
 Change the password from **Manage Users** in the admin UI after the first login.
 If you lock yourself out, reset the admin user from the container CLI:
@@ -307,6 +307,19 @@ For HTTP/HTTPS snapshot cameras, use `snap_interval_s: 60` for one snapshot per 
 Use the admin UI at `http://HOST:8889/` for normal camera setup. The camera form has separate fields for snapshot credentials, RTSP stream URLs, and PTZ options, so credentials do not need to be embedded in the HTTP snapshot URL.
 
 ![Admin camera setup fields](docs/images/go2rtc-admin-camera.svg)
+
+In the admin **Site** panel:
+
+- `Public website` enabled keeps the port `8888` camera page viewable without login.
+- `Public website` disabled shows a login landing page with the configured GUI name before any cameras, camera metadata, photos, or timelapse API results are served.
+
+Each camera has a **Main page visibility** setting:
+
+- `Public`: shown to everyone when the website is public.
+- `Logged-in users`: hidden from anonymous visitors, shown after login.
+- `Hidden`: removed from the main camera page for everyone, while still remaining in the admin config for maintenance.
+
+Existing configs with `public: false` are treated as `Logged-in users` for backwards compatibility.
 
 The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, and TP-Link. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them.
 
@@ -402,6 +415,23 @@ cameras:
 
 RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should use an `rtsp://...` URL, normally on port `554`; do not put an ONVIF/PTZ port such as `8899` in the RTSP URL unless the camera documentation explicitly says RTSP is served there. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, `8080`, or `8899`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
 
+Some ONVIF cameras, including some Sunba firmware, can refuse or reboot when too many ONVIF service calls arrive close together. Fenetre serializes ONVIF calls per `host:port`, caches discovered media profile tokens, and places an endpoint in a short cooldown after a PTZ operation failure. If the camera works in another NVR but Fenetre fails while reading `/onvif/Media`, set `profile_token` explicitly to skip media-profile discovery. If the camera reboots on continuous movement or stop commands, try `move_mode: relative`; relative nudges send a single ONVIF `RelativeMove` command instead of `ContinuousMove` followed by `Stop`.
+
+```yaml
+cameras:
+  Sunba-PTZ:
+    ptz:
+      enabled: true
+      host: 10.1.64.69
+      port: 8899
+      username: admin
+      password: CHANGE_ME
+      profile_token: Profile_1
+      move_mode: relative
+      relative_move_scale: 0.1
+      failure_cooldown_s: 60
+```
+
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
 The default go2rtc player is the compatibility player: `{base_url}/stream.html?src={stream}`. Older configs that still contain the former exact default, `{base_url}/webrtc.html?src={stream}`, are migrated to `stream.html` during validation because WebRTC is often less reliable across routed mesh networks. If you intentionally prefer a custom go2rtc page, set:
@@ -471,7 +501,7 @@ http://HOST:1984/
 
 The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a camera also has a PTZ live RTSP URL, including RTSP capture cameras with an optional low-resolution alignment substream, the same test captures one frame from that stream too and reports it separately.
 
-On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
+On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` send a single relative nudge command instead. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
 
 The embedded alignment view is loaded lazily when you tap the preview box or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
 

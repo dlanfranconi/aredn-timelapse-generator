@@ -246,6 +246,42 @@ body.dark-mode #theme-toggle {
     height: 32px;
 }
 
+.private-landing {
+    box-sizing: border-box;
+    display: grid;
+    gap: 14px;
+    justify-items: center;
+    margin: auto;
+    max-width: 460px;
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.private-landing h2 {
+    font-size: 30px;
+    margin: 0;
+}
+
+.private-landing p {
+    margin: 0;
+}
+
+.private-landing button {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: #333;
+    cursor: pointer;
+    min-height: 40px;
+    padding: 0 18px;
+}
+
+body.dark-mode .private-landing button {
+    background-color: #333;
+    border-color: #555;
+    color: #e0e0e0;
+}
+
 body.dark-mode #login-panel {
     border-color: #333;
 }
@@ -754,5 +790,10 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
         box-sizing: border-box;
         max-width: none;
         width: 100%;
+    }
+
+    .private-landing {
+        margin: 0 auto;
+        padding: 32px 16px;
     }
 }

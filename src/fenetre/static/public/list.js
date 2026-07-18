@@ -8,8 +8,13 @@ const loginPassword = document.getElementById('login-password');
 const loginSubmit = document.getElementById('login-submit');
 const logoutSubmit = document.getElementById('logout-submit');
 const loginStatus = document.getElementById('login-status');
+const privateLanding = document.getElementById('private-landing');
+const privateLandingName = document.getElementById('private-landing-name');
+const privateLoginButton = document.getElementById('private-login-button');
 let authToken = localStorage.getItem('fenetreAuthToken') || '';
 let authUser = null;
+let siteIsPublic = true;
+let deploymentName = 'Fenetre';
 
 function syncThemeToggleIcon() {
     themeToggle.classList.toggle('dark-mode-active', body.classList.contains('dark-mode'));
@@ -88,6 +93,35 @@ function authHeaders() {
     return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
 
+function storeAuthToken(token) {
+    authToken = token || '';
+    if (authToken) {
+        localStorage.setItem('fenetreAuthToken', authToken);
+        document.cookie = `fenetreAuthToken=${encodeURIComponent(authToken)}; Path=/; SameSite=Lax`;
+    } else {
+        localStorage.removeItem('fenetreAuthToken');
+        document.cookie = 'fenetreAuthToken=; Path=/; Max-Age=0; SameSite=Lax';
+    }
+}
+
+function setDeploymentName(name) {
+    deploymentName = name || deploymentName;
+    document.querySelector('#list-header h1').textContent = `${deploymentName} Cameras`;
+    privateLandingName.textContent = deploymentName;
+    document.title = `${deploymentName} Cameras`;
+}
+
+function updatePrivateLanding() {
+    const locked = !siteIsPublic && !authUser;
+    privateLanding.hidden = !locked;
+    cameraListElement.hidden = locked;
+    if (locked) {
+        cameraListElement.innerHTML = '';
+        clearCameraLayers();
+        setMapVisible(false);
+    }
+}
+
 function syncLoginUi() {
     loginToggle.textContent = authUser ? authUser.username : 'Login';
     loginSubmit.hidden = Boolean(authUser);
@@ -95,21 +129,18 @@ function syncLoginUi() {
     loginUsername.hidden = Boolean(authUser);
     loginPassword.hidden = Boolean(authUser);
     loginStatus.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
+    updatePrivateLanding();
 }
 
 async function loadAuthStatus() {
-    if (!authToken) {
-        authUser = null;
-        syncLoginUi();
-        return;
-    }
     try {
         const response = await fetch('/api/auth/status', { headers: authHeaders() });
         const data = await response.json();
+        siteIsPublic = data.public_site !== false;
+        setDeploymentName(data.deployment_name || deploymentName);
         authUser = data.authenticated ? data.user : null;
         if (!authUser) {
-            authToken = '';
-            localStorage.removeItem('fenetreAuthToken');
+            storeAuthToken('');
         }
     } catch (error) {
         authUser = null;
@@ -125,6 +156,8 @@ loginToggle.addEventListener('click', () => {
     openBasicLoginPrompt();
 });
 
+privateLoginButton.addEventListener('click', openBasicLoginPrompt);
+
 async function loginWithJsonCredentials() {
     loginStatus.textContent = 'Signing in...';
     try {
@@ -137,9 +170,8 @@ async function loginWithJsonCredentials() {
         if (!response.ok) {
             throw new Error(data.error || `Login failed: ${response.status}`);
         }
-        authToken = data.token;
+        storeAuthToken(data.token);
         authUser = data.user;
-        localStorage.setItem('fenetreAuthToken', authToken);
         loginPassword.value = '';
         syncLoginUi();
         window.location.reload();
@@ -171,9 +203,8 @@ logoutSubmit.addEventListener('click', async () => {
     if (authToken) {
         await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
     }
-    authToken = '';
+    storeAuthToken('');
     authUser = null;
-    localStorage.removeItem('fenetreAuthToken');
     syncLoginUi();
     updateAllCameras();
 });
@@ -357,7 +388,7 @@ function buildTimelapsePlayerUrl(src, title) {
 }
 
 async function fetchCameraTimelapses(cameraName) {
-    const response = await fetch(`/api/timelapses?camera=${encodeURIComponent(cameraName)}`);
+    const response = await fetch(`/api/timelapses?camera=${encodeURIComponent(cameraName)}`, { headers: authHeaders() });
     if (!response.ok) {
         throw new Error(`Failed to load timelapses for ${cameraName}: ${response.status}`);
     }
@@ -795,7 +826,7 @@ function updateCamera(camera, cameraData) {
         updateTimelapseArchiveSelect(camera, timelapseArchiveSelect, todayStr);
     }
 
-    fetch(camera.dynamic_metadata)
+    fetch(camera.dynamic_metadata, { headers: authHeaders() })
         .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
         .then(async metadata => {
             const lastPictureUrl = metadata.last_picture_url;
@@ -838,21 +869,49 @@ function updateCamera(camera, cameraData) {
 }
 
 function updateAllCameras() {
-    fetch('/cameras.json')
-        .then(response => response.json())
+    updatePrivateLanding();
+    if (!siteIsPublic && !authUser) {
+        return;
+    }
+    fetch('/api/cameras', { headers: authHeaders() })
+        .then(async response => {
+            const data = await response.json();
+            if (!response.ok) {
+                if (response.status === 401) {
+                    siteIsPublic = data.public_site !== false;
+                    setDeploymentName(data.deployment_name || deploymentName);
+                    authUser = null;
+                    storeAuthToken('');
+                    syncLoginUi();
+                    return null;
+                }
+                throw new Error(data.error || `Failed to load cameras: ${response.status}`);
+            }
+            return data;
+        })
         .then(data => {
-            const deploymentName = data.global.deployment_name || 'AREDN805';
+            if (!data) {
+                return;
+            }
+            setDeploymentName(data.global.deployment_name || deploymentName);
             const uiConfig = (data.global && data.global.ui) || {};
+            siteIsPublic = uiConfig.public_site !== false;
             updateHeaderLinks(uiConfig);
-            document.querySelector('#list-header h1').textContent = `${deploymentName} Cameras`;
 
             const cameras = data.cameras || [];
+            const visibleCameraNames = new Set(cameras.map(camera => camera.title));
+            cameraListElement.querySelectorAll('li[data-title]').forEach(item => {
+                if (!visibleCameraNames.has(item.dataset.title)) {
+                    item.remove();
+                }
+            });
             updateCameraMap(cameras);
             if (!mapVisibilityInitialized) {
                 const showMapByDefault = Boolean(uiConfig.show_map_by_default);
                 setMapVisible(showMapByDefault);
                 mapVisibilityInitialized = true;
             }
+            updatePrivateLanding();
             cameras.forEach(camera => updateCamera(camera, data));
         })
         .catch(error => {

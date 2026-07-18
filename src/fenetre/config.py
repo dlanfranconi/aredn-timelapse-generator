@@ -278,6 +278,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "show_main_website_icon",
             "show_github_icon",
             "show_map_by_default",
+            "public_site",
             "linked_deployments",
             "map_privacy_radius_m",
             "map_privacy_jitter_m",
@@ -318,6 +319,12 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.ui.show_map_by_default",
         errors,
         default=False,
+    )
+    ui_out["public_site"] = _bool(
+        ui_cfg.get("public_site"),
+        "global.ui.public_site",
+        errors,
+        default=True,
     )
     ui_out["map_privacy_radius_m"] = _float(
         ui_cfg.get("map_privacy_radius_m"),
@@ -1142,6 +1149,8 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
         # Copy any known keys used elsewhere without deep validation to preserve behavior
         for k in (
             "public",
+            "visibility",
+            "hidden",
             "ptz",
             "work_dir_max_size_GB",
             "rtsp_url",
