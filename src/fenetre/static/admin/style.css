@@ -185,6 +185,18 @@ h1 {
     flex: 1;
 }
 
+.stream-field-row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
+    gap: 10px 14px;
+    align-items: center;
+}
+
+.stream-field-row[hidden] {
+    display: none;
+}
+
 .option-groups {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

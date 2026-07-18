@@ -101,16 +101,20 @@
                     <option value="digest">Digest</option>
                 </select>
 
-                <label for="newCameraRtspUrl">RTSP URL</label>
-                <div class="inline-field">
-                    <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
-                    <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                <div id="newCameraRtspRow" class="stream-field-row">
+                    <label for="newCameraRtspUrl">RTSP capture URL</label>
+                    <div class="inline-field">
+                        <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+                        <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                    </div>
                 </div>
 
-                <label for="newCameraPtzRtspUrl">PTZ alignment RTSP URL</label>
-                <div class="inline-field">
-                    <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="Optional low-latency stream">
-                    <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
+                <div id="newCameraPtzRtspRow" class="stream-field-row" hidden>
+                    <label for="newCameraPtzRtspUrl">PTZ live RTSP URL</label>
+                    <div class="inline-field">
+                        <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/substream">
+                        <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
+                    </div>
                 </div>
             </div>
 
@@ -205,8 +209,8 @@
                         </select>
                         <label for="newCameraPtzHost">ONVIF host/IP</label>
                         <input id="newCameraPtzHost" type="text" autocomplete="off" placeholder="192.0.2.10">
-                        <label for="newCameraPtzPort">ONVIF port</label>
-                        <input id="newCameraPtzPort" type="number" min="1" max="65535" value="80">
+                        <label for="newCameraPtzPort">ONVIF/PTZ port</label>
+                        <input id="newCameraPtzPort" type="number" min="1" max="65535" value="80" placeholder="80, 8000, 8080, 8899">
                         <label for="newCameraPtzUsername">ONVIF username</label>
                         <input id="newCameraPtzUsername" type="text" autocomplete="off">
                         <label for="newCameraPtzPassword">ONVIF password</label>

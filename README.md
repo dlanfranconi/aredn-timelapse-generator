@@ -339,10 +339,12 @@ docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transpo
 
 Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an error, fix the RTSP URL, credentials, stream path, or transport before adding it back to Fenetre.
 
-`rtsp_url` and `ptz_rtsp_url` can point at the same camera stream, but they are separate for deployments that have more than one stream profile:
+`rtsp_url` and `ptz_rtsp_url` are used for different workflows:
 
-- `rtsp_url`: the stream Fenetre uses for normal RTSP frame capture and the default go2rtc source.
-- `ptz_rtsp_url`: an optional stream used for PTZ alignment/live view. Use this when the camera has a lower-latency or lower-resolution substream that is better for aiming the camera. If it is set, go2rtc uses this stream for the generated live-view stream. If it is empty, go2rtc falls back to `rtsp_url`.
+- `rtsp_url`: the stream Fenetre uses when the camera is RTSP-only and has no HTTP/HTTPS snapshot endpoint. This same stream is also the go2rtc live-view fallback.
+- `ptz_rtsp_url`: an optional stream used only for PTZ alignment/live view on snapshot-based cameras, or when the camera has a lower-latency/lower-resolution substream that is better for aiming. If it is empty, go2rtc falls back to `rtsp_url`.
+
+For an RTSP-only camera, set only `rtsp_url`; do not duplicate the same URL into `ptz_rtsp_url`. RTSP video URLs should normally use the camera's RTSP service, usually port `554`, for example `rtsp://user:password@camera.local:554/stream1`. For a snapshot camera with PTZ controls, keep the snapshot URL in `url` and set `ptz_rtsp_url` only if you want a live alignment view.
 
 For PTZ alignment, the Docker image includes go2rtc and starts it automatically when all of these are true:
 
@@ -380,7 +382,7 @@ cameras:
       allow_manual_control: true
 ```
 
-RTSP/go2rtc live view and ONVIF PTZ are separate camera services. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, or `8080`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
+RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should use an `rtsp://...` URL, normally on port `554`; do not put an ONVIF/PTZ port such as `8899` in the RTSP URL unless the camera documentation explicitly says RTSP is served there. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, `8080`, or `8899`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 

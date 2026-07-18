@@ -114,6 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraSnapshotAuthType = document.getElementById('newCameraSnapshotAuthType');
     const newCameraRtspUrl = document.getElementById('newCameraRtspUrl');
     const newCameraPtzRtspUrl = document.getElementById('newCameraPtzRtspUrl');
+    const newCameraRtspRow = document.getElementById('newCameraRtspRow');
+    const newCameraPtzRtspRow = document.getElementById('newCameraPtzRtspRow');
     const toggleNewCameraUrlBtn = document.getElementById('toggleNewCameraUrlBtn');
     const toggleNewCameraSnapshotPasswordBtn = document.getElementById('toggleNewCameraSnapshotPasswordBtn');
     const toggleNewCameraRtspUrlBtn = document.getElementById('toggleNewCameraRtspUrlBtn');
@@ -153,7 +155,10 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleNewCameraRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn));
     toggleNewCameraPtzRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn));
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
-    newCameraCaptureSource.addEventListener('change', resetNewCameraTest);
+    newCameraCaptureSource.addEventListener('change', () => {
+        syncCaptureStreamFields();
+        resetNewCameraTest();
+    });
     newCameraUrl.addEventListener('input', resetNewCameraTest);
     newCameraSnapshotUsername.addEventListener('input', resetNewCameraTest);
     newCameraSnapshotPassword.addEventListener('input', resetNewCameraTest);
@@ -171,7 +176,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
     document.querySelectorAll('.option-toggle').forEach(toggle => {
-        toggle.addEventListener('change', () => syncOptionGroup(toggle));
+        toggle.addEventListener('change', () => {
+            syncOptionGroup(toggle);
+            if (toggle.id === 'newCameraPtzEnabled') {
+                syncCaptureStreamFields();
+            }
+        });
         syncOptionGroup(toggle);
     });
 
@@ -281,6 +291,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function syncAllOptionGroups() {
         document.querySelectorAll('.option-toggle').forEach(toggle => syncOptionGroup(toggle));
+        syncCaptureStreamFields();
+    }
+
+    function syncCaptureStreamFields() {
+        const captureSource = newCameraCaptureSource.value || 'snapshot';
+        const ptzEnabled = checked('newCameraPtzEnabled');
+        const showRtspCapture = captureSource === 'rtsp';
+        const showPtzRtsp = captureSource !== 'rtsp' && ptzEnabled;
+        newCameraRtspRow.hidden = !showRtspCapture;
+        newCameraPtzRtspRow.hidden = !showPtzRtsp;
+        newCameraRtspUrl.disabled = !showRtspCapture;
+        newCameraPtzRtspUrl.disabled = !showPtzRtsp;
     }
 
     function resetCameraForm() {
@@ -372,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraSnapshotPassword', '');
         setSelectValue('newCameraSnapshotAuthType', (camera.http_auth && camera.http_auth.type) || 'basic');
         setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
-        setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
+        setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || (!camera.local_command ? (camera.rtsp_url || '') : ''));
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
         setCheckboxValue('newCameraPublic', camera.public !== false);
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
@@ -677,8 +699,8 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot_username: newCameraSnapshotUsername.value.trim(),
             snapshot_password: newCameraSnapshotPassword.value,
             snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
-            rtsp_url: newCameraRtspUrl.value.trim(),
-            ptz_rtsp_url: newCameraPtzRtspUrl.value.trim(),
+            rtsp_url: newCameraCaptureSource.value === 'rtsp' ? newCameraRtspUrl.value.trim() : '',
+            ptz_rtsp_url: newCameraCaptureSource.value !== 'rtsp' && checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
             public: checked('newCameraPublic'),
             cache_bust: checked('newCameraCacheBust'),
