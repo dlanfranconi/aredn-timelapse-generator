@@ -4,8 +4,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -25,9 +27,12 @@ from fenetre.auth import (
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.config import config_load
 from fenetre.gopro import GoPro
+from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.ptz import set_lock
 from fenetre.ui_utils import copy_public_html_files
+
+go2rtc_spawned_process = None
 
 metric_pictures_taken_total = Counter(
     "pictures_taken_total", "Total number of pictures taken", ["camera_name"]
@@ -308,6 +313,138 @@ def _config_write_metadata(config_file_path: str, backup_path: str | None) -> di
         "size_bytes": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
     }
+
+
+def _local_go2rtc_api_base(runtime_config: dict | None) -> str | None:
+    if not runtime_config:
+        return None
+    listen = str((runtime_config.get("api") or {}).get("listen") or "").strip()
+    if not listen:
+        return None
+    if listen.startswith(":"):
+        return f"http://127.0.0.1{listen}"
+    if listen.startswith("[") and "]:" in listen:
+        port = listen.rsplit(":", 1)[-1]
+        return f"http://127.0.0.1:{port}"
+    if ":" in listen:
+        host, port = listen.rsplit(":", 1)
+        if host in {"", "0.0.0.0", "::", "[::]"}:
+            host = "127.0.0.1"
+        return f"http://{host}:{port}"
+    return f"http://127.0.0.1:{listen}"
+
+
+def _go2rtc_mode_allows_autostart() -> bool:
+    mode = str(os.environ.get("FENETRE_GO2RTC", "auto")).strip().lower()
+    return mode not in {"off", "false", "0", "no"}
+
+
+def _start_go2rtc_if_needed(config_path: str) -> str | None:
+    global go2rtc_spawned_process
+    if not _go2rtc_mode_allows_autostart():
+        return "FENETRE_GO2RTC disables bundled go2rtc autostart."
+    if go2rtc_spawned_process and go2rtc_spawned_process.poll() is None:
+        return None
+    go2rtc_binary = shutil.which("go2rtc")
+    if not go2rtc_binary:
+        return "go2rtc binary was not found in PATH."
+    try:
+        go2rtc_spawned_process = subprocess.Popen(
+            [go2rtc_binary, "-config", config_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.5)
+    except OSError as exc:
+        return f"failed to start go2rtc: {exc}"
+    return None
+
+
+def _sync_go2rtc_api(
+    api_base: str,
+    streams: dict,
+    removed_streams: list[str],
+) -> None:
+    for stream_name, stream_source in streams.items():
+        response = requests.put(
+            f"{api_base}/api/streams",
+            params={"name": stream_name, "src": stream_source},
+            timeout=3,
+        )
+        response.raise_for_status()
+    for stream_name in removed_streams:
+        response = requests.delete(
+            f"{api_base}/api/streams",
+            params={"src": stream_name},
+            timeout=3,
+        )
+        if response.status_code not in {200, 204, 404}:
+            response.raise_for_status()
+
+
+def _sync_go2rtc_runtime(
+    config: dict,
+    previous_config: dict | None = None,
+) -> dict:
+    runtime_config = build_go2rtc_runtime_config(config)
+    output_path = os.environ.get("FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml")
+    result = {
+        "enabled": bool(runtime_config),
+        "config_path": output_path,
+        "streams": [],
+        "removed_streams": [],
+        "api_synced": False,
+        "warning": None,
+    }
+    if not runtime_config:
+        return result
+
+    with open(output_path, "w") as output_file:
+        yaml.safe_dump(runtime_config, output_file, sort_keys=False)
+
+    streams = runtime_config.get("streams") or {}
+    result["streams"] = sorted(streams.keys())
+    previous_runtime_config = (
+        build_go2rtc_runtime_config(previous_config) if previous_config else None
+    )
+    previous_streams = (previous_runtime_config or {}).get("streams") or {}
+    removed_streams = sorted(set(previous_streams) - set(streams))
+    result["removed_streams"] = removed_streams
+
+    api_base = _local_go2rtc_api_base(runtime_config)
+    if not api_base:
+        result["warning"] = "go2rtc API listen address is disabled."
+        return result
+
+    try:
+        _sync_go2rtc_api(api_base, streams, removed_streams)
+        result["api_synced"] = True
+    except requests.RequestException as exc:
+        start_warning = _start_go2rtc_if_needed(output_path)
+        if start_warning:
+            result["warning"] = f"go2rtc API sync failed: {exc}; {start_warning}"
+            return result
+        try:
+            _sync_go2rtc_api(api_base, streams, removed_streams)
+            result["api_synced"] = True
+            result["started"] = True
+        except requests.RequestException as retry_exc:
+            result["warning"] = f"go2rtc API sync failed: {retry_exc}"
+    return result
+
+
+def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
+    if not (camera.get("rtsp_url") or camera.get("ptz_rtsp_url")):
+        return
+    global_config = config.setdefault("global", {})
+    if not isinstance(global_config, dict):
+        return
+    go2rtc_config = global_config.setdefault("go2rtc", {})
+    if not isinstance(go2rtc_config, dict):
+        global_config["go2rtc"] = {"enabled": True}
+        return
+    if "enabled" not in go2rtc_config:
+        go2rtc_config["enabled"] = True
 
 
 def _slugify_camera_name(value: str) -> str:
@@ -795,15 +932,20 @@ def update_config():
                 400,
             )
         raw_config = _load_raw_config()
+        previous_config = (
+            yaml.safe_load(yaml.safe_dump(_get_effective_config(raw_config))) or {}
+        )
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        message = "Configuration updated successfully (saved as YAML). Reload is required to apply changes."
+        go2rtc_result = _sync_go2rtc_runtime(new_config_json, previous_config)
+        message = "Configuration updated successfully (saved as YAML). Reload is required to apply Fenetre capture changes."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
         return (
             jsonify(
                 {
                     "message": message,
+                    "go2rtc": go2rtc_result,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
@@ -866,6 +1008,7 @@ def test_snapshot_url():
         payload = request.get_json(force=True) or {}
         url = (payload.get("url") or "").strip()
         rtsp_url = (payload.get("rtsp_url") or "").strip()
+        ptz_rtsp_url = (payload.get("ptz_rtsp_url") or "").strip()
         local_command = (payload.get("local_command") or "").strip()
         timeout_s = int(payload.get("timeout_s") or 15)
         cache_bust = bool(payload.get("cache_bust", True))
@@ -890,6 +1033,20 @@ def test_snapshot_url():
             )
         else:
             return jsonify({"error": "Snapshot URL is required."}), 400
+        stream_tests = []
+        if ptz_rtsp_url:
+            stream_bytes, _, stream_size = _fetch_local_command_bytes(
+                _rtsp_snapshot_command(ptz_rtsp_url),
+                timeout_s=timeout_s,
+            )
+            stream_tests.append(
+                {
+                    "name": "PTZ live RTSP",
+                    "width": stream_size[0],
+                    "height": stream_size[1],
+                    "bytes": len(stream_bytes),
+                }
+            )
         return jsonify(
             {
                 "ok": True,
@@ -897,6 +1054,7 @@ def test_snapshot_url():
                 "width": size[0],
                 "height": size[1],
                 "bytes": len(image_bytes),
+                "stream_tests": stream_tests,
                 "preview_data_url": "data:image/jpeg;base64,"
                 + base64.b64encode(image_bytes).decode("ascii"),
             }
@@ -917,6 +1075,7 @@ def add_camera():
         name, camera = _build_camera_config(payload)
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         if payload.get("require_test", True):
             if camera.get("local_command"):
                 _fetch_local_command_bytes(
@@ -929,15 +1088,18 @@ def add_camera():
                     cache_bust=camera.get("cache_bust", True),
                     camera_config=camera,
                 )
+        _ensure_go2rtc_enabled_for_camera(config, camera)
         config["cameras"][name] = camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
         return (
             jsonify(
                 {
-                    "message": f"Camera '{name}' added. Reload the app to make it live.",
+                    "message": f"Camera '{name}' added. Reload the app to make Fenetre capture changes live.",
                     "camera_name": name,
+                    "go2rtc": go2rtc_result,
                     **metadata,
                 }
             ),
@@ -961,6 +1123,7 @@ def update_camera(camera_name):
         if camera_name not in cameras:
             return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
 
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         old_camera = dict(cameras.get(camera_name) or {})
         name, camera = _build_camera_config(payload, existing_camera=old_camera)
         if name != camera_name and name in cameras:
@@ -981,14 +1144,17 @@ def update_camera(camera_name):
         updated_camera = _merge_guided_camera_update(old_camera, camera)
         if name != camera_name:
             cameras.pop(camera_name)
+        _ensure_go2rtc_enabled_for_camera(config, updated_camera)
         cameras[name] = updated_camera
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
         return jsonify(
             {
-                "message": f"Camera '{name}' updated. Reload the app to make it live.",
+                "message": f"Camera '{name}' updated. Reload the app to make Fenetre capture changes live.",
                 "camera_name": name,
+                "go2rtc": go2rtc_result,
                 **metadata,
             }
         )

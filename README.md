@@ -368,7 +368,7 @@ For PTZ alignment, the Docker image includes go2rtc and starts it automatically 
 
 The Docker image also includes the `ptz` Python extra, so ONVIF PTZ control is available without a separate dependency install. If you run Fenetre outside Docker, install `pip install -e '.[ptz]'` for ONVIF controls.
 
-The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. The public `cameras.json` exposes only the generated go2rtc stream name and player URL, not the raw RTSP URL.
+The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. The public `cameras.json` exposes only the generated go2rtc stream name and player URL, not the raw RTSP URL. When you add or edit a camera through the admin UI, Fenetre updates this generated config and asks the local go2rtc API to add/update/remove streams immediately. If `FENETRE_GO2RTC=auto` and go2rtc was not running yet because the container started with no RTSP streams, Fenetre starts the bundled go2rtc process and retries the sync. If go2rtc is disabled or unreachable, the save still succeeds and the admin status message includes the sync warning.
 
 ```yaml
 global:
@@ -449,7 +449,7 @@ In `auto` mode, this message means go2rtc intentionally stayed off because the m
 go2rtc not started; set global.go2rtc.enabled and at least one camera rtsp_url or ptz_rtsp_url to enable it
 ```
 
-After editing `global.go2rtc` or camera RTSP fields, restart the container so the bundled go2rtc config is regenerated.
+After editing camera RTSP fields in the guided admin form, go2rtc streams are synced automatically. After editing raw `global.go2rtc` settings in the advanced config editor, save the config and use **Reload Application Config** if Fenetre capture settings also changed. If the go2rtc status warning says the API sync failed, check that go2rtc is running and reachable on the configured API port, and confirm `FENETRE_GO2RTC` is not set to `off`, `false`, or `0`.
 
 You can inspect the generated go2rtc config:
 
@@ -462,6 +462,8 @@ And open the go2rtc UI:
 ```text
 http://HOST:1984/
 ```
+
+The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a snapshot camera also has a PTZ live RTSP URL, the same test captures one frame from that stream too and reports it separately.
 
 On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. The go2rtc live view is loaded lazily when a manual PTZ control is pressed, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds, so idle WebRTC clients do not keep RTSP streams open.
 

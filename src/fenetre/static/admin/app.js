@@ -329,6 +329,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.size_bytes) {
             details.push(`${result.size_bytes} bytes`);
         }
+        if (result.go2rtc) {
+            if (result.go2rtc.api_synced) {
+                details.push(`go2rtc synced ${result.go2rtc.streams.length} stream(s)`);
+            } else if (result.go2rtc.warning) {
+                details.push(result.go2rtc.warning);
+            } else if (result.go2rtc.enabled === false) {
+                details.push('go2rtc disabled or no RTSP streams');
+            }
+        }
         return ` (${details.join(', ')})`;
     }
 
@@ -964,7 +973,8 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.snapshot_username,
             payload.snapshot_password,
             payload.snapshot_auth_type,
-            payload.rtsp_url
+            payload.rtsp_url,
+            payload.ptz_rtsp_url
         ].join('|');
     }
 
@@ -985,7 +995,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     snapshot_username: payload.snapshot_username,
                     snapshot_password: payload.snapshot_password,
                     snapshot_auth_type: payload.snapshot_auth_type,
-                    rtsp_url: payload.rtsp_url
+                    rtsp_url: payload.rtsp_url,
+                    ptz_rtsp_url: payload.ptz_rtsp_url
                 })
             });
             const result = await response.json();
@@ -1000,6 +1011,11 @@ document.addEventListener('DOMContentLoaded', () => {
             preview.alt = 'Snapshot preview';
             preview.src = result.preview_data_url;
             newCameraTestResult.appendChild(summary);
+            (result.stream_tests || []).forEach(streamTest => {
+                const streamSummary = document.createElement('div');
+                streamSummary.textContent = `${streamTest.name} OK: ${streamTest.width}x${streamTest.height}, ${Math.round(streamTest.bytes / 1024)} KB`;
+                newCameraTestResult.appendChild(streamSummary);
+            });
             newCameraTestResult.appendChild(preview);
             confirmNewCameraBtn.disabled = false;
         } catch (error) {

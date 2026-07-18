@@ -263,9 +263,12 @@ class ConfigServerTestCase(unittest.TestCase):
             {"type": "digest", "username": "admin", "password": "secret"},
         )
 
+    @patch("fenetre.admin_server.requests.put")
     @patch("fenetre.admin_server._fetch_local_command_bytes")
-    def test_add_camera_with_rtsp_capture_source(self, mock_fetch):
+    def test_add_camera_with_rtsp_capture_source(self, mock_fetch, mock_go2rtc_put):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        mock_go2rtc_put.return_value.status_code = 200
+        mock_go2rtc_put.return_value.raise_for_status.return_value = None
         response = self.app.post(
             "/api/camera/add",
             data=json.dumps(
@@ -285,8 +288,44 @@ class ConfigServerTestCase(unittest.TestCase):
         camera = updated_data_yaml["cameras"]["rtsp-cam"]
         self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
         self.assertIn("ffmpeg", camera["local_command"])
+        self.assertTrue(updated_data_yaml["global"]["go2rtc"]["enabled"])
+        self.assertTrue(response.json["go2rtc"]["api_synced"])
+        mock_go2rtc_put.assert_called_once()
+        self.assertEqual(
+            mock_go2rtc_put.call_args.kwargs["params"]["name"], "fenetre_rtsp-cam"
+        )
+        self.assertEqual(
+            mock_go2rtc_put.call_args.kwargs["params"]["src"],
+            "rtsp://admin:secret@camera:554/11",
+        )
         mock_fetch.assert_called_once_with(
             camera["local_command"], timeout_s=camera["timeout_s"]
+        )
+
+    @patch("fenetre.admin_server._fetch_local_command_bytes")
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_snapshot_test_checks_ptz_rtsp_url(self, mock_snapshot, mock_stream):
+        mock_snapshot.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        mock_stream.return_value = (b"streamjpeg", "image/jpeg", (640, 360))
+
+        response = self.app.post(
+            "/api/camera/test_snapshot",
+            data=json.dumps(
+                {
+                    "url": "http://camera/images/snapshot.jpg",
+                    "ptz_rtsp_url": "rtsp://admin:secret@camera:554/12",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json["stream_tests"],
+            [{"name": "PTZ live RTSP", "width": 640, "height": 360, "bytes": 10}],
+        )
+        self.assertIn(
+            "rtsp://admin:secret@camera:554/12", mock_stream.call_args.args[0]
         )
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
