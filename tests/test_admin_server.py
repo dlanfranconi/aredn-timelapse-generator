@@ -650,6 +650,64 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertIn("Request body must be JSON", response.json["error"])
 
+    def test_update_config_preserves_users_when_omitted(self):
+        self.test_config_data["users"] = {
+            "operator": {
+                "role": "operator",
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+                "password_hash": "hash",
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "global": {"setting": "new_value"},
+                    "cameras": {"cam1": {"url": "http://localhost"}},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("users", updated_data_yaml)
+        self.assertEqual(
+            updated_data_yaml["users"]["operator"]["ptz_cameras"], ["cam1"]
+        )
+
+    def test_update_config_removes_deleted_camera_from_user_access(self):
+        self.test_config_data["users"] = {
+            "operator": {
+                "role": "operator",
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1", "missing-cam"],
+                "password_hash": "hash",
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps({"global": {"setting": "value"}, "cameras": {}}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json["user_camera_access_removed"],
+            {"operator": ["cam1", "missing-cam"]},
+        )
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(updated_data_yaml["users"]["operator"]["ptz_cameras"], [])
+
     @patch("os.kill")
     def test_reload_config_success(self, mock_kill):
         # Ensure PID file exists and has a valid PID

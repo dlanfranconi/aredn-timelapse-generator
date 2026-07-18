@@ -276,6 +276,9 @@ creates a config-backed superadmin user with username `admin` and password `admi
 This bootstrap only happens when the config has no `users:` block yet, so
 upgrading the container will not restore an admin user you removed or overwrite
 a password you changed.
+Admin UI config writes preserve an existing `users:` block if the submitted
+config omits it, so upgrading or saving with an older/newer editor does not
+reset users or their assigned camera access.
 
 Change the password from **Manage Users** in the admin UI after the first login.
 If you lock yourself out, reset the admin user from the container CLI:
@@ -475,6 +478,7 @@ PTZ user roles are:
 - `viewer`: view-only unless explicitly given PTZ access.
 
 For non-superadmin users, the **Manage Users** camera access table controls exactly which cameras they can move or send to presets. Manual movement also requires the camera's **Allow manual movement** PTZ option; otherwise the public page returns "Manual PTZ control is disabled for this camera" even if the user is logged in.
+New cameras are not added to any non-superadmin user's PTZ camera list automatically; a superadmin must grant access. When a camera is deleted from the config, Fenetre removes that camera name from every user's PTZ access list during the config save.
 
 ![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
 

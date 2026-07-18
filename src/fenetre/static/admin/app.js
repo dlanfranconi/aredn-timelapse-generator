@@ -338,6 +338,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 details.push('go2rtc disabled or no RTSP streams');
             }
         }
+        if (result.user_camera_access_removed && Object.keys(result.user_camera_access_removed).length) {
+            details.push('removed deleted cameras from user PTZ access');
+        }
+        if (result.user_camera_access_replaced && Object.keys(result.user_camera_access_replaced).length) {
+            details.push('updated user PTZ camera assignments');
+        }
         return ` (${details.join(', ')})`;
     }
 

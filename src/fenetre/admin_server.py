@@ -447,6 +447,50 @@ def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
         go2rtc_config["enabled"] = True
 
 
+def _preserve_users_if_omitted(new_config: dict, existing_config: dict) -> None:
+    if "users" not in new_config and isinstance(existing_config.get("users"), dict):
+        new_config["users"] = existing_config["users"]
+
+
+def _cleanup_user_camera_access(config: dict) -> dict:
+    valid_cameras = set((config.get("cameras") or {}).keys())
+    removed = {}
+    users = config.get("users") or {}
+    if not isinstance(users, dict):
+        return removed
+    for username, user in users.items():
+        if not isinstance(user, dict):
+            continue
+        camera_names = user.get("ptz_cameras") or []
+        if not isinstance(camera_names, list):
+            camera_names = []
+        cleaned = [camera for camera in camera_names if camera in valid_cameras]
+        dropped = sorted(set(camera_names) - set(cleaned))
+        if dropped:
+            removed[str(username)] = dropped
+            user["ptz_cameras"] = cleaned
+    return removed
+
+
+def _replace_user_camera_access(config: dict, old_camera: str, new_camera: str) -> dict:
+    changed = {}
+    users = config.get("users") or {}
+    if not isinstance(users, dict):
+        return changed
+    for username, user in users.items():
+        if not isinstance(user, dict):
+            continue
+        camera_names = user.get("ptz_cameras") or []
+        if not isinstance(camera_names, list) or old_camera not in camera_names:
+            continue
+        replaced = [
+            new_camera if camera == old_camera else camera for camera in camera_names
+        ]
+        user["ptz_cameras"] = list(dict.fromkeys(replaced))
+        changed[str(username)] = {"from": old_camera, "to": new_camera}
+    return changed
+
+
 def _slugify_camera_name(value: str) -> str:
     value = (value or "").strip().lower()
     value = re.sub(r"[^a-z0-9_-]+", "-", value)
@@ -932,9 +976,10 @@ def update_config():
                 400,
             )
         raw_config = _load_raw_config()
-        previous_config = (
-            yaml.safe_load(yaml.safe_dump(_get_effective_config(raw_config))) or {}
-        )
+        existing_config = _get_effective_config(raw_config)
+        previous_config = yaml.safe_load(yaml.safe_dump(existing_config)) or {}
+        _preserve_users_if_omitted(new_config_json, existing_config)
+        user_access_removed = _cleanup_user_camera_access(new_config_json)
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         go2rtc_result = _sync_go2rtc_runtime(new_config_json, previous_config)
@@ -946,6 +991,7 @@ def update_config():
                 {
                     "message": message,
                     "go2rtc": go2rtc_result,
+                    "user_camera_access_removed": user_access_removed,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
@@ -1144,8 +1190,10 @@ def update_camera(camera_name):
         updated_camera = _merge_guided_camera_update(old_camera, camera)
         if name != camera_name:
             cameras.pop(camera_name)
+            _replace_user_camera_access(config, camera_name, name)
         _ensure_go2rtc_enabled_for_camera(config, updated_camera)
         cameras[name] = updated_camera
+        user_access_removed = _cleanup_user_camera_access(config)
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
@@ -1155,6 +1203,7 @@ def update_camera(camera_name):
                 "message": f"Camera '{name}' updated. Reload the app to make Fenetre capture changes live.",
                 "camera_name": name,
                 "go2rtc": go2rtc_result,
+                "user_camera_access_removed": user_access_removed,
                 **metadata,
             }
         )
@@ -1178,6 +1227,8 @@ def rename_camera():
         if new_name in cameras and new_name != old_name:
             return jsonify({"error": f"Camera '{new_name}' already exists."}), 409
         cameras[new_name] = cameras.pop(old_name)
+        user_access_replaced = _replace_user_camera_access(config, old_name, new_name)
+        user_access_removed = _cleanup_user_camera_access(config)
         if payload.get("description"):
             cameras[new_name]["description"] = payload.get("description")
         config_to_write = _merge_effective_config(raw_config, config)
@@ -1187,6 +1238,8 @@ def rename_camera():
             jsonify(
                 {
                     "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.",
+                    "user_camera_access_replaced": user_access_replaced,
+                    "user_camera_access_removed": user_access_removed,
                     **metadata,
                 }
             ),
