@@ -411,17 +411,26 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}",
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
     )
-    if player_url_template == "{base_url}/webrtc.html?src={stream}":
-        player_url_template = "{base_url}/stream.html?src={stream}"
+    if player_url_template in {
+        "{base_url}/webrtc.html?src={stream}",
+        "{base_url}/stream.html?src={stream}",
+    }:
+        player_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
     go2rtc_out["player_url_template"] = player_url_template
-    go2rtc_out["preview_url_template"] = _str(
+    preview_url_template = _str(
         go2rtc_cfg.get("preview_url_template"),
         "global.go2rtc.preview_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}",
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
     )
+    if preview_url_template in {
+        "{base_url}/webrtc.html?src={stream}",
+        "{base_url}/stream.html?src={stream}",
+    }:
+        preview_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    go2rtc_out["preview_url_template"] = preview_url_template
     go2rtc_out["stream_name_prefix"] = _str(
         go2rtc_cfg.get("stream_name_prefix"),
         "global.go2rtc.stream_name_prefix",

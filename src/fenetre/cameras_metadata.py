@@ -96,6 +96,7 @@ def build_cameras_metadata(
     include_private: bool = False,
     include_hidden: bool = False,
     include_removed: bool = True,
+    include_go2rtc: bool = True,
 ) -> Dict[str, Any]:
     updated_cameras_metadata = {"cameras": [], "global": {}}
     ui_public = dict((global_config or {}).get("ui", {}))
@@ -129,9 +130,10 @@ def build_cameras_metadata(
             "visibility": visibility,
             "ptz": public_ptz_metadata(cam_conf.get("ptz") or {}),
         }
-        go2rtc_metadata = build_go2rtc_metadata(cam, cam_conf, global_config or {})
-        if go2rtc_metadata:
-            metadata["go2rtc"] = go2rtc_metadata
+        if include_go2rtc:
+            go2rtc_metadata = build_go2rtc_metadata(cam, cam_conf, global_config or {})
+            if go2rtc_metadata:
+                metadata["go2rtc"] = go2rtc_metadata
 
         if cam_conf.get("source") == "external_website":
             metadata["source"] = "external_website"
@@ -200,6 +202,7 @@ def write_cameras_metadata(
         global_config,
         timelapse_config,
         json_filepath,
+        include_go2rtc=False,
     )
 
     with open(json_filepath, "w") as json_file:

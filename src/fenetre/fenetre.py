@@ -1226,6 +1226,7 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             include_private=bool(user),
             include_hidden=False,
             include_removed=False,
+            include_go2rtc=bool(user),
         )
         self._send_json(200, metadata)
 

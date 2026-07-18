@@ -122,6 +122,13 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         self.assertFalse(updated_data_yaml["global"]["ui"]["public_site"])
 
+    def test_admin_logout_returns_basic_auth_challenge(self):
+        response = self.app.get("/logout")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Basic", response.headers["WWW-Authenticate"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_with_guided_options(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
@@ -836,9 +843,7 @@ class ConfigServerTestCase(unittest.TestCase):
         with open(self.temp_config_file.name, "r") as f:
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml["users"]["operator"]["role"], "operator")
-        self.assertEqual(
-            updated_data_yaml["users"]["operator"]["ptz_access"], "manual"
-        )
+        self.assertEqual(updated_data_yaml["users"]["operator"]["ptz_access"], "manual")
         self.assertEqual(
             updated_data_yaml["users"]["operator"]["ptz_cameras"], ["cam1"]
         )

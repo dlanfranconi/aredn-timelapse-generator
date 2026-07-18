@@ -6,8 +6,12 @@ from urllib.parse import quote
 import yaml
 
 _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
-_DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
+_DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+_OLD_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
 _LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
+_DEFAULT_PREVIEW_URL_TEMPLATE = (
+    "{base_url}/stream.html?src={stream}&media=video&muted=1"
+)
 
 
 def _go2rtc_config(global_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -35,15 +39,15 @@ def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> 
 
 def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(config.get("player_url_template") or _DEFAULT_PLAYER_URL_TEMPLATE)
-    if template == _LEGACY_PLAYER_URL_TEMPLATE:
+    if template in {_LEGACY_PLAYER_URL_TEMPLATE, _OLD_PLAYER_URL_TEMPLATE}:
         template = _DEFAULT_PLAYER_URL_TEMPLATE
     return _stream_url_from_template(config, base_url, stream_name, template)
 
 
 def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
-    template = str(
-        config.get("preview_url_template") or "{base_url}/stream.html?src={stream}"
-    )
+    template = str(config.get("preview_url_template") or _DEFAULT_PREVIEW_URL_TEMPLATE)
+    if template in {_LEGACY_PLAYER_URL_TEMPLATE, _OLD_PLAYER_URL_TEMPLATE}:
+        template = _DEFAULT_PREVIEW_URL_TEMPLATE
     return _stream_url_from_template(config, base_url, stream_name, template)
 
 
@@ -58,7 +62,7 @@ def _stream_url_from_template(
             stream_name=stream_name,
         )
     except (IndexError, KeyError, ValueError):
-        return f"{base_url}/stream.html?src={encoded_stream}"
+        return f"{base_url}/stream.html?src={encoded_stream}&media=video&muted=1"
 
 
 def build_go2rtc_metadata(

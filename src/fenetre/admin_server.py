@@ -1084,6 +1084,18 @@ def serve_ui_page():
     return send_from_directory("static/admin", "index.html")
 
 
+@app.route("/logout")
+def admin_logout():
+    return Response(
+        "Logged out of Fenetre admin. Reload this page to sign in again.\n",
+        401,
+        {
+            "WWW-Authenticate": 'Basic realm="Fenetre Admin", charset="UTF-8"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @app.route("/api/camera/test_snapshot", methods=["POST"])
 def test_snapshot_url():
     try:

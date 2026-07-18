@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 
 # Import the functions/classes to be tested
-from fenetre.cameras_metadata import build_cameras_metadata
+from fenetre.cameras_metadata import build_cameras_metadata, write_cameras_metadata
 from fenetre.config import ConfigError, config_load
 from fenetre.fenetre import _cors_allow_origin_for_request, load_and_apply_configuration
 from fenetre.go2rtc import build_go2rtc_runtime_config, write_go2rtc_runtime_config
@@ -428,6 +428,28 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(private_metadata["cameras"][1]["visibility"], "authenticated")
 
+    def test_written_public_cameras_metadata_omits_go2rtc_urls(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = write_cameras_metadata(
+            {
+                "public-cam": {
+                    "url": "http://public",
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984/",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        self.assertNotIn("go2rtc", metadata["cameras"][0])
+
     def test_cameras_metadata_honors_explicit_go2rtc_player_template(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(
@@ -443,7 +465,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                 "go2rtc": {
                     "enabled": True,
                     "base_url": "http://go2rtc.local:1984/",
-                    "player_url_template": "{base_url}/stream.html?src={stream}",
+                    "player_url_template": "{base_url}/stream.html?src={stream}&mode=mse",
                     "stream_name_prefix": "site_",
                 },
             },
@@ -458,11 +480,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             camera["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=mse",
         )
         self.assertEqual(
             camera["go2rtc"]["full_player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full&mode=mse",
         )
         encoded = yaml.dump(camera)
         self.assertNotIn("rtsp://", encoded)
@@ -492,7 +514,7 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
         )
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["preview_url"],
@@ -532,7 +554,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],
-            "{base_url}/stream.html?src={stream}",
+            "{base_url}/stream.html?src={stream}&media=video&muted=1",
         )
         self.assertEqual(global_conf["go2rtc"]["stream_name_prefix"], "mesh_")
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")

@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncUiBtn = document.getElementById('syncUiBtn');
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     const addCameraBtn = document.getElementById('addCameraBtn');
+    const adminLogoutBtn = document.getElementById('adminLogoutBtn');
     const editCameraBtn = document.getElementById('editCameraBtn');
     const editCameraSelect = document.getElementById('editCameraSelect');
     const refreshStorageBtn = document.getElementById('refreshStorageBtn');
@@ -228,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
     reloadAppBtn.addEventListener('click', reloadApplication);
     rebuildCamerasBtn.addEventListener('click', rebuildCamerasJson);
     syncUiBtn.addEventListener('click', syncUI);
+    adminLogoutBtn.addEventListener('click', logoutAdmin);
     addCameraBtn.addEventListener('click', handleAddCamera);
     editCameraBtn.addEventListener('click', handleEditCamera);
     editCameraSelect.addEventListener('change', () => {
@@ -350,6 +352,48 @@ document.addEventListener('DOMContentLoaded', () => {
             details.push('updated user PTZ camera assignments');
         }
         return ` (${details.join(', ')})`;
+    }
+
+    function sitePublicValue() {
+        return sitePublicInput.value !== 'private';
+    }
+
+    function setSiteAccessValue(isPublic) {
+        sitePublicInput.value = isPublic === false ? 'private' : 'public';
+    }
+
+    function ensureGlobalUi(configData) {
+        if (!configData.global || typeof configData.global !== 'object') {
+            configData.global = {};
+        }
+        if (!configData.global.ui || typeof configData.global.ui !== 'object') {
+            configData.global.ui = {};
+        }
+    }
+
+    function syncSiteInputsFromConfig(configData) {
+        siteNameInput.value = (configData.global && configData.global.deployment_name) || 'fenetre.cam';
+        setSiteAccessValue((((configData.global || {}).ui || {}).public_site !== false));
+    }
+
+    function applySiteInputsToConfig(configData) {
+        ensureGlobalUi(configData);
+        const siteName = siteNameInput.value.trim();
+        if (siteName) {
+            configData.global.deployment_name = siteName;
+        }
+        configData.global.ui.public_site = sitePublicValue();
+    }
+
+    function syncSiteInputsToRenderedConfig() {
+        const deploymentInput = document.getElementById('config.global.deployment_name');
+        if (deploymentInput) {
+            deploymentInput.value = siteNameInput.value.trim();
+        }
+        const publicSiteInput = document.getElementById('config.global.ui.public_site');
+        if (publicSiteInput) {
+            publicSiteInput.checked = sitePublicValue();
+        }
     }
 
     async function loadStorageSummary() {
@@ -759,8 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const config = await response.json();
             loadedConfigData = config.config || config;
-            siteNameInput.value = (loadedConfigData.global && loadedConfigData.global.deployment_name) || 'fenetre.cam';
-            sitePublicInput.checked = (((loadedConfigData.global || {}).ui || {}).public_site !== false);
+            syncSiteInputsFromConfig(loadedConfigData);
             saveSiteNameBtn.disabled = false;
             populateCameraEditOptions();
             renderConfigForm(config, configFormContainer, '');
@@ -1277,7 +1320,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updatedConfig.global.ui = {};
         }
         updatedConfig.global.deployment_name = siteName;
-        updatedConfig.global.ui.public_site = sitePublicInput.checked;
+        updatedConfig.global.ui.public_site = sitePublicValue();
         setStatus('Saving site settings...', 'info');
         try {
             const response = await fetch('/api/global/deployment_name', {
@@ -1285,7 +1328,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     deployment_name: siteName,
-                    public_site: sitePublicInput.checked,
+                    public_site: sitePublicValue(),
                 }),
             });
             if (!response.ok) {
@@ -1293,14 +1336,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             loadedConfigData = updatedConfig;
-            const deploymentInput = document.getElementById('config.global.deployment_name');
-            if (deploymentInput) {
-                deploymentInput.value = siteName;
-            }
-            const publicSiteInput = document.getElementById('config.global.ui.public_site');
-            if (publicSiteInput) {
-                publicSiteInput.checked = sitePublicInput.checked;
-            }
+            syncSiteInputsToRenderedConfig();
             const result = await response.json();
             setStatus(
                 (result.message || 'Site settings saved. Reload the app and sync UI to publish them.') + configWriteDetails(result),
@@ -1611,6 +1647,8 @@ document.addEventListener('DOMContentLoaded', () => {
             configData = configData.config;
         }
 
+        applySiteInputsToConfig(configData);
+
         console.log("Saving data:", JSON.stringify(configData, null, 2));
 
         try {
@@ -1627,10 +1665,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const result = await response.json();
             loadedConfigData = configData;
-            if (configData.global && configData.global.deployment_name) {
-                siteNameInput.value = configData.global.deployment_name;
-            }
-            sitePublicInput.checked = (((configData.global || {}).ui || {}).public_site !== false);
+            syncSiteInputsFromConfig(configData);
+            syncSiteInputsToRenderedConfig();
             setStatus((result.message || 'Configuration saved successfully!') + configWriteDetails(result), 'success');
         } catch (error) {
             console.error('Error saving config:', error);
@@ -1650,6 +1686,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const result = await response.json();
             setStatus(result.message || 'Reload signal sent successfully!', 'success');
+            await fetchAndDisplayConfig();
         } catch (error) {
             console.error('Error reloading application:', error);
             setStatus(`Error reloading application: ${error.message}`, 'error');
@@ -1672,6 +1709,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error sending UI sync:', error);
             setStatus(`Error sending UI sync: ${error.message}`, 'error');
         }
+    }
+
+    function logoutAdmin() {
+        window.location.href = '/logout';
     }
 
     async function rebuildCamerasJson() {

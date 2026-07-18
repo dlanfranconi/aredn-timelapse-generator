@@ -312,8 +312,10 @@ Use the admin UI at `http://HOST:8889/` for normal camera setup. The camera form
 
 In the admin **Site** panel:
 
-- `Public website` enabled keeps the port `8888` camera page viewable without login.
-- `Public website` disabled shows a login landing page with the configured GUI name before any cameras, camera metadata, photos, or timelapse API results are served.
+- `Website access: Public` keeps the port `8888` camera page viewable without login.
+- `Website access: Private` shows a login landing page with the configured GUI name before any cameras, camera metadata, photos, or timelapse API results are served.
+
+The main **Save to config.yaml** button also applies the current **Site** panel GUI name and website access values before writing the YAML file. **Reload Application Config** refreshes the admin editor from the saved file after the reload request.
 
 Each camera has a **Main page visibility** setting:
 
@@ -386,15 +388,15 @@ For PTZ alignment, the Docker image includes go2rtc and starts it automatically 
 
 The Docker image also includes the `ptz` Python extra, so ONVIF PTZ control is available without a separate dependency install. If you run Fenetre outside Docker, install `pip install -e '.[ptz]'` for ONVIF controls.
 
-The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. The public `cameras.json` exposes only generated go2rtc stream names and player URLs, not raw RTSP URLs. When you add or edit a camera through the admin UI, Fenetre updates this generated config and asks the local go2rtc API to add/update/remove streams immediately. If `FENETRE_GO2RTC=auto` and go2rtc was not running yet because the container started with no RTSP streams, Fenetre starts the bundled go2rtc process and retries the sync. If go2rtc is disabled or unreachable, the save still succeeds and the admin status message includes the sync warning.
+The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. Public `cameras.json` does not expose raw RTSP URLs or go2rtc player URLs. Logged-in public-page users receive go2rtc player URLs from `/api/cameras` only after authentication. When you add or edit a camera through the admin UI, Fenetre updates this generated config and asks the local go2rtc API to add/update/remove streams immediately. If `FENETRE_GO2RTC=auto` and go2rtc was not running yet because the container started with no RTSP streams, Fenetre starts the bundled go2rtc process and retries the sync. If go2rtc is disabled or unreachable, the save still succeeds and the admin status message includes the sync warning.
 
 ```yaml
 global:
   go2rtc:
     enabled: true
     base_url: http://HOST:1984
-    player_url_template: "{base_url}/stream.html?src={stream}"
-    preview_url_template: "{base_url}/stream.html?src={stream}"
+    player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"
@@ -436,7 +438,7 @@ cameras:
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is the compatibility player: `{base_url}/stream.html?src={stream}`. Older configs that still contain the former exact default, `{base_url}/webrtc.html?src={stream}`, are migrated to `stream.html` during validation because WebRTC is often less reliable across routed mesh networks. If you intentionally prefer a custom go2rtc page, set:
+The default go2rtc player is the compatibility player with video-only muted playback: `{base_url}/stream.html?src={stream}&media=video&muted=1`. Older configs that still contain the former exact defaults, `{base_url}/webrtc.html?src={stream}` or `{base_url}/stream.html?src={stream}`, are migrated to the muted `stream.html` default during validation because WebRTC is often less reliable across routed mesh networks and public audio should stay disabled by default. If you intentionally prefer a custom go2rtc page, set:
 
 ```yaml
 global:

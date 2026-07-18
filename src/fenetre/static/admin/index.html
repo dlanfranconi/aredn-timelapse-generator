@@ -21,6 +21,7 @@
             <button id="rebuildCamerasBtn">Rebuild cameras.json</button>
             <button id="manageUsersBtn" type="button">Manage Users</button>
             <button id="addCameraBtn" type="button">Add New Camera</button>
+            <button id="adminLogoutBtn" type="button">Logout</button>
         </div>
 
         <div id="statusMessage"></div>
@@ -29,7 +30,11 @@
             <h2>Site</h2>
             <label for="siteNameInput">GUI name</label>
             <input id="siteNameInput" type="text" autocomplete="off" placeholder="fenetre.cam">
-            <label><input id="sitePublicInput" type="checkbox" checked> Public website</label>
+            <label for="sitePublicInput">Website access</label>
+            <select id="sitePublicInput">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+            </select>
             <button id="saveSiteNameBtn" type="button" disabled>Save site settings</button>
         </section>
 
