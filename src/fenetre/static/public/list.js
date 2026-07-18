@@ -492,7 +492,10 @@ function createCameraListItem(camera) {
                 </div>
                 <div class="ptz-live-view" hidden>
                     <button class="btn-ptz-live-start" type="button">Start alignment view</button>
-                    <iframe class="ptz-live-frame" title="PTZ live view" loading="lazy" allow="autoplay; fullscreen"></iframe>
+                    <button class="ptz-live-preview" type="button" aria-label="Start PTZ alignment preview">
+                        <span class="ptz-live-placeholder">Tap to start alignment view</span>
+                        <img class="ptz-live-image" alt="PTZ alignment preview">
+                    </button>
                     <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open full live view</a>
                 </div>
                 <span class="ptz-status"></span>
@@ -524,7 +527,9 @@ function configurePtzPresets(camera, listItem) {
     const speedInput = listItem.querySelector('.input-ptz-speed');
     const durationSelect = listItem.querySelector('.select-ptz-duration');
     const liveView = listItem.querySelector('.ptz-live-view');
-    const liveFrame = listItem.querySelector('.ptz-live-frame');
+    const livePreview = listItem.querySelector('.ptz-live-preview');
+    const liveImage = listItem.querySelector('.ptz-live-image');
+    const livePlaceholder = listItem.querySelector('.ptz-live-placeholder');
     const liveStartButton = listItem.querySelector('.btn-ptz-live-start');
     const liveLink = listItem.querySelector('.ptz-live-link');
     const status = listItem.querySelector('.ptz-status');
@@ -534,7 +539,7 @@ function configurePtzPresets(camera, listItem) {
         authUser.role === 'superadmin' || userCameras.includes(camera.title)
     );
     const go2rtc = camera.go2rtc || {};
-    const livePlayerUrl = go2rtc.enabled ? go2rtc.player_url : '';
+    const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';
     const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_player_url || go2rtc.player_url) : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
@@ -556,7 +561,8 @@ function configurePtzPresets(camera, listItem) {
             clearTimeout(liveIdleTimer);
             liveIdleTimer = null;
         }
-        liveFrame.src = 'about:blank';
+        liveImage.removeAttribute('src');
+        livePreview.classList.remove('loaded');
         return;
     }
 
@@ -576,18 +582,21 @@ function configurePtzPresets(camera, listItem) {
     select.hidden = !canUsePresets;
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
-    liveView.hidden = !(canUseManual && livePlayerUrl);
-    if (canUseManual && livePlayerUrl) {
+    liveView.hidden = !(canUseManual && livePreviewUrl);
+    if (canUseManual && livePreviewUrl) {
         liveLink.href = fullLivePlayerUrl;
     } else {
         if (liveIdleTimer) {
             clearTimeout(liveIdleTimer);
             liveIdleTimer = null;
         }
-        liveFrame.src = 'about:blank';
+        liveImage.removeAttribute('src');
+        livePreview.classList.remove('loaded');
     }
     const unloadLiveView = () => {
-        liveFrame.src = 'about:blank';
+        liveImage.removeAttribute('src');
+        livePreview.classList.remove('loaded');
+        livePlaceholder.textContent = 'Tap to start alignment view';
         liveIdleTimer = null;
         if (status.textContent === 'Alignment view loaded') {
             status.textContent = '';
@@ -603,16 +612,25 @@ function configurePtzPresets(camera, listItem) {
         }
     };
     const loadLiveView = () => {
-        if (canUseManual && livePlayerUrl && liveFrame.src !== livePlayerUrl) {
-            liveFrame.src = livePlayerUrl;
+        if (canUseManual && livePreviewUrl && liveImage.src !== livePreviewUrl) {
+            livePlaceholder.textContent = 'Loading alignment view...';
+            liveImage.src = livePreviewUrl;
             status.textContent = 'Alignment view loaded';
         }
-        if (canUseManual && livePlayerUrl) {
+        if (canUseManual && livePreviewUrl) {
             scheduleLiveViewUnload();
         }
     };
-    liveFrame.onload = scheduleLiveViewUnload;
-    liveFrame.onclick = loadLiveView;
+    liveImage.onload = () => {
+        livePreview.classList.add('loaded');
+        scheduleLiveViewUnload();
+    };
+    liveImage.onerror = () => {
+        livePreview.classList.remove('loaded');
+        livePlaceholder.textContent = 'Preview failed. Open full live view.';
+        status.textContent = 'Alignment preview failed';
+    };
+    livePreview.onclick = loadLiveView;
     liveStartButton.onclick = loadLiveView;
     liveView.onclick = event => {
         if (event.target === liveView) {

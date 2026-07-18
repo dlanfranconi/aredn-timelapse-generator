@@ -379,6 +379,7 @@ global:
     enabled: true
     base_url: http://HOST:1984
     player_url_template: "{base_url}/webrtc.html?src={stream}"
+    preview_url_template: "{base_url}/api/stream.mjpeg?src={stream}"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"
@@ -470,7 +471,7 @@ The camera add/edit dialog's **Test Capture and Streams** button checks the prim
 
 On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover ONVIF presets on demand for authorized users.
 
-The embedded alignment view is loaded lazily when you press **Start alignment view** or use a manual PTZ control, so normal page loads do not keep RTSP streams open. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full stream in a new window when a separate `rtsp_url` stream is configured.
+The embedded alignment view is loaded lazily when you press **Start alignment view** or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview uses go2rtc's MJPEG endpoint via `preview_url_template`, which is more reliable inside mobile browsers than embedding the full go2rtc player. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
 
 PTZ user roles are:
 

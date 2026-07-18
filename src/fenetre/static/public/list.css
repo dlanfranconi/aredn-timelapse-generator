@@ -401,12 +401,41 @@ body.dark-mode .camera-metadata {
     width: min(420px, 100%);
 }
 
-.ptz-live-frame {
+.ptz-live-preview {
     aspect-ratio: 16 / 9;
     background: #111;
     border: 1px solid #d6d6d6;
     border-radius: 4px;
+    color: #ddd;
+    cursor: pointer;
+    display: grid;
+    min-height: 150px;
+    overflow: hidden;
+    padding: 0;
+    place-items: center;
+    position: relative;
     width: 100%;
+}
+
+.ptz-live-image {
+    display: none;
+    height: 100%;
+    object-fit: contain;
+    width: 100%;
+}
+
+.ptz-live-preview.loaded .ptz-live-image {
+    display: block;
+}
+
+.ptz-live-preview.loaded .ptz-live-placeholder {
+    display: none;
+}
+
+.ptz-live-placeholder {
+    font-size: 0.9em;
+    padding: 12px;
+    text-align: center;
 }
 
 .ptz-live-link {
@@ -515,7 +544,7 @@ body.dark-mode .ptz-presets select {
 body.dark-mode .ptz-status {
     color: #bbb;
 }
-body.dark-mode .ptz-live-frame {
+body.dark-mode .ptz-live-preview {
     border-color: #333;
 }
 body.dark-mode .camera-details .links a:hover {
@@ -573,15 +602,106 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
         height: 58vh;
     }
 
-    .camera-header img { width: 100px; }
+    #camera-list {
+        margin: 8px;
+    }
+
+    .camera-header {
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .camera-header img {
+        margin-right: 0;
+        min-width: 96px;
+        width: 34vw;
+    }
+
+    .camera-name {
+        font-size: 1em;
+        overflow-wrap: anywhere;
+    }
+
+    .camera-details {
+        padding: 10px;
+    }
+
     .camera-details .links a {
         display: block;
+        margin: 6px 0;
+        min-height: 34px;
     }
     .camera-details .links select {
         display: block;
         width: 100%;
+        margin: 6px 0;
     }
+
+    .ptz-presets {
+        align-items: stretch;
+        flex-direction: column;
+        margin: 10px 0 0;
+    }
+
+    .ptz-presets select,
+    .ptz-presets button {
+        margin-right: 0;
+        min-height: 44px;
+        width: 100%;
+    }
+
+    .ptz-manual {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .ptz-manual button {
+        min-height: 52px;
+        padding: 10px 6px;
+    }
+
+    .ptz-speed-control,
+    .ptz-duration-control {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .input-ptz-speed {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .ptz-live-view {
+        width: 100%;
+    }
+
+    .ptz-live-preview {
+        min-height: 180px;
+    }
+
     #list-header {
         flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+    }
+
+    #controls {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    #login-panel {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 10px;
+    }
+
+    #login-panel input,
+    #login-panel button {
+        box-sizing: border-box;
+        max-width: none;
+        width: 100%;
     }
 }

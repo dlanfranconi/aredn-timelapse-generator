@@ -433,6 +433,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "enabled": True,
                     "base_url": "http://go2rtc.local:1984/",
                     "stream_name_prefix": "site_",
+                    "preview_url_template": "{base_url}/api/stream.mjpeg?src={stream}",
                     "live_view_idle_timeout_s": 15,
                 },
             },
@@ -443,6 +444,10 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["player_url"],
             "http://go2rtc.local:1984/webrtc.html?src=site_North_Ridge_Camera",
+        )
+        self.assertEqual(
+            metadata["cameras"][0]["go2rtc"]["preview_url"],
+            "http://go2rtc.local:1984/api/stream.mjpeg?src=site_North_Ridge_Camera",
         )
         self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
 
@@ -455,6 +460,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "enabled": True,
                     "base_url": "http://go2rtc.local:1984",
                     "player_url_template": "{base_url}/webrtc.html?src={stream}",
+                    "preview_url_template": "{base_url}/api/stream.mjpeg?src={stream}",
                     "stream_name_prefix": "mesh_",
                     "api_listen": ":11984",
                     "rtsp_listen": ":18554",
@@ -471,6 +477,10 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertTrue(global_conf["go2rtc"]["enabled"])
         self.assertEqual(global_conf["go2rtc"]["base_url"], "http://go2rtc.local:1984")
+        self.assertEqual(
+            global_conf["go2rtc"]["preview_url_template"],
+            "{base_url}/api/stream.mjpeg?src={stream}",
+        )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],
             "{base_url}/webrtc.html?src={stream}",

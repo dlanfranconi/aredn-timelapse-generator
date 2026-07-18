@@ -192,7 +192,9 @@ def goto_preset(
         None,
     )
     if not preset:
-        raise PTZError(f"Preset '{preset_id}' is not configured for this camera.")
+        if normalize_presets(ptz_config):
+            raise PTZError(f"Preset '{preset_id}' is not configured for this camera.")
+        preset = {"id": preset_id, "name": preset_id, "token": preset_id}
 
     session = acquire_session(camera_name, owner, duration_s)
     ptz_service, profile_token = _onvif_services_and_profile_token(ptz_config)
@@ -229,7 +231,7 @@ def discover_presets(
     presets = []
     for index, preset in enumerate(raw_presets or []):
         token = str(getattr(preset, "token", "") or index).strip()
-        name = str(getattr(preset, "Name", "") or token).strip()
+        name = str(getattr(preset, "Name", "") or "").strip()
         if not token or not name:
             continue
         presets.append({"id": token, "name": name, "token": token})

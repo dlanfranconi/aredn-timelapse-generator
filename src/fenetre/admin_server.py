@@ -29,7 +29,7 @@ from fenetre.config import config_load
 from fenetre.gopro import GoPro
 from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
-from fenetre.ptz import set_lock
+from fenetre.ptz import discover_presets, set_lock
 from fenetre.ui_utils import copy_public_html_files
 
 go2rtc_spawned_process = None
@@ -1103,6 +1103,60 @@ def test_snapshot_url():
                 "stream_tests": stream_tests,
                 "preview_data_url": "data:image/jpeg;base64,"
                 + base64.b64encode(image_bytes).decode("ascii"),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/camera/ptz_presets", methods=["POST"])
+def load_ptz_presets():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = str(payload.get("camera_name") or payload.get("name") or "camera")
+        ptz_config = {
+            "enabled": True,
+            "host": (payload.get("ptz_host") or "").strip(),
+            "port": int(payload.get("ptz_port") or 80),
+            "username": (payload.get("ptz_username") or "").strip(),
+            "password": payload.get("ptz_password") or "",
+            "profile_token": (payload.get("ptz_profile_token") or "").strip(),
+        }
+        if not ptz_config["password"] and payload.get("camera_name"):
+            _, config = _load_effective_config_with_raw()
+            existing_ptz = (
+                (config.get("cameras") or {})
+                .get(str(payload.get("camera_name")), {})
+                .get("ptz", {})
+            )
+            if isinstance(existing_ptz, dict):
+                ptz_config["password"] = existing_ptz.get("password") or ""
+        missing = [
+            label
+            for label in ("host", "username", "password")
+            if not ptz_config.get(label)
+        ]
+        if missing:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Missing ONVIF " + ", ".join(missing),
+                    }
+                ),
+                400,
+            )
+        result = discover_presets(
+            camera_name,
+            {"ptz": ptz_config},
+            owner="admin",
+            duration_s=15,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "presets": result.get("presets", []),
+                "count": len(result.get("presets", [])),
             }
         )
     except Exception as exc:

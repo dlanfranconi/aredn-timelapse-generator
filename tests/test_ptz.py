@@ -103,6 +103,35 @@ class PTZTestCase(unittest.TestCase):
         self.assertEqual(request.PresetToken, "1")
         ptz.GotoPreset.assert_called_once_with(request)
 
+    def test_goto_preset_allows_discovered_onvif_token_when_no_configured_presets(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        request = MagicMock()
+        ptz.create_type.return_value = request
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            result = goto_preset("cam1", camera_config, "1")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["preset"], "1")
+        self.assertEqual(request.PresetToken, "1")
+        ptz.GotoPreset.assert_called_once_with(request)
+
     def test_goto_preset_reports_onvif_connection_error_with_host_and_port(self):
         onvif_module = MagicMock()
         onvif_module.ONVIFCamera.side_effect = ConnectionRefusedError(
@@ -133,6 +162,7 @@ class PTZTestCase(unittest.TestCase):
         ptz.GetPresets.return_value = [
             MagicMock(token="1", Name="Home"),
             MagicMock(token="2", Name="Launch Pad"),
+            MagicMock(token="3", Name=""),
         ]
         camera = MagicMock()
         camera.create_media_service.return_value = media

@@ -122,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggleNewCameraSnapshotPasswordBtn = document.getElementById('toggleNewCameraSnapshotPasswordBtn');
     const toggleNewCameraRtspUrlBtn = document.getElementById('toggleNewCameraRtspUrlBtn');
     const toggleNewCameraPtzRtspUrlBtn = document.getElementById('toggleNewCameraPtzRtspUrlBtn');
+    const loadNewCameraPtzPresetsBtn = document.getElementById('loadNewCameraPtzPresetsBtn');
     const testNewCameraBtn = document.getElementById('testNewCameraBtn');
     const confirmNewCameraBtn = document.getElementById('confirmNewCameraBtn');
     const newCameraTestResult = document.getElementById('newCameraTestResult');
@@ -241,6 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleNewCameraSnapshotPasswordBtn.addEventListener('click', () => toggleSensitiveInput(newCameraSnapshotPassword, toggleNewCameraSnapshotPasswordBtn));
     toggleNewCameraRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn));
     toggleNewCameraPtzRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn));
+    loadNewCameraPtzPresetsBtn.addEventListener('click', loadNewCameraPtzPresets);
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
     newCameraSnapshotTemplate.addEventListener('change', () => applySelectedSnapshotTemplate({ force: true }));
     newCameraRtspTemplate.addEventListener('change', () => applySelectedRtspTemplate({ force: true }));
@@ -1035,6 +1037,52 @@ document.addEventListener('DOMContentLoaded', () => {
             confirmNewCameraBtn.disabled = true;
             newCameraTestResult.textContent = error.message;
             setStatus(`Snapshot test failed: ${error.message}`, 'error');
+        }
+    }
+
+    async function loadNewCameraPtzPresets() {
+        const presetsField = document.getElementById('newCameraPtzPresets');
+        const previousPresetsText = presetsField.value;
+        try {
+            if (!checked('newCameraPtzEnabled')) {
+                throw new Error('Enable PTZ controls before loading presets.');
+            }
+            loadNewCameraPtzPresetsBtn.disabled = true;
+            presetsField.value = presetsField.value || 'Loading ONVIF presets...';
+            const response = await fetch('/api/camera/ptz_presets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    camera_name: editingCameraName || newCameraName.value.trim(),
+                    name: newCameraName.value.trim(),
+                    ptz_host: document.getElementById('newCameraPtzHost').value.trim(),
+                    ptz_port: intValue('newCameraPtzPort', 80),
+                    ptz_username: document.getElementById('newCameraPtzUsername').value.trim(),
+                    ptz_password: document.getElementById('newCameraPtzPassword').value,
+                    ptz_profile_token: document.getElementById('newCameraPtzProfileToken').value.trim()
+                })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `Preset load failed with HTTP ${response.status}`);
+            }
+            const presets = (result.presets || []).map(preset => ({
+                id: preset.id,
+                name: preset.name,
+                token: preset.token || preset.id
+            }));
+            presetsField.value = JSON.stringify(presets, null, 2);
+            setStatus(
+                presets.length
+                    ? `Loaded ${presets.length} ONVIF preset(s). Edit names here to override display labels.`
+                    : 'No named ONVIF presets were found. Unnamed presets are treated as untaught.',
+                presets.length ? 'success' : 'info'
+            );
+        } catch (error) {
+            presetsField.value = previousPresetsText;
+            setStatus(`Could not load ONVIF presets: ${error.message}`, 'error');
+        } finally {
+            loadNewCameraPtzPresetsBtn.disabled = false;
         }
     }
 

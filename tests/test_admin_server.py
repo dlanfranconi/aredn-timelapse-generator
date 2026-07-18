@@ -219,6 +219,69 @@ class ConfigServerTestCase(unittest.TestCase):
         mock_fetch.assert_called_once()
         self.assertEqual(mock_fetch.call_args.kwargs["camera_config"], camera)
 
+    @patch("fenetre.admin_server.discover_presets")
+    def test_load_ptz_presets_from_guided_fields(self, mock_discover):
+        mock_discover.return_value = {
+            "ok": True,
+            "presets": [
+                {"id": "1", "name": "Home", "token": "1"},
+                {"id": "2", "name": "Launch Pad", "token": "2"},
+            ],
+        }
+
+        response = self.app.post(
+            "/api/camera/ptz_presets",
+            data=json.dumps(
+                {
+                    "camera_name": "cam1",
+                    "ptz_host": "192.0.2.10",
+                    "ptz_port": 8899,
+                    "ptz_username": "operator",
+                    "ptz_password": "secret",
+                    "ptz_profile_token": "profile-1",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["count"], 2)
+        self.assertEqual(response.json["presets"][0]["name"], "Home")
+        camera_config = mock_discover.call_args.args[1]
+        self.assertEqual(camera_config["ptz"]["password"], "secret")
+        self.assertEqual(camera_config["ptz"]["profile_token"], "profile-1")
+
+    @patch("fenetre.admin_server.discover_presets")
+    def test_load_ptz_presets_reuses_existing_password_on_edit(self, mock_discover):
+        self.test_config_data["cameras"]["cam1"]["ptz"] = {
+            "enabled": True,
+            "host": "192.0.2.10",
+            "port": 8899,
+            "username": "operator",
+            "password": "existing-secret",
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        mock_discover.return_value = {"ok": True, "presets": []}
+
+        response = self.app.post(
+            "/api/camera/ptz_presets",
+            data=json.dumps(
+                {
+                    "camera_name": "cam1",
+                    "ptz_host": "192.0.2.10",
+                    "ptz_port": 8899,
+                    "ptz_username": "operator",
+                    "ptz_password": "",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        camera_config = mock_discover.call_args.args[1]
+        self.assertEqual(camera_config["ptz"]["password"], "existing-secret")
+
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_snapshot_test_respects_cache_bust_false(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))

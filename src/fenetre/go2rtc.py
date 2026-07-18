@@ -35,6 +35,19 @@ def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(
         config.get("player_url_template") or "{base_url}/webrtc.html?src={stream}"
     )
+    return _stream_url_from_template(config, base_url, stream_name, template)
+
+
+def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
+    template = str(
+        config.get("preview_url_template") or "{base_url}/api/stream.mjpeg?src={stream}"
+    )
+    return _stream_url_from_template(config, base_url, stream_name, template)
+
+
+def _stream_url_from_template(
+    config: Dict[str, Any], base_url: str, stream_name: str, template: str
+) -> str:
     encoded_stream = quote(stream_name, safe="")
     try:
         return template.format(
@@ -76,6 +89,7 @@ def build_go2rtc_metadata(
         "full_stream": full_stream_name,
         "player_url": _player_url(config, base_url, stream_name),
         "full_player_url": _player_url(config, base_url, full_stream_name),
+        "preview_url": _preview_url(config, base_url, stream_name),
         "idle_timeout_s": int(idle_timeout_s),
     }
 

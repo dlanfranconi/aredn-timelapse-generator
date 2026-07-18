@@ -379,6 +379,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "enabled",
             "base_url",
             "player_url_template",
+            "preview_url_template",
             "stream_name_prefix",
             "api_listen",
             "rtsp_listen",
@@ -404,6 +405,12 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.go2rtc.player_url_template",
         errors,
         default="{base_url}/webrtc.html?src={stream}",
+    )
+    go2rtc_out["preview_url_template"] = _str(
+        go2rtc_cfg.get("preview_url_template"),
+        "global.go2rtc.preview_url_template",
+        errors,
+        default="{base_url}/api/stream.mjpeg?src={stream}",
     )
     go2rtc_out["stream_name_prefix"] = _str(
         go2rtc_cfg.get("stream_name_prefix"),
