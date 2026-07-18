@@ -404,12 +404,12 @@ RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should us
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is the compatibility player: `{base_url}/stream.html?src={stream}`. If you intentionally prefer WebRTC and it works in your network, set:
+The default go2rtc player is the compatibility player: `{base_url}/stream.html?src={stream}`. Older configs that still contain the former exact default, `{base_url}/webrtc.html?src={stream}`, are migrated to `stream.html` during validation because WebRTC is often less reliable across routed mesh networks. If you intentionally prefer a custom go2rtc page, set:
 
 ```yaml
 global:
   go2rtc:
-    player_url_template: "{base_url}/webrtc.html?src={stream}"
+    player_url_template: "{base_url}/stream.html?src={stream}&mode=webrtc"
 ```
 
 If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published.

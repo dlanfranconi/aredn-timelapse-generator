@@ -400,12 +400,15 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default="",
     )
-    go2rtc_out["player_url_template"] = _str(
+    player_url_template = _str(
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",
         errors,
         default="{base_url}/stream.html?src={stream}",
     )
+    if player_url_template == "{base_url}/webrtc.html?src={stream}":
+        player_url_template = "{base_url}/stream.html?src={stream}"
+    go2rtc_out["player_url_template"] = player_url_template
     go2rtc_out["preview_url_template"] = _str(
         go2rtc_cfg.get("preview_url_template"),
         "global.go2rtc.preview_url_template",

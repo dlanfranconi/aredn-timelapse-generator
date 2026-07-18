@@ -6,6 +6,8 @@ from urllib.parse import quote
 import yaml
 
 _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
+_DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
+_LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
 
 
 def _go2rtc_config(global_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -32,9 +34,9 @@ def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> 
 
 
 def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
-    template = str(
-        config.get("player_url_template") or "{base_url}/stream.html?src={stream}"
-    )
+    template = str(config.get("player_url_template") or _DEFAULT_PLAYER_URL_TEMPLATE)
+    if template == _LEGACY_PLAYER_URL_TEMPLATE:
+        template = _DEFAULT_PLAYER_URL_TEMPLATE
     return _stream_url_from_template(config, base_url, stream_name, template)
 
 

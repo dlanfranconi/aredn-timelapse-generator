@@ -483,7 +483,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],
-            "{base_url}/webrtc.html?src={stream}",
+            "{base_url}/stream.html?src={stream}",
         )
         self.assertEqual(global_conf["go2rtc"]["stream_name_prefix"], "mesh_")
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
