@@ -149,14 +149,20 @@ async function loadAuthStatus() {
 }
 
 loginToggle.addEventListener('click', () => {
+    openLoginPanel();
+});
+
+privateLoginButton.addEventListener('click', openLoginPanel);
+
+function openLoginPanel() {
     if (authUser) {
         loginPanel.hidden = !loginPanel.hidden;
         return;
     }
-    openBasicLoginPrompt();
-});
-
-privateLoginButton.addEventListener('click', openBasicLoginPrompt);
+    loginPanel.hidden = false;
+    loginStatus.textContent = '';
+    window.setTimeout(() => loginUsername.focus(), 0);
+}
 
 async function loginWithJsonCredentials() {
     loginStatus.textContent = 'Signing in...';
@@ -178,13 +184,6 @@ async function loginWithJsonCredentials() {
     } catch (error) {
         loginStatus.textContent = error.message;
     }
-}
-
-async function openBasicLoginPrompt() {
-    loginPanel.hidden = false;
-    loginStatus.textContent = 'Signing in...';
-    const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.location.href = `/login?next=${encodeURIComponent(next)}`;
 }
 
 loginSubmit.addEventListener('click', loginWithJsonCredentials);

@@ -276,9 +276,11 @@ creates a config-backed superadmin user with username `admin` and password `admi
 This bootstrap only happens when the config has no `users:` block yet, so
 upgrading the container will not restore an admin user you removed or overwrite
 a password you changed.
-Admin UI config writes preserve the existing `users:` block and password hashes
-during generic config saves, even if an older browser tab submits stale or empty
-user data. Use **Manage Users** to intentionally add, change, or delete users.
+Admin UI config writes preserve the existing `users:` block, password hashes,
+roles, PTZ access levels, and assigned PTZ camera lists during generic config
+saves, even if an older browser tab submits stale or empty user data. Use
+**Manage Users** to intentionally add, change, or delete users. Deleted cameras
+are still removed from every user's PTZ camera list during config saves.
 
 Change the password from **Manage Users** in the admin UI after the first login.
 If you lock yourself out, reset the admin user from the container CLI:
@@ -501,7 +503,7 @@ http://HOST:1984/
 
 The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a camera also has a PTZ live RTSP URL, including RTSP capture cameras with an optional low-resolution alignment substream, the same test captures one frame from that stream too and reports it separately.
 
-On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens a browser-native Basic Auth prompt, like the admin page. After a successful login, the page stores a short-lived public session token, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` send a single relative nudge command instead. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
+On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens the inline login form. The page marks login and secret fields with non-saving browser autocomplete hints, stores a short-lived public session token after login, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` send a single relative nudge command instead. Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden; use the admin camera editor's **Load ONVIF Presets** button to import named presets, then edit the generated JSON if you want friendlier display names.
 
 The embedded alignment view is loaded lazily when you tap the preview box or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens the full go2rtc player in a new window when a separate `rtsp_url` stream is configured.
 

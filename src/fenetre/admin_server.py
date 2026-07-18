@@ -461,17 +461,8 @@ def _merge_persistent_users(new_config: dict, existing_config: dict) -> None:
     for username, submitted_user in submitted_users.items():
         if not isinstance(submitted_user, dict):
             continue
-        existing_user = merged_users.get(username)
-        if not isinstance(existing_user, dict):
+        if not isinstance(merged_users.get(username), dict):
             merged_users[username] = submitted_user
-            continue
-
-        merged_user = dict(existing_user)
-        merged_user.update(submitted_user)
-        for password_key in ("password_hash", "password"):
-            if not submitted_user.get(password_key) and existing_user.get(password_key):
-                merged_user[password_key] = existing_user[password_key]
-        merged_users[username] = merged_user
 
     new_config["users"] = merged_users
 

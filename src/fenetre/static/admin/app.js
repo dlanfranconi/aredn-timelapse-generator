@@ -1202,12 +1202,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     parentElement.appendChild(formRow);
                 } else {
                     const input = document.createElement('input');
-                    input.type = isSensitiveField(currentKey) ? 'password' : 'text';
+                    const sensitive = isSensitiveField(currentKey);
+                    input.type = sensitive ? 'password' : 'text';
+                    input.autocomplete = sensitive ? 'new-password' : 'off';
                     input.id = currentKey;
                     input.value = value;
                     input.dataset.key = currentKey;
                     inputWrapper.appendChild(input);
-                    if (isSensitiveField(currentKey)) {
+                    if (sensitive) {
                         appendRevealToggle(inputWrapper, input);
                     }
                     formRow.appendChild(inputWrapper);
@@ -1838,7 +1840,9 @@ document.addEventListener('DOMContentLoaded', () => {
             input.rows = (fieldConfig.default.match(/\n/g) || []).length + 2;
         } else { // 'text' or other
             input = document.createElement('input');
-            input.type = isSensitiveField(fieldKey) ? 'password' : 'text';
+            const sensitive = isSensitiveField(fieldKey);
+            input.type = sensitive ? 'password' : 'text';
+            input.autocomplete = sensitive ? 'new-password' : 'off';
             input.value = fieldConfig.default;
         }
         input.id = fieldKey;

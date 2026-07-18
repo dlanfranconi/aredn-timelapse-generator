@@ -791,8 +791,11 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(
             updated_data_yaml["users"]["operator"]["password_hash"], "hash"
         )
+        self.assertEqual(
+            updated_data_yaml["users"]["operator"]["ptz_cameras"], ["cam1"]
+        )
 
-    def test_update_config_preserves_user_password_hash_from_stale_form(self):
+    def test_update_config_preserves_user_settings_from_stale_form(self):
         self.test_config_data["users"] = {
             "operator": {
                 "role": "operator",
@@ -819,8 +822,9 @@ class ConfigServerTestCase(unittest.TestCase):
                     "users": {
                         "operator": {
                             "role": "admin",
-                            "ptz_access": "manual",
-                            "ptz_cameras": ["cam1"],
+                            "ptz_access": "none",
+                            "ptz_cameras": [],
+                            "disabled": True,
                         }
                     },
                 }
@@ -831,7 +835,14 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         with open(self.temp_config_file.name, "r") as f:
             updated_data_yaml = yaml.safe_load(f)
-        self.assertEqual(updated_data_yaml["users"]["operator"]["role"], "admin")
+        self.assertEqual(updated_data_yaml["users"]["operator"]["role"], "operator")
+        self.assertEqual(
+            updated_data_yaml["users"]["operator"]["ptz_access"], "manual"
+        )
+        self.assertEqual(
+            updated_data_yaml["users"]["operator"]["ptz_cameras"], ["cam1"]
+        )
+        self.assertNotIn("disabled", updated_data_yaml["users"]["operator"])
         self.assertEqual(
             updated_data_yaml["users"]["operator"]["password_hash"], "hash"
         )
