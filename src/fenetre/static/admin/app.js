@@ -122,7 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzRtspUrl = document.getElementById('newCameraPtzRtspUrl');
     const newCameraRtspRow = document.getElementById('newCameraRtspRow');
     const newCameraPtzRtspRow = document.getElementById('newCameraPtzRtspRow');
-    const newCameraPtzCompatibility = document.getElementById('newCameraPtzCompatibility');
     const newCameraPtzCapabilityPan = document.getElementById('newCameraPtzCapabilityPan');
     const newCameraPtzCapabilityTilt = document.getElementById('newCameraPtzCapabilityTilt');
     const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
@@ -229,12 +228,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'tplink-stream1', label: 'Stream 1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream1' },
                 { id: 'tplink-stream2', label: 'Stream 2', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream2' }
             ]
-        },
-        frigate: {
-            snapshots: [
-                { id: 'frigate-latest', label: 'Frigate latest frame', url: 'http://FRIGATE_HOST:5000/api/CAMERA_NAME/latest.jpg', auth: 'basic' }
-            ],
-            rtsp: []
         }
     };
 
@@ -623,7 +616,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzAllowPresets', true);
         setCheckboxValue('newCameraPtzAllowManual', false);
         setSelectValue('newCameraPtzAccessLevel', 'presets');
-        setSelectValue('newCameraPtzCompatibility', '');
         setCheckboxValue('newCameraPtzCapabilityPan', true);
         setCheckboxValue('newCameraPtzCapabilityTilt', true);
         setCheckboxValue('newCameraPtzCapabilityZoom', true);
@@ -721,7 +713,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzAllowPresets', ptz.allow_presets !== false);
         setCheckboxValue('newCameraPtzAllowManual', ptz.allow_manual_control === true);
         setSelectValue('newCameraPtzAccessLevel', ptz.access_level || 'presets');
-        setSelectValue('newCameraPtzCompatibility', ptz.compatibility || ptz.ptz_profile || ptz.vendor || '');
         const capabilities = ptz.capabilities || {};
         const zoomOnly = ptz.zoom_only === true;
         setCheckboxValue('newCameraPtzCapabilityPan', capabilities.pan ?? ptz.supports_pan ?? !zoomOnly);
@@ -983,7 +974,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCameraTemplateUrl(templateUrl) {
         return templateUrl
-            .replaceAll('CAMERA_NAME', encodeURIComponent(newCameraName.value.trim() || 'CAMERA_NAME'))
             .replaceAll('USERNAME', encodeURIComponent(newCameraSnapshotUsername.value.trim() || 'USERNAME'))
             .replaceAll('PASSWORD', encodeURIComponent(newCameraSnapshotPassword.value || 'PASSWORD'));
     }
@@ -1037,9 +1027,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyNewCameraTemplate() {
         syncTemplateSelects();
-        if (newCameraVendor.value === 'sunba' && !newCameraPtzCompatibility.value) {
-            newCameraPtzCompatibility.value = 'sunba';
-        }
         applySelectedSnapshotTemplate();
         applySelectedRtspTemplate();
     }
@@ -1141,7 +1128,6 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.ptz_allow_presets = checked('newCameraPtzAllowPresets');
             payload.ptz_allow_manual_control = checked('newCameraPtzAllowManual');
             payload.ptz_access_level = document.getElementById('newCameraPtzAccessLevel').value || 'presets';
-            payload.ptz_compatibility = newCameraPtzCompatibility.value;
             payload.ptz_capabilities = {
                 pan: newCameraPtzCapabilityPan.checked,
                 tilt: newCameraPtzCapabilityTilt.checked,

@@ -727,6 +727,8 @@ def _build_camera_config(
             presets = json.loads(presets) if presets.strip() else []
         existing_ptz = existing_camera.get("ptz") or {}
         ptz_config = dict(existing_ptz) if isinstance(existing_ptz, dict) else {}
+        for legacy_key in ("compatibility", "ptz_profile", "vendor"):
+            ptz_config.pop(legacy_key, None)
         ptz_config.update(
             {
                 "enabled": True,
@@ -745,14 +747,6 @@ def _build_camera_config(
                 "presets": presets,
             }
         )
-        compatibility = (
-            payload.get("ptz_compatibility")
-            or payload.get("ptz_profile")
-            or ptz_config.get("compatibility")
-            or ""
-        )
-        if compatibility:
-            ptz_config["compatibility"] = str(compatibility).strip()
         capabilities = payload.get("ptz_capabilities")
         if isinstance(capabilities, dict):
             ptz_config["capabilities"] = {

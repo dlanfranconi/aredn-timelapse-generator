@@ -374,43 +374,6 @@ class PTZTestCase(unittest.TestCase):
         ptz.Stop.assert_not_called()
         mock_sleep.assert_not_called()
 
-    def test_sunba_safe_mode_uses_small_relative_nudge_without_stop(self):
-        media = MagicMock()
-        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
-        ptz = MagicMock()
-        request = MagicMock()
-        ptz.create_type.return_value = request
-        camera = MagicMock()
-        camera.create_media_service.return_value = media
-        camera.create_ptz_service.return_value = ptz
-        onvif_module = MagicMock()
-        onvif_module.ONVIFCamera.return_value = camera
-        camera_config = {
-            "ptz": {
-                "enabled": True,
-                "host": "192.0.2.10",
-                "port": 8899,
-                "username": "operator",
-                "password": "secret",
-                "compatibility": "sunba",
-            }
-        }
-
-        with patch.dict("sys.modules", {"onvif": onvif_module}), patch(
-            "fenetre.ptz.time.sleep"
-        ) as mock_sleep:
-            result = nudge_move("cam1", camera_config, pan=1, tilt=0, zoom=0)
-
-        self.assertTrue(result["ok"])
-        ptz.create_type.assert_called_once_with("RelativeMove")
-        self.assertEqual(
-            request.Translation,
-            {"PanTilt": {"x": 0.03, "y": 0.0}, "Zoom": {"x": 0.0}},
-        )
-        ptz.RelativeMove.assert_called_once_with(request)
-        ptz.Stop.assert_not_called()
-        mock_sleep.assert_not_called()
-
     def test_stop_move_can_be_disabled_for_fragile_cameras(self):
         camera_config = {
             "ptz": {

@@ -325,7 +325,7 @@ Each camera has a **Main page visibility** setting:
 
 Existing configs with `public: false` are treated as `Logged-in users` for backwards compatibility.
 
-The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, TP-Link, and Frigate latest-frame sources. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them. PTZ-capable cameras also have a **PTZ profile** selector, movement capability checkboxes, optional tour controls, and a preset row editor.
+The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, and TP-Link. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them. PTZ-capable cameras also have movement capability checkboxes, optional tour controls, and a preset row editor.
 
 For cameras that need HTTP Basic or Digest authentication for snapshots, keep the URL clean and set credentials in `http_auth`:
 
@@ -381,19 +381,6 @@ Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an e
 
 Fenetre-generated RTSP snapshot commands are video-only. This avoids negotiating or decoding RTSP audio tracks on cameras where audio SETUP/probing is unstable. Older saved Fenetre-generated RTSP commands are upgraded in memory at capture time when `rtsp_url` is present; custom `local_command` values are left unchanged.
 
-Some older Sunba 601-D20X firmware appears unable to tolerate repeated direct RTSP session open/close cycles. A first Fenetre RTSP frame can succeed, the next scheduled frame can make the camera refuse port `554`, and the camera may recover only after it reboots. For those cameras, use a stable upstream that already holds the RTSP stream open, such as Frigate, and configure Fenetre as an HTTP snapshot camera:
-
-```yaml
-cameras:
-  k6kp-eoc:
-    url: http://FRIGATE_HOST:5000/api/k6kp-eoc/latest.jpg
-    cache_bust: true
-    timeout_s: 10
-    capture_failure_interval_s: 300
-```
-
-When using this pattern for a fragile D20, remove Fenetre's direct `local_command` and avoid direct `rtsp_url`/`ptz_rtsp_url` entries unless you have confirmed the camera remains stable. Newer Sunba models may work normally with direct RTSP and the Sunba PTZ profile.
-
 `rtsp_url` and `ptz_rtsp_url` are used for different workflows:
 
 - `rtsp_url`: the stream Fenetre uses when the camera is RTSP-only and has no HTTP/HTTPS snapshot endpoint. This same stream is also the go2rtc live-view fallback.
@@ -440,13 +427,11 @@ cameras:
 
 RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should use an `rtsp://...` URL, normally on port `554`; do not put an ONVIF/PTZ port such as `8899` in the RTSP URL unless the camera documentation explicitly says RTSP is served there. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, `8080`, or `8899`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
 
-Some ONVIF cameras, including some Sunba firmware, can refuse or reboot when too many ONVIF service calls arrive close together. Fenetre serializes ONVIF calls per `host:port`, caches discovered media profile tokens, and places an endpoint in a short cooldown after a PTZ operation failure. If the camera works in another NVR but Fenetre fails while reading `/onvif/Media`, set `profile_token` explicitly to skip media-profile discovery.
-
-For Sunba 601-series cameras, select **Sunba safe** in the admin camera editor or set `ptz.compatibility: sunba`. That profile defaults manual controls to one-shot ONVIF `RelativeMove` nudges, uses a smaller relative move scale, skips ONVIF `Stop`, and uses a longer failure cooldown. This avoids the `ContinuousMove` plus `Stop` pattern that can reboot fragile firmware.
+Some ONVIF cameras handle short relative nudges better than continuous move plus stop. Fenetre exposes that as generic PTZ configuration instead of a vendor-specific profile: set `ptz.move_mode: relative` and adjust `relative_move_scale` if the nudge is too large or too small. If a camera cannot tolerate ONVIF `Stop`, set `disable_stop: true`; continuous manual movement will be rejected and nudge movement must use relative mode.
 
 ```yaml
 cameras:
-  Sunba-PTZ:
+  Relative-PTZ:
     ptz:
       enabled: true
       host: 10.1.64.69
@@ -454,7 +439,9 @@ cameras:
       username: admin
       password: CHANGE_ME
       profile_token: Profile_1
-      compatibility: sunba
+      move_mode: relative
+      relative_move_scale: 0.05
+      disable_stop: true
       capabilities:
         pan: true
         tilt: true
@@ -547,7 +534,7 @@ The camera add/edit dialog's **Test Capture and Streams** button checks the prim
 
 Saving a camera from the admin add/edit dialog writes `config.yaml`, syncs bundled public UI files, rebuilds `cameras.json`, syncs go2rtc stream definitions, and asks the running Fenetre process to reload its configuration. If the reload signal fails, the config save still succeeds and the admin status line shows the reload warning.
 
-On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens the inline login form. The page marks login and secret fields with non-saving browser autocomplete hints, stores a short-lived public session token after login, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` or the Sunba safe PTZ profile send a single relative nudge command instead. The public page hides unsupported controls based on `ptz.capabilities`, so zoom-only cameras show only zoom controls.
+On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens the inline login form. The page marks login and secret fields with non-saving browser autocomplete hints, stores a short-lived public session token after login, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` send a single relative nudge command instead. The public page hides unsupported controls based on `ptz.capabilities`, so zoom-only cameras show only zoom controls.
 
 Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden. Numeric-only presets such as `1` with no real name are also hidden. Use the admin camera editor's **Load ONVIF Presets** button to import named presets into editable rows, then rename or remove rows before saving.
 

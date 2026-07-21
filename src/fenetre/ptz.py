@@ -177,7 +177,7 @@ def _profile_token_cache_key(ptz_config: Dict[str, Any]) -> str:
 def _operation_cooldown_s(ptz_config: Dict[str, Any]) -> float:
     configured = ptz_config.get("failure_cooldown_s")
     if configured is None or configured == "":
-        configured = 120 if _is_sunba_safe_mode(ptz_config) else 60
+        configured = 60
     return max(0, float(configured))
 
 
@@ -191,38 +191,17 @@ def _bool_config(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _ptz_compatibility(ptz_config: Dict[str, Any]) -> str:
-    value = (
-        ptz_config.get("compatibility")
-        or ptz_config.get("ptz_profile")
-        or ptz_config.get("vendor")
-        or ""
-    )
-    normalized = str(value).strip().lower().replace("-", "_")
-    if normalized in {"sunba", "sunba_safe", "sunba_601", "sunba_601_d20x"}:
-        return "sunba"
-    return normalized
-
-
-def _is_sunba_safe_mode(ptz_config: Dict[str, Any]) -> bool:
-    return _ptz_compatibility(ptz_config) == "sunba" or _bool_config(
-        ptz_config.get("sunba_safe_mode"), False
-    )
-
-
 def _effective_move_mode(ptz_config: Dict[str, Any]) -> str:
     configured = str(ptz_config.get("move_mode") or "").strip().lower()
     if configured in {"relative", "continuous"}:
         return configured
-    if _is_sunba_safe_mode(ptz_config):
-        return "relative"
     return "continuous"
 
 
 def _relative_move_scale(ptz_config: Dict[str, Any]) -> float:
     configured = ptz_config.get("relative_move_scale")
     if configured is None or configured == "":
-        configured = 0.03 if _is_sunba_safe_mode(ptz_config) else 0.1
+        configured = 0.1
     return max(0.001, min(0.25, float(configured)))
 
 
@@ -231,7 +210,7 @@ def _stop_disabled(ptz_config: Dict[str, Any]) -> bool:
         return _bool_config(ptz_config.get("disable_stop"), False)
     if "skip_stop" in ptz_config:
         return _bool_config(ptz_config.get("skip_stop"), False)
-    return _is_sunba_safe_mode(ptz_config)
+    return False
 
 
 def _ptz_capabilities(ptz_config: Dict[str, Any]) -> Dict[str, bool]:
@@ -275,8 +254,7 @@ def _raise_if_endpoint_in_backoff(ptz_config: Dict[str, Any]):
         return
     raise PTZError(
         f"ONVIF PTZ for {key} is cooling down for {remaining}s after a failed "
-        "PTZ operation. This prevents repeated attempts from rebooting fragile "
-        "camera firmware."
+        "PTZ operation. This prevents repeated attempts against a failing endpoint."
     )
 
 
@@ -336,8 +314,7 @@ def _call_ptz_operation(ptz_config: Dict[str, Any], description: str, call):
         _mark_endpoint_failure(ptz_config)
         raise PTZError(
             f"ONVIF PTZ {description} failed for {_endpoint_lock_key(ptz_config)}. "
-            "The command was not retried because this camera may reboot on "
-            f"malformed or unsupported PTZ requests. Original error: {exc}"
+            f"The command was not retried automatically. Original error: {exc}"
         ) from exc
     _clear_endpoint_failure(ptz_config)
     return result

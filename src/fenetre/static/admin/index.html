@@ -84,7 +84,6 @@
                     <option value="amcrest">Amcrest</option>
                     <option value="axis">Axis</option>
                     <option value="tplink">TP-Link</option>
-                    <option value="frigate">Frigate latest frame</option>
                 </select>
 
                 <label for="newCameraSnapshotTemplate">Snapshot template</label>
@@ -233,11 +232,6 @@
                             <option value="manual">Manual controls</option>
                             <option value="admin">Admin only</option>
                         </select>
-                        <label for="newCameraPtzCompatibility">PTZ profile</label>
-                        <select id="newCameraPtzCompatibility">
-                            <option value="">Generic ONVIF</option>
-                            <option value="sunba">Sunba safe</option>
-                        </select>
                         <label>Movement controls</label>
                         <div class="inline-options">
                             <label><input id="newCameraPtzCapabilityPan" type="checkbox" checked> Pan</label>
@@ -337,6 +331,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js?v=20260720-frigate-retry"></script>
+    <script src="/static/admin/app.js?v=20260720-ptz-cleanup"></script>
 </body>
 </html>
