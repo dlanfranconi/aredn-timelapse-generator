@@ -500,6 +500,88 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["ptz"]["password"], "existing-secret")
         self.assertEqual(camera["ptz"]["port"], 8899)
 
+    @patch("fenetre.admin_server.requests.put")
+    def test_update_camera_to_rtsp_capture_removes_stale_snapshot_fields(
+        self, mock_go2rtc_put
+    ):
+        mock_go2rtc_put.return_value.status_code = 200
+        mock_go2rtc_put.return_value.raise_for_status.return_value = None
+        self.test_config_data["cameras"] = {
+            "cam1": {
+                "url": "http://old-camera/snapshot.jpg",
+                "http_auth": {
+                    "type": "basic",
+                    "username": "admin",
+                    "password": "old-secret",
+                },
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/api/camera/cam1",
+            data=json.dumps(
+                {
+                    "name": "cam1",
+                    "capture_source": "rtsp",
+                    "url": "http://CAMERA_IP:HTTP_PORT/images/snapshot.jpg",
+                    "snapshot_username": "admin",
+                    "snapshot_password": "wrong-place",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "timeout_s": 20,
+                    "public": True,
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["cam1"]
+        self.assertNotIn("url", camera)
+        self.assertNotIn("http_auth", camera)
+        self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
+        self.assertIn("-allowed_media_types video", camera["local_command"])
+        self.assertIn("-an -map 0:v:0", camera["local_command"])
+
+    @patch("fenetre.admin_server.requests.put")
+    def test_update_camera_rebuilds_public_metadata_when_work_dir_is_set(
+        self, mock_go2rtc_put
+    ):
+        mock_go2rtc_put.return_value.status_code = 200
+        mock_go2rtc_put.return_value.raise_for_status.return_value = None
+        work_dir = tempfile.mkdtemp()
+        self.test_config_data["global"] = {
+            "work_dir": work_dir,
+            "timezone": "UTC",
+            "go2rtc": {"enabled": True},
+        }
+        self.test_config_data["cameras"] = {"cam1": {"url": "http://old"}}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/api/camera/cam1",
+            data=json.dumps(
+                {
+                    "name": "cam1",
+                    "capture_source": "rtsp",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "timeout_s": 20,
+                    "public": True,
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["cameras_json"]["ok"])
+        self.assertTrue(os.path.exists(os.path.join(work_dir, "cameras.json")))
+
     def test_storage_summary_reports_total_and_dry_run(self):
         work_dir = tempfile.mkdtemp()
         photos_dir = os.path.join(work_dir, "photos", "cam1")

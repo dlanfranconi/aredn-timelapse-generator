@@ -768,15 +768,6 @@ def snap(camera_name, camera_config: Dict):
 
         logger.info("%s: Fetching new picture.", camera_name)
 
-        # Capture picture from a URL. Useful for public cams or CCTV
-        url = camera_config.get("url")
-        timeout = camera_config.get("timeout_s")
-        if url is not None:
-            ua = global_config.get("user_agent", "")
-            return get_pic_from_url(
-                url, timeout, ua, camera_name, camera_config, global_config
-            )
-
         timeout = camera_config.get("timeout_s", 60)
         local_command = camera_local_command(camera_config)
 
@@ -784,6 +775,14 @@ def snap(camera_name, camera_config: Dict):
         if local_command is not None:
             return get_pic_from_local_command(
                 local_command, timeout, camera_name, camera_config
+            )
+
+        # Capture picture from a URL. Useful for public cams or CCTV
+        url = camera_config.get("url")
+        if url is not None:
+            ua = global_config.get("user_agent", "")
+            return get_pic_from_url(
+                url, timeout, ua, camera_name, camera_config, global_config
             )
 
         # gopro_model will call GoPro specific Classes defiend in gopro.py

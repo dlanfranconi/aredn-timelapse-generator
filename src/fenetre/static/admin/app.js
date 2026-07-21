@@ -360,6 +360,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.user_camera_access_replaced && Object.keys(result.user_camera_access_replaced).length) {
             details.push('updated user PTZ camera assignments');
         }
+        if (result.ui_sync) {
+            details.push(result.ui_sync.ok ? 'UI synced' : `UI sync warning: ${result.ui_sync.warning || 'unknown'}`);
+        }
+        if (result.cameras_json) {
+            details.push(result.cameras_json.ok ? 'cameras.json rebuilt' : `cameras.json warning: ${result.cameras_json.warning || 'unknown'}`);
+        }
+        if (result.reload) {
+            details.push(result.reload.ok ? 'app reload signaled' : `reload warning: ${result.reload.warning || 'unknown'}`);
+        }
         return ` (${details.join(', ')})`;
     }
 
@@ -1063,15 +1072,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const visibility = newCameraVisibility.value || 'public';
 
+        const captureSource = newCameraCaptureSource.value || 'snapshot';
         const payload = {
             name: newCameraName.value.trim(),
             description: newCameraDescription.value.trim(),
-            capture_source: newCameraCaptureSource.value || 'snapshot',
-            url: newCameraUrl.value.trim(),
-            snapshot_username: newCameraSnapshotUsername.value.trim(),
-            snapshot_password: newCameraSnapshotPassword.value,
+            capture_source: captureSource,
+            url: captureSource === 'snapshot' ? newCameraUrl.value.trim() : '',
+            snapshot_username: captureSource === 'snapshot' ? newCameraSnapshotUsername.value.trim() : '',
+            snapshot_password: captureSource === 'snapshot' ? newCameraSnapshotPassword.value : '',
             snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
-            rtsp_url: newCameraCaptureSource.value === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
+            rtsp_url: captureSource === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
             ptz_rtsp_url: checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
             public: visibility === 'public',
@@ -1287,8 +1297,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 throw new Error(result.error || `Failed to add camera with HTTP ${response.status}`);
             }
+            try {
+                const reloadResult = await requestApplicationReload();
+                result.reload = { ok: true, message: reloadResult.message || 'Reload signal sent successfully.' };
+            } catch (reloadError) {
+                result.reload = { ok: false, warning: reloadError.message };
+            }
             setStatus(
-                (result.message || `Camera '${payload.name}' saved. Reload the app to make it live.`) + configWriteDetails(result),
+                (result.message || `Camera '${payload.name}' saved.`) + configWriteDetails(result),
                 'success'
             );
             await fetchAndDisplayConfig();
@@ -1441,13 +1457,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
+            const result = await response.json();
+            try {
+                const reloadResult = await requestApplicationReload();
+                result.reload = { ok: true, message: reloadResult.message || 'Reload signal sent successfully.' };
+            } catch (reloadError) {
+                result.reload = { ok: false, warning: reloadError.message };
+            }
             loadedConfigData = updatedConfig;
             syncSiteInputsToRenderedConfig();
-            const result = await response.json();
             setStatus(
-                (result.message || 'Site settings saved. Reload the app and sync UI to publish them.') + configWriteDetails(result),
+                (result.message || 'Site settings saved.') + configWriteDetails(result),
                 'success'
             );
+            await fetchAndDisplayConfig();
         } catch (error) {
             console.error('Error saving site settings:', error);
             setStatus(`Error saving site settings: ${error.message}`, 'error');
@@ -1770,27 +1793,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
             const result = await response.json();
+            try {
+                const reloadResult = await requestApplicationReload();
+                result.reload = { ok: true, message: reloadResult.message || 'Reload signal sent successfully.' };
+            } catch (reloadError) {
+                result.reload = { ok: false, warning: reloadError.message };
+            }
             loadedConfigData = configData;
             syncSiteInputsFromConfig(configData);
             syncSiteInputsToRenderedConfig();
             setStatus((result.message || 'Configuration saved successfully!') + configWriteDetails(result), 'success');
+            await fetchAndDisplayConfig();
         } catch (error) {
             console.error('Error saving config:', error);
             setStatus(`Error saving configuration: ${error.message}`, 'error');
         }
     }
 
+    async function requestApplicationReload() {
+        const response = await fetch('/config/reload', {
+            method: 'POST',
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        return result;
+    }
+
     async function reloadApplication() {
         setStatus('Sending reload signal to application...', 'info');
         try {
-            const response = await fetch('/config/reload', {
-                method: 'POST',
-            });
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-            }
-            const result = await response.json();
+            const result = await requestApplicationReload();
             setStatus(result.message || 'Reload signal sent successfully!', 'success');
             await fetchAndDisplayConfig();
         } catch (error) {

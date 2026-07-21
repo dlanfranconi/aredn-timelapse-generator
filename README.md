@@ -363,6 +363,8 @@ cameras:
     snap_interval_s: 60
 ```
 
+When a camera is saved in RTSP capture mode, Fenetre removes stale snapshot URL and HTTP-auth fields from that camera entry and uses the generated/local RTSP command ahead of any legacy `url` value. This prevents placeholder snapshot templates such as `http://CAMERA_IP:HTTP_PORT/...` from being used after switching a camera to RTSP capture.
+
 If an RTSP/local-command camera logs `did not return a valid image`, the command ran but stdout was not a JPEG/PNG that Pillow could decode. Fenetre logs the command exit code, the first bytes of stdout, and the last stderr text so you can tell whether ffmpeg returned an auth error, protocol error, empty output, HTML, or another non-image response. To test the generated command manually, run an equivalent one-frame capture inside the container:
 
 ```bash
@@ -526,6 +528,8 @@ http://HOST:1984/
 ```
 
 The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a camera also has a PTZ live RTSP URL, including RTSP capture cameras with an optional low-resolution alignment substream, the same test captures one frame from that stream too and reports it separately.
+
+Saving a camera from the admin add/edit dialog writes `config.yaml`, syncs bundled public UI files, rebuilds `cameras.json`, syncs go2rtc stream definitions, and asks the running Fenetre process to reload its configuration. If the reload signal fails, the config save still succeeds and the admin status line shows the reload warning.
 
 On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens the inline login form. The page marks login and secret fields with non-saving browser autocomplete hints, stores a short-lived public session token after login, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` or the Sunba safe PTZ profile send a single relative nudge command instead. The public page hides unsupported controls based on `ptz.capabilities`, so zoom-only cameras show only zoom controls.
 

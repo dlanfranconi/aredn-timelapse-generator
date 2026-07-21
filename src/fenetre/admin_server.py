@@ -27,7 +27,6 @@ from fenetre.auth import (
     user_has_password,
 )
 from fenetre.cameras_metadata import write_cameras_metadata
-from fenetre.config import config_load
 from fenetre.gopro import GoPro
 from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
@@ -317,6 +316,55 @@ def _config_write_metadata(config_file_path: str, backup_path: str | None) -> di
         "size_bytes": stat.st_size,
         "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
     }
+
+
+def _sync_public_ui_files(config: dict) -> dict:
+    work_dir = (config.get("global") or {}).get("work_dir")
+    if not work_dir:
+        return {"ok": False, "warning": "work_dir not set in global config."}
+    copy_public_html_files(work_dir, config.get("global", {}))
+    return {"ok": True, "message": "UI files synchronized successfully."}
+
+
+def _rebuild_cameras_json(config: dict) -> dict:
+    global_config = config.get("global") or {}
+    work_dir = global_config.get("work_dir")
+    if not work_dir:
+        return {"ok": False, "warning": "work_dir not set in global configuration."}
+    cameras_json_path = os.path.join(work_dir, "cameras.json")
+    backup_path = None
+    if os.path.exists(cameras_json_path):
+        backup_path = (
+            f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
+        )
+        os.replace(cameras_json_path, backup_path)
+    write_cameras_metadata(
+        config.get("cameras") or {},
+        global_config,
+        config.get("timelapse") or {},
+        cameras_json_path,
+    )
+    result = {
+        "ok": True,
+        "message": "cameras.json rebuilt successfully.",
+        "path": cameras_json_path,
+    }
+    if backup_path:
+        result["backup"] = os.path.basename(backup_path)
+    return result
+
+
+def _publish_public_artifacts(config: dict) -> dict:
+    result = {}
+    try:
+        result["ui_sync"] = _sync_public_ui_files(config)
+    except Exception as exc:
+        result["ui_sync"] = {"ok": False, "warning": str(exc)}
+    try:
+        result["cameras_json"] = _rebuild_cameras_json(config)
+    except Exception as exc:
+        result["cameras_json"] = {"ok": False, "warning": str(exc)}
+    return result
 
 
 def _local_go2rtc_api_base(runtime_config: dict | None) -> str | None:
@@ -629,7 +677,7 @@ def _build_camera_config(
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),
     }
-    if url:
+    if source_type == "snapshot" and url:
         camera["url"] = url
         auth_username = (payload.get("snapshot_username") or "").strip()
         auth_password = payload.get("snapshot_password")
@@ -1060,7 +1108,8 @@ def update_config():
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         go2rtc_result = _sync_go2rtc_runtime(new_config_json, previous_config)
-        message = "Configuration updated successfully (saved as YAML). Reload is required to apply Fenetre capture changes."
+        publish_result = _publish_public_artifacts(new_config_json)
+        message = "Configuration updated successfully (saved as YAML). Public UI files and cameras.json were updated."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
         return (
@@ -1068,6 +1117,7 @@ def update_config():
                 {
                     "message": message,
                     "go2rtc": go2rtc_result,
+                    **publish_result,
                     "user_camera_access_removed": user_access_removed,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
@@ -1107,13 +1157,17 @@ def update_deployment_name():
             ui_config["public_site"] = bool(payload.get("public_site"))
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
-        message = "Site settings updated. Reload and sync UI to publish the change."
+        publish_result = _publish_public_artifacts(config)
+        message = (
+            "Site settings updated. Public UI files and cameras.json were updated."
+        )
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
         return (
             jsonify(
                 {
                     "message": message,
+                    **publish_result,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
@@ -1307,12 +1361,14 @@ def add_camera():
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
         go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
         return (
             jsonify(
                 {
-                    "message": f"Camera '{name}' added. Reload the app to make Fenetre capture changes live.",
+                    "message": f"Camera '{name}' added. Public UI files and cameras.json were updated.",
                     "camera_name": name,
                     "go2rtc": go2rtc_result,
+                    **publish_result,
                     **metadata,
                 }
             ),
@@ -1365,11 +1421,13 @@ def update_camera(camera_name):
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
         go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
         return jsonify(
             {
-                "message": f"Camera '{name}' updated. Reload the app to make Fenetre capture changes live.",
+                "message": f"Camera '{name}' updated. Public UI files and cameras.json were updated.",
                 "camera_name": name,
                 "go2rtc": go2rtc_result,
+                **publish_result,
                 "user_camera_access_removed": user_access_removed,
                 **metadata,
             }
@@ -1422,11 +1480,10 @@ def rename_camera():
 def sync_ui():
     try:
         _, config = _load_effective_config_with_raw()
-        work_dir = config.get("global", {}).get("work_dir")
-        if not work_dir:
-            return jsonify({"error": "work_dir not set in global config."}), 500
-        copy_public_html_files(work_dir, config.get("global", {}))
-        return jsonify({"message": "UI files synchronized successfully."}), 200
+        result = _sync_public_ui_files(config)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("warning")}), 500
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": f"Error synchronizing UI files: {str(e)}"}), 500
 
@@ -1578,27 +1635,15 @@ def reload_config():
 @app.route("/api/cameras_json/rebuild", methods=["POST"])
 def rebuild_cameras_json():
     try:
-        config_file_path = _config_file_path()
-        _, cameras_config, global_config, _, timelapse_config = config_load(
-            config_file_path
-        )
-        work_dir = global_config.get("work_dir")
-        if not work_dir:
-            return jsonify({"error": "work_dir not set in global configuration."}), 500
-        cameras_json_path = os.path.join(work_dir, "cameras.json")
-        backup_path = None
-        if os.path.exists(cameras_json_path):
-            backup_path = (
-                f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
-            )
-            os.replace(cameras_json_path, backup_path)
-        write_cameras_metadata(
-            cameras_config, global_config, timelapse_config, cameras_json_path
-        )
-        message = "cameras.json rebuilt successfully."
-        if backup_path:
-            message += f" Previous file saved as {os.path.basename(backup_path)}."
-        return jsonify({"message": message}), 200
+        _, config = _load_effective_config_with_raw()
+        result = _rebuild_cameras_json(config)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("warning")}), 500
+        message = result["message"]
+        if result.get("backup"):
+            message += f" Previous file saved as {result['backup']}."
+        result["message"] = message
+        return jsonify(result), 200
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:
