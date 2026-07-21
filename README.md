@@ -367,11 +367,14 @@ If an RTSP/local-command camera logs `did not return a valid image`, the command
 
 ```bash
 docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
+  -allowed_media_types video \
   -i 'rtsp://USER:PASSWORD@camera.local:554/stream1' \
-  -frames:v 1 -f image2pipe -vcodec mjpeg - > /tmp/test.jpg"
+  -an -map 0:v:0 -frames:v 1 -f image2pipe -vcodec mjpeg - > /tmp/test.jpg"
 ```
 
 Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an error, fix the RTSP URL, credentials, stream path, or transport before adding it back to Fenetre.
+
+Fenetre-generated RTSP snapshot commands are video-only. This avoids negotiating or decoding RTSP audio tracks on cameras where audio SETUP/probing is unstable. Older saved Fenetre-generated RTSP commands are upgraded in memory at capture time when `rtsp_url` is present; custom `local_command` values are left unchanged.
 
 `rtsp_url` and `ptz_rtsp_url` are used for different workflows:
 

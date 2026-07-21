@@ -32,6 +32,7 @@ from fenetre.gopro import GoPro
 from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.ptz import discover_presets, set_lock
+from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
 from fenetre.ui_utils import copy_public_html_files
 
 go2rtc_spawned_process = None
@@ -548,13 +549,6 @@ GUIDED_CAMERA_KEYS = {
 }
 
 
-def _rtsp_snapshot_command(rtsp_url: str) -> str:
-    return (
-        "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp "
-        f"-i {shlex.quote(rtsp_url)} -frames:v 1 -f image2pipe -vcodec mjpeg -"
-    )
-
-
 def _fetch_local_command_bytes(command: str, timeout_s: int = 15):
     result = subprocess.run(
         shlex.split(command),
@@ -653,7 +647,11 @@ def _build_camera_config(
     if payload.get("ptz_rtsp_url"):
         camera["ptz_rtsp_url"] = str(payload.get("ptz_rtsp_url")).strip()
     if source_type == "rtsp":
-        camera["local_command"] = local_command or _rtsp_snapshot_command(rtsp_url)
+        command = local_command or rtsp_snapshot_command(rtsp_url)
+        camera["local_command"] = (
+            camera_local_command({"local_command": command, "rtsp_url": rtsp_url})
+            or command
+        )
     description = (payload.get("description") or "").strip()
     if description:
         camera["description"] = description
@@ -1182,7 +1180,7 @@ def test_snapshot_url():
             }
         if local_command or rtsp_url:
             image_bytes, content_type, size = _fetch_local_command_bytes(
-                local_command or _rtsp_snapshot_command(rtsp_url),
+                local_command or rtsp_snapshot_command(rtsp_url),
                 timeout_s=timeout_s,
             )
         elif url:
@@ -1197,7 +1195,7 @@ def test_snapshot_url():
         stream_tests = []
         if ptz_rtsp_url:
             stream_bytes, _, stream_size = _fetch_local_command_bytes(
-                _rtsp_snapshot_command(ptz_rtsp_url),
+                rtsp_snapshot_command(ptz_rtsp_url),
                 timeout_s=timeout_s,
             )
             stream_tests.append(
@@ -1446,7 +1444,7 @@ def capture_for_ui(camera_name):
             )
         camera_config = config["cameras"][camera_name]
         url = camera_config.get("url")
-        local_command = camera_config.get("local_command")
+        local_command = camera_local_command(camera_config)
         gopro_ip = camera_config.get("gopro_ip")
         if not url and not local_command and not gopro_ip:
             return (

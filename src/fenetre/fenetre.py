@@ -78,6 +78,7 @@ from fenetre.camera_utils import (
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
+from fenetre.rtsp_capture import camera_local_command
 from fenetre.ptz import (
     PTZBackendUnavailable,
     PTZError,
@@ -777,7 +778,7 @@ def snap(camera_name, camera_config: Dict):
             )
 
         timeout = camera_config.get("timeout_s", 60)
-        local_command = camera_config.get("local_command")
+        local_command = camera_local_command(camera_config)
 
         # local_command is very flexible, it could be anything from running raspistill locally, to extracting a picture from a stream with ffmpeg, etc...
         if local_command is not None:

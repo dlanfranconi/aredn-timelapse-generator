@@ -386,6 +386,8 @@ class ConfigServerTestCase(unittest.TestCase):
         camera = updated_data_yaml["cameras"]["rtsp-cam"]
         self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
         self.assertIn("ffmpeg", camera["local_command"])
+        self.assertIn("-allowed_media_types video", camera["local_command"])
+        self.assertIn("-an -map 0:v:0", camera["local_command"])
         self.assertTrue(updated_data_yaml["global"]["go2rtc"]["enabled"])
         self.assertTrue(response.json["go2rtc"]["api_synced"])
         mock_go2rtc_put.assert_called_once()
