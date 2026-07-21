@@ -592,6 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraCacheBust', true);
         setCheckboxValue('newCameraMozjpeg', true);
         setCheckboxValue('newCameraTimelapse', true);
+        setCheckboxValue('newCameraGo2rtcEnabled', true);
         setInputValue('newCameraFailureRetry', 60);
         setInputValue('newCameraTimeout', 15);
         setCheckboxValue('newCameraFixedIntervalEnabled', true);
@@ -683,6 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
         setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
         setCheckboxValue('newCameraTimelapse', camera.timelapse_enabled !== false && camera.generate_timelapse !== false);
+        setCheckboxValue('newCameraGo2rtcEnabled', camera.go2rtc_enabled !== false);
 
         setCheckboxValue('newCameraFixedIntervalEnabled', camera.snap_interval_s !== undefined);
         setInputValue('newCameraSnapInterval', camera.snap_interval_s ?? 60);
@@ -1088,6 +1090,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gather_metrics: true,
             mozjpeg_optimize: checked('newCameraMozjpeg'),
             timelapse_enabled: checked('newCameraTimelapse'),
+            go2rtc_enabled: checked('newCameraGo2rtcEnabled'),
             require_test: requireTest,
             postprocessing
         };

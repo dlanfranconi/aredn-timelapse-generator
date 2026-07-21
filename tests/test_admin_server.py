@@ -19,7 +19,7 @@ from fenetre.auth import (
     hash_password,
     reset_admin_user,
 )
-from fenetre.admin_server import app as flask_app
+from fenetre.admin_server import _sync_go2rtc_runtime, app as flask_app
 from fenetre.ptz import set_lock
 
 
@@ -398,6 +398,79 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         mock_fetch.assert_called_once_with(
             camera["local_command"], timeout_s=camera["timeout_s"]
+        )
+
+    @patch("fenetre.admin_server.requests.put")
+    @patch("fenetre.admin_server._fetch_local_command_bytes")
+    def test_add_camera_can_disable_go2rtc_live_view(self, mock_fetch, mock_go2rtc_put):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "disabled-live-cam",
+                    "capture_source": "rtsp",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "go2rtc_enabled": False,
+                    "require_test": True,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["disabled-live-cam"]
+        self.assertFalse(camera["go2rtc_enabled"])
+        self.assertNotIn("go2rtc", updated_data_yaml.get("global", {}))
+        self.assertFalse(response.json["go2rtc"]["enabled"])
+        mock_go2rtc_put.assert_not_called()
+
+    @patch("fenetre.admin_server.requests.delete")
+    def test_sync_go2rtc_removes_last_disabled_live_view_stream(self, mock_delete):
+        mock_delete.return_value.status_code = 200
+        output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".yaml")
+        output_file.write(b"streams:\n  fenetre_cam1: rtsp://old\n")
+        output_file.close()
+        old_output = os.environ.get("FENETRE_GO2RTC_CONFIG")
+        os.environ["FENETRE_GO2RTC_CONFIG"] = output_file.name
+        previous_config = {
+            "global": {"go2rtc": {"enabled": True, "api_listen": ":1984"}},
+            "cameras": {"cam1": {"rtsp_url": "rtsp://admin:secret@camera/11"}},
+        }
+        current_config = {
+            "global": {"go2rtc": {"enabled": True, "api_listen": ":1984"}},
+            "cameras": {
+                "cam1": {
+                    "rtsp_url": "rtsp://admin:secret@camera/11",
+                    "go2rtc_enabled": False,
+                }
+            },
+        }
+
+        try:
+            result = _sync_go2rtc_runtime(current_config, previous_config)
+            removed_config_file = not os.path.exists(output_file.name)
+        finally:
+            if old_output is None:
+                os.environ.pop("FENETRE_GO2RTC_CONFIG", None)
+            else:
+                os.environ["FENETRE_GO2RTC_CONFIG"] = old_output
+            if os.path.exists(output_file.name):
+                os.unlink(output_file.name)
+
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["streams"], [])
+        self.assertEqual(result["removed_streams"], ["fenetre_cam1"])
+        self.assertTrue(result["api_synced"])
+        self.assertTrue(removed_config_file)
+        mock_delete.assert_called_once()
+        self.assertEqual(
+            mock_delete.call_args.args[0], "http://127.0.0.1:1984/api/streams"
+        )
+        self.assertEqual(
+            mock_delete.call_args.kwargs["params"], {"src": "fenetre_cam1"}
         )
 
     @patch("fenetre.admin_server._fetch_local_command_bytes")

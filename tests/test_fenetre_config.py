@@ -168,6 +168,22 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(cameras_conf["cam1"]["capture_failure_interval_s"], 300)
 
+    def test_config_load_camera_go2rtc_enabled(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1",
+                    "go2rtc_enabled": False,
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        self.assertFalse(cameras_conf["cam1"]["go2rtc_enabled"])
+
     def test_config_load_camera_http_auth(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
@@ -546,6 +562,28 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
 
+    def test_cameras_metadata_omits_disabled_camera_go2rtc(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                    "go2rtc_enabled": False,
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984/",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        self.assertNotIn("go2rtc", metadata["cameras"][0])
+
     def test_config_load_go2rtc_global_settings(self):
         test_data = {
             "global": {
@@ -625,6 +663,33 @@ class FenetreConfigTestCase(unittest.TestCase):
                 "mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2",
                 "mesh_Ridge_Camera_full": "rtsp://admin:snapshot@example.test/stream1",
             },
+        )
+
+    def test_go2rtc_runtime_config_skips_disabled_camera_streams(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {
+                    "go2rtc": {
+                        "enabled": True,
+                        "stream_name_prefix": "mesh_",
+                    }
+                },
+                "cameras": {
+                    "Enabled Camera": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/enabled",
+                    },
+                    "Disabled Camera": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/disabled",
+                        "ptz_rtsp_url": "rtsp://admin:secret@example.test/disabled-sub",
+                        "go2rtc_enabled": False,
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            runtime_config["streams"],
+            {"mesh_Enabled_Camera": "rtsp://admin:secret@example.test/enabled"},
         )
 
     def test_go2rtc_runtime_config_writer(self):

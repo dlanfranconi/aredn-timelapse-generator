@@ -998,6 +998,12 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             errors,
             default=True,
         )
+        cam_out["go2rtc_enabled"] = _bool(
+            cam.get("go2rtc_enabled"),
+            f"cameras.{name}.go2rtc_enabled",
+            errors,
+            default=True,
+        )
         if cam.get("unavailable_command") is not None:
             cam_out["unavailable_command"] = _str(
                 cam.get("unavailable_command"),

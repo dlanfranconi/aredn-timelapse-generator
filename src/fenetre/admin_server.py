@@ -439,31 +439,31 @@ def _sync_go2rtc_runtime(
     previous_config: dict | None = None,
 ) -> dict:
     runtime_config = build_go2rtc_runtime_config(config)
-    output_path = os.environ.get("FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml")
-    result = {
-        "enabled": bool(runtime_config),
-        "config_path": output_path,
-        "streams": [],
-        "removed_streams": [],
-        "api_synced": False,
-        "warning": None,
-    }
-    if not runtime_config:
-        return result
-
-    with open(output_path, "w") as output_file:
-        yaml.safe_dump(runtime_config, output_file, sort_keys=False)
-
-    streams = runtime_config.get("streams") or {}
-    result["streams"] = sorted(streams.keys())
     previous_runtime_config = (
         build_go2rtc_runtime_config(previous_config) if previous_config else None
     )
+    output_path = os.environ.get("FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml")
+    streams = (runtime_config or {}).get("streams") or {}
     previous_streams = (previous_runtime_config or {}).get("streams") or {}
     removed_streams = sorted(set(previous_streams) - set(streams))
-    result["removed_streams"] = removed_streams
+    result = {
+        "enabled": bool(runtime_config),
+        "config_path": output_path,
+        "streams": sorted(streams.keys()),
+        "removed_streams": removed_streams,
+        "api_synced": False,
+        "warning": None,
+    }
+    if not runtime_config and not removed_streams:
+        return result
 
-    api_base = _local_go2rtc_api_base(runtime_config)
+    if runtime_config:
+        with open(output_path, "w") as output_file:
+            yaml.safe_dump(runtime_config, output_file, sort_keys=False)
+    elif os.path.exists(output_path):
+        os.remove(output_path)
+
+    api_base = _local_go2rtc_api_base(runtime_config or previous_runtime_config)
     if not api_base:
         result["warning"] = "go2rtc API listen address is disabled."
         return result
@@ -472,6 +472,9 @@ def _sync_go2rtc_runtime(
         _sync_go2rtc_api(api_base, streams, removed_streams)
         result["api_synced"] = True
     except requests.RequestException as exc:
+        if not runtime_config:
+            result["warning"] = f"go2rtc API sync failed: {exc}"
+            return result
         start_warning = _start_go2rtc_if_needed(output_path)
         if start_warning:
             result["warning"] = f"go2rtc API sync failed: {exc}; {start_warning}"
@@ -487,6 +490,8 @@ def _sync_go2rtc_runtime(
 
 def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
     if not (camera.get("rtsp_url") or camera.get("ptz_rtsp_url")):
+        return
+    if camera.get("go2rtc_enabled") is False:
         return
     global_config = config.setdefault("global", {})
     if not isinstance(global_config, dict):
@@ -676,6 +681,7 @@ def _build_camera_config(
         "capture_failure_interval_s": int(
             payload.get("capture_failure_interval_s") or 60
         ),
+        "go2rtc_enabled": bool(payload.get("go2rtc_enabled", True)),
         "cache_bust": bool(payload.get("cache_bust", True)),
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),

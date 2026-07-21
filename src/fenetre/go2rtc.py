@@ -98,6 +98,8 @@ def build_go2rtc_metadata(
     base_url = str(config.get("base_url") or "").rstrip("/")
     if not config.get("enabled") or not base_url:
         return None
+    if camera_config.get("go2rtc_enabled") is False:
+        return None
 
     alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
         "rtsp_url"
@@ -138,6 +140,8 @@ def build_go2rtc_runtime_config(
     if isinstance(cameras, dict):
         for camera_name, camera_config in cameras.items():
             if not isinstance(camera_config, dict):
+                continue
+            if camera_config.get("go2rtc_enabled") is False:
                 continue
             alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
                 "rtsp_url"

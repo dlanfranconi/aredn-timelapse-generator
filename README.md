@@ -388,6 +388,8 @@ Fenetre-generated RTSP snapshot commands are video-only. This avoids negotiating
 
 For an RTSP-only camera, set only `rtsp_url`; do not duplicate the same URL into `ptz_rtsp_url`. RTSP video URLs should normally use the camera's RTSP service, usually port `554`, for example `rtsp://user:password@camera.local:554/stream1`. For a snapshot camera with PTZ controls, keep the snapshot URL in `url`, set `ptz_rtsp_url` to a low-res/substream for aiming, and optionally set `rtsp_url` to the high-res/main stream for the **Open full live view** link. If both RTSP fields are set and differ, Fenetre creates two go2rtc streams: one alignment stream and one `_full` stream.
 
+If a camera is fragile, private, or should only be used for still-image capture, disable **Enable RTSP live view** in the admin camera form or set `go2rtc_enabled: false`. Fenetre will keep snapshot capture and timelapse behavior intact, but it will omit that camera from generated go2rtc streams and from authenticated live-view metadata.
+
 For PTZ alignment, the Docker image includes go2rtc and starts it automatically when all of these are true:
 
 - `global.go2rtc.enabled: true`
@@ -418,6 +420,7 @@ global:
 cameras:
   Ridge-PTZ:
     url: http://ridge-camera.local/snapshot.jpg
+    go2rtc_enabled: true
     rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream1
     ptz_rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream2
     ptz:
