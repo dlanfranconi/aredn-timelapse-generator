@@ -537,6 +537,46 @@ class ConfigServerTestCase(unittest.TestCase):
         preview = self.app.get("/api/launches/preview")
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.json["events"][0]["plans"][0]["id"], "vandenberg")
+        self.assertEqual(
+            preview.json["events"][0]["plans"][0]["camera_details"][0]["name"],
+            "cam1",
+        )
+
+        unsaved_config = {
+            "global": {
+                "launch_workflow": {
+                    "enabled": True,
+                    "dry_run": True,
+                    "lookahead_hours": 1000000,
+                    "schedule_events": [
+                        {
+                            "id": "launch-2",
+                            "name": "Unsaved Launch",
+                            "net": "2099-07-21T12:00:00Z",
+                            "provider": "SpaceX",
+                            "location": "Vandenberg",
+                        }
+                    ],
+                    "plans": {
+                        "unsaved": {
+                            "match": {"providers": ["SpaceX"]},
+                            "cameras": {"cam1": {"preset": "launch"}},
+                        }
+                    },
+                }
+            },
+            "cameras": self.test_config_data["cameras"],
+        }
+        unsaved_preview = self.app.post(
+            "/api/launches/preview",
+            data=json.dumps({"config": unsaved_config}),
+            content_type="application/json",
+        )
+        self.assertEqual(unsaved_preview.status_code, 200)
+        self.assertEqual(
+            unsaved_preview.json["events"][0]["name"],
+            "Unsaved Launch",
+        )
 
         with patch("fenetre.admin_server.run_due_launch_actions") as mock_run_due:
             mock_run_due.return_value = {"ok": True, "enabled": True, "actions": []}

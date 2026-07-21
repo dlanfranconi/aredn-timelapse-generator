@@ -593,7 +593,9 @@ curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
   -d '{"camera":"Reolink-PTZ","profile":"launch","dry_run":true}'
 ```
 
-Rocket-launch automation is configured under `global.launch_workflow`. It is disabled by default and defaults to `dry_run: true`; keep dry-run enabled until the preview and due actions look right. Schedule input can come from inline `schedule_events`, a local `schedule_file`, or a JSON `schedule_url`. Events are normalized from common fields such as `net`, `date_utc`, provider, pad, and location, then matched to one or more plans.
+Rocket-launch automation is configured under `global.launch_workflow`. It is disabled by default and defaults to `dry_run: true`; keep dry-run enabled until the preview and due actions look right. Schedule input can come from inline `schedule_events`, a local `schedule_file`, or a JSON `schedule_url`. The recommended live source is Launch Library 2.3.0 upcoming launches, for example `https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net`. Keep `refresh_interval_s` conservative because unauthenticated Launch Library requests are rate limited. Events are normalized from common fields such as `net`, `date_utc`, provider, pad, and location, then matched to one or more plans.
+
+Use the admin **Launch Automation** panel to enable or disable the workflow, preview upcoming launches, and mark cameras as rocket launch cameras. When the workflow is disabled, Fenetre does not poll the launch schedule and the public timelapse behavior stays unchanged. The admin launch dashboard at `http://HOST:8889/static/admin/launches.html` shows the upcoming matched launch times, relevant cameras, presets, recording status, and configured recording download paths.
 
 ```yaml
 global:
@@ -605,7 +607,7 @@ global:
     default_post_seconds: 900
     lookahead_hours: 168
     state_file: /srv/fenetre/data/launch_workflow_state.json
-    schedule_url: https://example.invalid/launches.json
+    schedule_url: https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net
     plans:
       vandenberg-spacex:
         match:

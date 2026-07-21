@@ -274,6 +274,15 @@ def preview_launch_workflow(
 ) -> Dict[str, Any]:
     workflow = launch_workflow_config(config)
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    enabled = _bool_config(workflow.get("enabled"), False)
+    if not enabled:
+        return {
+            "ok": True,
+            "enabled": False,
+            "dry_run": _bool_config(workflow.get("dry_run"), True),
+            "now": now.isoformat(),
+            "events": [],
+        }
     default_pre = int(workflow.get("default_pre_seconds") or 60)
     default_post = int(workflow.get("default_post_seconds") or 600)
     lookahead_seconds = int(float(workflow.get("lookahead_hours") or 168) * 3600)
@@ -291,17 +300,46 @@ def preview_launch_workflow(
                 continue
             pre_seconds = int(plan.get("pre_seconds") or default_pre)
             post_seconds = int(plan.get("post_seconds") or default_post)
+            camera_plans = (
+                plan.get("cameras") if isinstance(plan.get("cameras"), dict) else {}
+            )
+            camera_details = []
+            for camera_name, camera_plan in sorted(camera_plans.items()):
+                if not isinstance(camera_plan, dict):
+                    continue
+                record = camera_plan.get("record") or {}
+                if not isinstance(record, dict):
+                    record = {}
+                camera_details.append(
+                    {
+                        "name": str(camera_name),
+                        "preset": str(camera_plan.get("preset") or ""),
+                        "image_profile": str(camera_plan.get("image_profile") or ""),
+                        "pause_tour": _bool_config(
+                            camera_plan.get("pause_tour"), False
+                        ),
+                        "record": bool(
+                            record.get("start_url")
+                            or record.get("start_command")
+                            or record.get("stop_url")
+                            or record.get("stop_command")
+                            or record.get("download_url")
+                            or record.get("download_command")
+                        ),
+                        "download_path": str(record.get("download_path") or ""),
+                        "skip_when_full_viewers": _bool_config(
+                            record.get("skip_when_full_viewers"), False
+                        ),
+                    }
+                )
             event_plans.append(
                 {
                     "id": plan_id,
                     "phase": _phase_for_event(event, now, pre_seconds, post_seconds),
                     "pre_seconds": pre_seconds,
                     "post_seconds": post_seconds,
-                    "cameras": (
-                        sorted((plan.get("cameras") or {}).keys())
-                        if isinstance(plan.get("cameras"), dict)
-                        else []
-                    ),
+                    "cameras": [camera["name"] for camera in camera_details],
+                    "camera_details": camera_details,
                 }
             )
         events.append(
@@ -310,7 +348,7 @@ def preview_launch_workflow(
         )
     return {
         "ok": True,
-        "enabled": _bool_config(workflow.get("enabled"), False),
+        "enabled": enabled,
         "dry_run": _bool_config(workflow.get("dry_run"), True),
         "now": now.isoformat(),
         "events": events,

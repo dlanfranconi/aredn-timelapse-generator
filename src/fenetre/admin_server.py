@@ -1363,7 +1363,12 @@ def apply_camera_image_profile():
 @app.route("/api/launches/preview", methods=["GET", "POST"])
 def preview_launches():
     try:
-        _, config = _load_effective_config_with_raw()
+        payload = request.get_json(silent=True) or {}
+        config = (
+            payload.get("config") if isinstance(payload.get("config"), dict) else None
+        )
+        if config is None:
+            _, config = _load_effective_config_with_raw()
         return jsonify(preview_launch_workflow(config))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

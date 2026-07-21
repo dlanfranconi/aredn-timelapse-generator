@@ -23,7 +23,8 @@ h1 {
     text-align: center;
 }
 
-.controls button {
+.controls button,
+.button-link {
     padding: 10px 15px;
     margin: 5px;
     border: none;
@@ -31,6 +32,11 @@ h1 {
     cursor: pointer;
     background-color: #007bff;
     color: white;
+}
+
+.button-link {
+    display: inline-block;
+    text-decoration: none;
 }
 
 .controls button:disabled {
@@ -43,6 +49,21 @@ h1 {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.section-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.subsection-header {
+    margin-top: 16px;
+}
+
+.subsection-header h3 {
+    margin: 0;
+    font-size: 1rem;
 }
 
 #statusMessage {
@@ -90,6 +111,175 @@ h1 {
     padding: 8px;
     border-radius: 4px;
     border: 1px solid #ccc;
+}
+
+.launch-settings fieldset {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin: 14px 0;
+    padding: 12px;
+    background: #fff;
+}
+
+.launch-settings legend {
+    font-weight: bold;
+    padding: 0 4px;
+}
+
+.launch-camera-list {
+    display: grid;
+    gap: 12px;
+}
+
+.launch-camera-card {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    padding: 12px;
+}
+
+.launch-camera-card.disabled {
+    opacity: 0.68;
+}
+
+.launch-camera-card h4 {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.launch-camera-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.launch-camera-enabled {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.launch-camera-fields {
+    display: grid;
+    grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
+    gap: 10px 14px;
+    align-items: center;
+}
+
+.launch-camera-fields input,
+.launch-camera-fields select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.launch-inline-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.launch-inline-options label {
+    align-items: center;
+    display: inline-flex;
+    gap: 5px;
+}
+
+.launch-preview-result {
+    margin-top: 14px;
+}
+
+.launch-preview-list {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.launch-preview-list li {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.launch-preview-list small {
+    color: #666;
+}
+
+.launch-preview-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e7f3ff;
+    color: #0056b3;
+    font-size: 0.85rem;
+}
+
+.launch-dashboard {
+    display: grid;
+    gap: 12px;
+}
+
+.launch-event-card {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.launch-event-header,
+.launch-plan-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.launch-event-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.launch-dashboard-plan {
+    display: grid;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+}
+
+.launch-dashboard-cameras {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+}
+
+.launch-camera-pill {
+    display: grid;
+    gap: 3px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #f9f9f9;
+}
+
+.launch-camera-pill span,
+.launch-camera-pill small,
+.launch-event-card small {
+    color: #666;
+}
+
+.launch-empty {
+    color: #666;
+    padding: 8px 0;
 }
 
 .storage-summary-body {
@@ -474,10 +664,19 @@ h1 {
 @media (max-width: 760px) {
     .form-grid,
     .option-content,
+    .launch-camera-fields,
     .user-manager,
     .user-form,
     #configFormContainer .form-row {
         grid-template-columns: 1fr;
+    }
+
+    .section-header,
+    .launch-camera-header,
+    .launch-event-header,
+    .launch-plan-title {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
     .checkbox-line,

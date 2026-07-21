@@ -21,6 +21,7 @@
             <button id="rebuildCamerasBtn">Rebuild cameras.json</button>
             <button id="manageUsersBtn" type="button">Manage Users</button>
             <button id="addCameraBtn" type="button">Add New Camera</button>
+            <a class="button-link" href="/static/admin/launches.html">Launch Dashboard</a>
             <button id="adminLogoutBtn" type="button">Logout</button>
         </div>
 
@@ -56,6 +57,71 @@
                 <select id="editCameraSelect">
                     <option value="">Load config to select a camera</option>
                 </select>
+            </div>
+        </section>
+
+        <section class="quick-settings launch-settings">
+            <div class="section-header">
+                <h2>Launch Automation</h2>
+                <div class="section-actions">
+                    <button id="previewLaunchWorkflowBtn" type="button" disabled>Preview Launches</button>
+                    <button id="saveLaunchWorkflowBtn" type="button" disabled>Save Launch Workflow</button>
+                </div>
+            </div>
+
+            <div class="launch-enable-row">
+                <label><input id="launchWorkflowEnabled" type="checkbox"> Enable workflow</label>
+            </div>
+
+            <div id="launchWorkflowDetails" hidden>
+            <div class="form-grid launch-source-grid">
+                <label><input id="launchWorkflowDryRun" type="checkbox" checked> Dry run only</label>
+                <span></span>
+
+                <label for="launchScheduleUrl">Schedule URL</label>
+                <input id="launchScheduleUrl" type="text" autocomplete="off" placeholder="https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net">
+
+                <label for="launchRefreshInterval">Refresh seconds</label>
+                <input id="launchRefreshInterval" type="number" min="10" value="900">
+
+                <label for="launchLookaheadHours">Lookahead hours</label>
+                <input id="launchLookaheadHours" type="number" min="1" step="1" value="168">
+
+                <label for="launchStateFile">State file</label>
+                <input id="launchStateFile" type="text" autocomplete="off" placeholder="/srv/fenetre/data/launch_workflow_state.json">
+            </div>
+
+            <fieldset class="launch-plan-box">
+                <legend>Match and Timing</legend>
+                <div class="form-grid">
+                    <label for="launchPlanId">Plan ID</label>
+                    <input id="launchPlanId" type="text" autocomplete="off" value="vandenberg-spacex">
+
+                    <label for="launchProviders">Provider match</label>
+                    <input id="launchProviders" type="text" autocomplete="off" value="SpaceX">
+
+                    <label for="launchLocations">Location match</label>
+                    <input id="launchLocations" type="text" autocomplete="off" value="Vandenberg">
+
+                    <label for="launchPads">Pad match</label>
+                    <input id="launchPads" type="text" autocomplete="off" placeholder="Optional, comma separated">
+
+                    <label for="launchPreSeconds">Pre-launch seconds</label>
+                    <input id="launchPreSeconds" type="number" min="0" value="60">
+
+                    <label for="launchPostSeconds">Post-launch seconds</label>
+                    <input id="launchPostSeconds" type="number" min="0" value="900">
+                </div>
+            </fieldset>
+
+            <div class="section-header subsection-header">
+                <h3>PTZ Cameras</h3>
+            </div>
+            <div id="launchCameraPlans" class="launch-camera-list">
+                Load the config to select launch cameras.
+            </div>
+
+            <div id="launchPreviewResult" class="launch-preview-result"></div>
             </div>
         </section>
 
@@ -332,6 +398,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js?v=20260720-go2rtc-toggle"></script>
+    <script src="/static/admin/app.js?v=20260721-launch-workflow-ui"></script>
 </body>
 </html>

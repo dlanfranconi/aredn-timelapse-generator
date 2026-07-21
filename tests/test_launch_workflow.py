@@ -97,6 +97,28 @@ class LaunchWorkflowTestCase(unittest.TestCase):
         self.assertEqual(preview["events"][0]["name"], "Falcon 9 Mission")
         self.assertEqual(preview["events"][0]["plans"][0]["id"], "vandenberg")
         self.assertEqual(preview["events"][0]["plans"][0]["phase"], "pending")
+        camera_details = preview["events"][0]["plans"][0]["camera_details"][0]
+        self.assertEqual(camera_details["name"], "cam1")
+        self.assertEqual(camera_details["preset"], "launch-pad")
+        self.assertTrue(camera_details["record"])
+
+    @patch("fenetre.launch_workflow.requests.get")
+    def test_preview_disabled_does_not_fetch_schedule(self, mock_get):
+        config = sample_config()
+        config["global"]["launch_workflow"]["enabled"] = False
+        config["global"]["launch_workflow"]["schedule_events"] = []
+        config["global"]["launch_workflow"][
+            "schedule_url"
+        ] = "https://example.invalid/launches.json"
+
+        preview = preview_launch_workflow(
+            config, now=datetime(2026, 7, 21, 11, 0, tzinfo=timezone.utc)
+        )
+
+        self.assertTrue(preview["ok"])
+        self.assertFalse(preview["enabled"])
+        self.assertEqual(preview["events"], [])
+        mock_get.assert_not_called()
 
     def test_due_launch_actions_builds_prelaunch_actions(self):
         actions = due_launch_actions(

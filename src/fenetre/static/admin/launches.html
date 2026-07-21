@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fenetre Launch Dashboard</title>
+    <link rel="stylesheet" href="/static/admin/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Launch Dashboard</h1>
+        <div class="controls">
+            <a class="button-link" href="/static/admin/index.html">Configuration</a>
+            <button id="refreshLaunchDashboardBtn" type="button">Refresh</button>
+        </div>
+        <div id="launchDashboardStatus"></div>
+        <section class="quick-settings">
+            <div class="section-header">
+                <h2>Upcoming Launches</h2>
+            </div>
+            <div id="launchDashboard" class="launch-dashboard">Loading launches...</div>
+        </section>
+    </div>
+
+    <script src="/static/admin/launches.js?v=20260721-launch-dashboard"></script>
+</body>
+</html>

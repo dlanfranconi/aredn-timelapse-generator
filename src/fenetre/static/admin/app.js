@@ -88,6 +88,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const editCameraSelect = document.getElementById('editCameraSelect');
     const refreshStorageBtn = document.getElementById('refreshStorageBtn');
     const storageSummary = document.getElementById('storageSummary');
+    const launchWorkflowEnabled = document.getElementById('launchWorkflowEnabled');
+    const launchWorkflowDetails = document.getElementById('launchWorkflowDetails');
+    const launchWorkflowDryRun = document.getElementById('launchWorkflowDryRun');
+    const launchScheduleUrl = document.getElementById('launchScheduleUrl');
+    const launchRefreshInterval = document.getElementById('launchRefreshInterval');
+    const launchLookaheadHours = document.getElementById('launchLookaheadHours');
+    const launchStateFile = document.getElementById('launchStateFile');
+    const launchPlanId = document.getElementById('launchPlanId');
+    const launchProviders = document.getElementById('launchProviders');
+    const launchLocations = document.getElementById('launchLocations');
+    const launchPads = document.getElementById('launchPads');
+    const launchPreSeconds = document.getElementById('launchPreSeconds');
+    const launchPostSeconds = document.getElementById('launchPostSeconds');
+    const launchCameraPlans = document.getElementById('launchCameraPlans');
+    const previewLaunchWorkflowBtn = document.getElementById('previewLaunchWorkflowBtn');
+    const saveLaunchWorkflowBtn = document.getElementById('saveLaunchWorkflowBtn');
+    const launchPreviewResult = document.getElementById('launchPreviewResult');
     const addCameraModal = document.getElementById('addCameraModal');
     const cameraModalTitle = document.getElementById('cameraModalTitle');
     const closeAddCameraModalBtn = document.getElementById('closeAddCameraModalBtn');
@@ -145,6 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let cameraFormMode = 'add';
     let editingCameraName = null;
     let editingOriginalCamera = null;
+    const DEFAULT_LAUNCH_SCHEDULE_URL = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net';
+    const DEFAULT_LAUNCH_STATE_FILE = '/srv/fenetre/data/launch_workflow_state.json';
     const CAMERA_TEMPLATE_GROUPS = {
         generic: {
             snapshots: [
@@ -246,6 +265,9 @@ document.addEventListener('DOMContentLoaded', () => {
     manageUsersBtn.addEventListener('click', openUserManager);
     closeUserModalBtn.addEventListener('click', () => hideModal(userModal));
     refreshStorageBtn.addEventListener('click', loadStorageSummary);
+    previewLaunchWorkflowBtn.addEventListener('click', previewLaunchWorkflow);
+    saveLaunchWorkflowBtn.addEventListener('click', saveLaunchWorkflow);
+    launchWorkflowEnabled.addEventListener('change', syncLaunchWorkflowEnabledState);
     newUserBtn.addEventListener('click', clearUserForm);
     userForm.addEventListener('submit', saveUser);
     deleteUserBtn.addEventListener('click', deleteUser);
@@ -424,6 +446,439 @@ document.addEventListener('DOMContentLoaded', () => {
             renderStorageSummary(data);
         } catch (error) {
             storageSummary.textContent = `Storage summary unavailable: ${error.message}`;
+        }
+    }
+
+    function ensureGlobalLaunchWorkflow(configData) {
+        if (!configData.global || typeof configData.global !== 'object') {
+            configData.global = {};
+        }
+        if (!configData.global.launch_workflow || typeof configData.global.launch_workflow !== 'object') {
+            configData.global.launch_workflow = {};
+        }
+        if (!configData.global.launch_workflow.plans || typeof configData.global.launch_workflow.plans !== 'object' || Array.isArray(configData.global.launch_workflow.plans)) {
+            configData.global.launch_workflow.plans = {};
+        }
+        return configData.global.launch_workflow;
+    }
+
+    function csvFromList(value, fallback = '') {
+        if (Array.isArray(value)) {
+            return value.join(', ');
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        return fallback;
+    }
+
+    function csvToList(value) {
+        return String(value || '')
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean);
+    }
+
+    function numberInputValue(input, fallback) {
+        const value = parseFloat(input.value);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    function intInputValue(input, fallback) {
+        const value = parseInt(input.value, 10);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    function syncLaunchWorkflowEnabledState() {
+        const enabled = launchWorkflowEnabled.checked;
+        launchWorkflowDetails.hidden = !enabled;
+        previewLaunchWorkflowBtn.disabled = !enabled || !loadedConfigData;
+        saveLaunchWorkflowBtn.disabled = !loadedConfigData;
+        if (!enabled) {
+            launchPreviewResult.textContent = '';
+        }
+    }
+
+    function selectedLaunchPlanId(workflow) {
+        const plans = (workflow && workflow.plans && typeof workflow.plans === 'object' && !Array.isArray(workflow.plans))
+            ? workflow.plans
+            : {};
+        const current = launchPlanId.value.trim();
+        if (current && plans[current]) {
+            return current;
+        }
+        if (plans['vandenberg-spacex']) {
+            return 'vandenberg-spacex';
+        }
+        const ids = Object.keys(plans);
+        return ids[0] || current || 'vandenberg-spacex';
+    }
+
+    function setLaunchCameraCardEnabled(card) {
+        const enabled = card.querySelector('.launch-camera-use').checked;
+        const recordEnabled = card.querySelector('.launch-camera-record').checked;
+        card.classList.toggle('disabled', !enabled);
+        card.querySelectorAll('input, select').forEach(input => {
+            if (input.classList.contains('launch-camera-use')) {
+                return;
+            }
+            const isRecordField = input.classList.contains('launch-record-field');
+            input.disabled = !enabled || (isRecordField && !recordEnabled);
+        });
+    }
+
+    function appendOption(select, value, label) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+    }
+
+    function presetOptionValue(preset) {
+        return String(preset.token || preset.id || preset.name || '').trim();
+    }
+
+    function cameraImageProfileNames(camera) {
+        const imageProfiles = camera.image_profiles || camera.image_settings_profiles || {};
+        const profiles = imageProfiles.profiles || {};
+        return profiles && typeof profiles === 'object' ? Object.keys(profiles).sort() : [];
+    }
+
+    function renderLaunchCameraPlans(configData, plan = {}) {
+        const cameras = (configData && configData.cameras) || {};
+        const names = Object.keys(cameras).sort();
+        launchCameraPlans.innerHTML = '';
+        if (!names.length) {
+            launchCameraPlans.textContent = 'No cameras configured.';
+            return;
+        }
+        const planCameras = (plan.cameras && typeof plan.cameras === 'object') ? plan.cameras : {};
+        names.forEach(cameraName => {
+            const camera = cameras[cameraName] || {};
+            const ptz = camera.ptz || {};
+            const ptzEnabled = ptz.enabled === true;
+            const cameraPlan = planCameras[cameraName] || {};
+            const record = (cameraPlan.record && typeof cameraPlan.record === 'object') ? cameraPlan.record : {};
+            const card = document.createElement('div');
+            card.className = 'launch-camera-card';
+            card.dataset.camera = cameraName;
+
+            const header = document.createElement('div');
+            header.className = 'launch-camera-header';
+            const title = document.createElement('h4');
+            title.textContent = `${cameraName}${ptzEnabled ? ' PTZ' : ''}`;
+            const enabledLabel = document.createElement('label');
+            enabledLabel.className = 'launch-camera-enabled';
+            const enabledInput = document.createElement('input');
+            enabledInput.type = 'checkbox';
+            enabledInput.className = 'launch-camera-use';
+            enabledInput.checked = Boolean(planCameras[cameraName]);
+            enabledLabel.appendChild(enabledInput);
+            enabledLabel.appendChild(document.createTextNode('Rocket launch camera'));
+            header.appendChild(title);
+            header.appendChild(enabledLabel);
+            card.appendChild(header);
+
+            const fields = document.createElement('div');
+            fields.className = 'launch-camera-fields';
+
+            const presetLabel = document.createElement('label');
+            presetLabel.textContent = 'PTZ preset';
+            const presetSelect = document.createElement('select');
+            presetSelect.className = 'launch-camera-preset';
+            appendOption(presetSelect, '', ptzEnabled ? 'No PTZ move' : 'PTZ not enabled');
+            (ptz.presets || [])
+                .filter(presetHasUsableName)
+                .forEach(preset => appendOption(
+                    presetSelect,
+                    presetOptionValue(preset),
+                    preset.name || presetOptionValue(preset)
+                ));
+            if (cameraPlan.preset) {
+                const presetValue = String(cameraPlan.preset);
+                if (!Array.from(presetSelect.options).some(option => option.value === presetValue)) {
+                    appendOption(presetSelect, presetValue, presetValue);
+                }
+                presetSelect.value = presetValue;
+            }
+            fields.appendChild(presetLabel);
+            fields.appendChild(presetSelect);
+
+            const imageProfileLabel = document.createElement('label');
+            imageProfileLabel.textContent = 'Image profile';
+            const imageProfileSelect = document.createElement('select');
+            imageProfileSelect.className = 'launch-camera-image-profile';
+            appendOption(imageProfileSelect, '', 'Do not change image profile');
+            cameraImageProfileNames(camera).forEach(profileName => appendOption(imageProfileSelect, profileName, profileName));
+            if (cameraPlan.image_profile) {
+                const imageProfile = String(cameraPlan.image_profile);
+                if (!Array.from(imageProfileSelect.options).some(option => option.value === imageProfile)) {
+                    appendOption(imageProfileSelect, imageProfile, imageProfile);
+                }
+                imageProfileSelect.value = imageProfile;
+            }
+            fields.appendChild(imageProfileLabel);
+            fields.appendChild(imageProfileSelect);
+
+            const optionsLabel = document.createElement('label');
+            optionsLabel.textContent = 'Launch options';
+            const options = document.createElement('div');
+            options.className = 'launch-inline-options';
+            [
+                ['launch-camera-pause-tour', 'Pause/resume tour', Boolean(cameraPlan.pause_tour || cameraPlan.resume_tour)],
+                ['launch-camera-record', 'Record on camera', Boolean(record.start_url || record.start_command || record.stop_url || record.stop_command || record.download_url || record.download_command)],
+                ['launch-camera-skip-full-viewers', 'Keep HD stream if watched', record.skip_when_full_viewers !== false],
+            ].forEach(([className, labelText, checkedValue]) => {
+                const label = document.createElement('label');
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.className = className;
+                input.checked = checkedValue;
+                label.appendChild(input);
+                label.appendChild(document.createTextNode(labelText));
+                options.appendChild(label);
+            });
+            fields.appendChild(optionsLabel);
+            fields.appendChild(options);
+
+            [
+                ['Record start URL', 'launch-camera-start-url', record.start_url || ''],
+                ['Record stop URL', 'launch-camera-stop-url', record.stop_url || ''],
+                ['Download URL', 'launch-camera-download-url', record.download_url || ''],
+                ['Download path', 'launch-camera-download-path', record.download_path || ''],
+            ].forEach(([labelText, className, value]) => {
+                const label = document.createElement('label');
+                label.textContent = labelText;
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.autocomplete = 'off';
+                input.className = `${className} launch-record-field`;
+                input.value = value;
+                fields.appendChild(label);
+                fields.appendChild(input);
+            });
+
+            const delayLabel = document.createElement('label');
+            delayLabel.textContent = 'Download delay seconds';
+            const delayInput = document.createElement('input');
+            delayInput.type = 'number';
+            delayInput.min = '0';
+            delayInput.className = 'launch-camera-download-delay launch-record-field';
+            delayInput.value = record.download_delay_seconds ?? 60;
+            fields.appendChild(delayLabel);
+            fields.appendChild(delayInput);
+
+            card.appendChild(fields);
+            card.querySelectorAll('input, select').forEach(input => {
+                input.addEventListener('change', () => setLaunchCameraCardEnabled(card));
+            });
+            launchCameraPlans.appendChild(card);
+            setLaunchCameraCardEnabled(card);
+        });
+    }
+
+    function syncLaunchInputsFromConfig(configData) {
+        const workflow = ((configData.global || {}).launch_workflow || {});
+        launchWorkflowEnabled.checked = workflow.enabled === true;
+        launchWorkflowDryRun.checked = workflow.dry_run !== false;
+        launchScheduleUrl.value = workflow.schedule_url || DEFAULT_LAUNCH_SCHEDULE_URL;
+        launchRefreshInterval.value = workflow.refresh_interval_s ?? 900;
+        launchLookaheadHours.value = workflow.lookahead_hours ?? 168;
+        launchStateFile.value = workflow.state_file || DEFAULT_LAUNCH_STATE_FILE;
+
+        const planId = selectedLaunchPlanId(workflow);
+        const plans = workflow.plans && typeof workflow.plans === 'object' && !Array.isArray(workflow.plans)
+            ? workflow.plans
+            : {};
+        const plan = plans[planId] || {};
+        const match = plan.match || {};
+        launchPlanId.value = planId;
+        launchProviders.value = csvFromList(match.providers, 'SpaceX');
+        launchLocations.value = csvFromList(match.locations, 'Vandenberg');
+        launchPads.value = csvFromList(match.pads, '');
+        launchPreSeconds.value = plan.pre_seconds ?? workflow.default_pre_seconds ?? 60;
+        launchPostSeconds.value = plan.post_seconds ?? workflow.default_post_seconds ?? 900;
+        renderLaunchCameraPlans(configData, plan);
+        syncLaunchWorkflowEnabledState();
+    }
+
+    function collectLaunchCameraPlans() {
+        const cameras = {};
+        launchCameraPlans.querySelectorAll('.launch-camera-card').forEach(card => {
+            if (!card.querySelector('.launch-camera-use').checked) {
+                return;
+            }
+            const cameraName = card.dataset.camera;
+            const cameraPlan = {};
+            const preset = card.querySelector('.launch-camera-preset').value.trim();
+            const imageProfile = card.querySelector('.launch-camera-image-profile').value.trim();
+            if (preset) {
+                cameraPlan.preset = preset;
+            }
+            if (imageProfile) {
+                cameraPlan.image_profile = imageProfile;
+            }
+            if (card.querySelector('.launch-camera-pause-tour').checked) {
+                cameraPlan.pause_tour = true;
+                cameraPlan.resume_tour = true;
+            }
+            if (card.querySelector('.launch-camera-record').checked) {
+                const record = {
+                    start_url: card.querySelector('.launch-camera-start-url').value.trim(),
+                    stop_url: card.querySelector('.launch-camera-stop-url').value.trim(),
+                    download_url: card.querySelector('.launch-camera-download-url').value.trim(),
+                    download_path: card.querySelector('.launch-camera-download-path').value.trim(),
+                    download_delay_seconds: intInputValue(card.querySelector('.launch-camera-download-delay'), 60),
+                    skip_when_full_viewers: card.querySelector('.launch-camera-skip-full-viewers').checked
+                };
+                Object.keys(record).forEach(key => {
+                    if (record[key] === '' || record[key] === null || record[key] === undefined) {
+                        delete record[key];
+                    }
+                });
+                cameraPlan.record = record;
+            }
+            cameras[cameraName] = cameraPlan;
+        });
+        return cameras;
+    }
+
+    function applyLaunchInputsToConfig(configData) {
+        const existingWorkflow = configData.global
+            && typeof configData.global === 'object'
+            && configData.global.launch_workflow
+            && typeof configData.global.launch_workflow === 'object';
+        if (!launchWorkflowEnabled.checked && !existingWorkflow) {
+            return;
+        }
+        const workflow = ensureGlobalLaunchWorkflow(configData);
+        if (!launchWorkflowEnabled.checked) {
+            workflow.enabled = false;
+            workflow.dry_run = launchWorkflowDryRun.checked;
+            return;
+        }
+        const planId = launchPlanId.value.trim() || 'vandenberg-spacex';
+        workflow.enabled = launchWorkflowEnabled.checked;
+        workflow.dry_run = launchWorkflowDryRun.checked;
+        workflow.schedule_url = launchScheduleUrl.value.trim() || DEFAULT_LAUNCH_SCHEDULE_URL;
+        workflow.schedule_timeout_s = workflow.schedule_timeout_s ?? 10;
+        workflow.refresh_interval_s = intInputValue(launchRefreshInterval, 900);
+        workflow.lookahead_hours = numberInputValue(launchLookaheadHours, 168);
+        workflow.default_pre_seconds = intInputValue(launchPreSeconds, 60);
+        workflow.default_post_seconds = intInputValue(launchPostSeconds, 900);
+        workflow.state_file = launchStateFile.value.trim() || DEFAULT_LAUNCH_STATE_FILE;
+        const previousPlan = workflow.plans[planId] && typeof workflow.plans[planId] === 'object'
+            ? workflow.plans[planId]
+            : {};
+        workflow.plans[planId] = {
+            ...previousPlan,
+            enabled: true,
+            match: {
+                providers: csvToList(launchProviders.value),
+                locations: csvToList(launchLocations.value),
+                pads: csvToList(launchPads.value),
+            },
+            pre_seconds: intInputValue(launchPreSeconds, 60),
+            post_seconds: intInputValue(launchPostSeconds, 900),
+            cameras: collectLaunchCameraPlans()
+        };
+    }
+
+    function configWithLaunchInputs() {
+        if (!loadedConfigData) {
+            throw new Error('Load the configuration before using launch automation.');
+        }
+        const configData = structuredClone(loadedConfigData);
+        applySiteInputsToConfig(configData);
+        applyLaunchInputsToConfig(configData);
+        return configData;
+    }
+
+    function renderLaunchPreview(data) {
+        launchPreviewResult.innerHTML = '';
+        if (!data || !data.ok) {
+            launchPreviewResult.textContent = (data && data.error) || 'Launch preview failed.';
+            return;
+        }
+        const events = data.events || [];
+        const summary = document.createElement('div');
+        summary.textContent = events.length
+            ? `Found ${events.length} upcoming matched launch event(s).`
+            : 'No upcoming launches matched this plan.';
+        launchPreviewResult.appendChild(summary);
+        if (!events.length) {
+            return;
+        }
+        const list = document.createElement('ul');
+        list.className = 'launch-preview-list';
+        events.forEach(event => {
+            const item = document.createElement('li');
+            const launchDate = event.launch_time_utc
+                ? new Date(event.launch_time_utc).toLocaleString()
+                : 'Unknown time';
+            const planText = (event.plans || []).map(plan => {
+                const cameras = (plan.cameras || []).join(', ') || 'no cameras';
+                return `${plan.id}: ${plan.phase}, ${cameras}`;
+            }).join(' | ');
+            item.innerHTML = `
+                <strong>${escapeHtml(event.name)}</strong>
+                <span>${escapeHtml(launchDate)}</span>
+                <small>${escapeHtml([event.provider, event.location, event.pad].filter(Boolean).join(' - '))}</small>
+                <span class="launch-preview-badge">${escapeHtml(planText || 'no matching plan')}</span>
+            `;
+            list.appendChild(item);
+        });
+        launchPreviewResult.appendChild(list);
+    }
+
+    async function previewLaunchWorkflow() {
+        try {
+            if (!launchWorkflowEnabled.checked) {
+                throw new Error('Launch automation is disabled.');
+            }
+            setStatus('Loading launch preview...', 'info');
+            const configData = configWithLaunchInputs();
+            const response = await fetch('/api/launches/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: configData })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `Launch preview failed with HTTP ${response.status}`);
+            }
+            renderLaunchPreview(result);
+            setStatus('Launch preview loaded.', 'success');
+        } catch (error) {
+            launchPreviewResult.textContent = error.message;
+            setStatus(`Launch preview failed: ${error.message}`, 'error');
+        }
+    }
+
+    async function saveLaunchWorkflow() {
+        try {
+            const configData = configWithLaunchInputs();
+            setStatus('Saving launch workflow...', 'info');
+            const response = await fetch('/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(configData),
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `HTTP error! status: ${response.status}`);
+            }
+            try {
+                const reloadResult = await requestApplicationReload();
+                result.reload = { ok: true, message: reloadResult.message || 'Reload signal sent successfully.' };
+            } catch (reloadError) {
+                result.reload = { ok: false, warning: reloadError.message };
+            }
+            loadedConfigData = configData;
+            setStatus((result.message || 'Launch workflow saved.') + configWriteDetails(result), 'success');
+            await fetchAndDisplayConfig();
+        } catch (error) {
+            setStatus(`Error saving launch workflow: ${error.message}`, 'error');
         }
     }
 
@@ -914,6 +1369,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const config = await response.json();
             loadedConfigData = config.config || config;
             syncSiteInputsFromConfig(loadedConfigData);
+            syncLaunchInputsFromConfig(loadedConfigData);
             saveSiteNameBtn.disabled = false;
             populateCameraEditOptions();
             renderConfigForm(config, configFormContainer, '');
@@ -1776,6 +2232,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         applySiteInputsToConfig(configData);
+        applyLaunchInputsToConfig(configData);
 
         console.log("Saving data:", JSON.stringify(configData, null, 2));
 
