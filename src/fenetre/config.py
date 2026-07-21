@@ -976,6 +976,13 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             default=60,
             min_value=1,
         )
+        cam_out["capture_failure_interval_s"] = _int(
+            cam.get("capture_failure_interval_s"),
+            f"cameras.{name}.capture_failure_interval_s",
+            errors,
+            default=60,
+            min_value=1,
+        )
         cam_out["cache_bust"] = _bool(
             cam.get("cache_bust"), f"cameras.{name}.cache_bust", errors, default=False
         )

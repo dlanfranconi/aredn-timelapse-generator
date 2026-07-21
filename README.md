@@ -325,7 +325,7 @@ Each camera has a **Main page visibility** setting:
 
 Existing configs with `public: false` are treated as `Logged-in users` for backwards compatibility.
 
-The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, and TP-Link. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them. PTZ-capable cameras also have a **PTZ profile** selector, movement capability checkboxes, optional tour controls, and a preset row editor.
+The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, TP-Link, and Frigate latest-frame sources. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them. PTZ-capable cameras also have a **PTZ profile** selector, movement capability checkboxes, optional tour controls, and a preset row editor.
 
 For cameras that need HTTP Basic or Digest authentication for snapshots, keep the URL clean and set credentials in `http_auth`:
 
@@ -361,9 +361,12 @@ cameras:
     capture_source: rtsp
     rtsp_url: rtsp://admin:change-me@camera.local:554/stream1
     snap_interval_s: 60
+    capture_failure_interval_s: 180
 ```
 
 When a camera is saved in RTSP capture mode, Fenetre removes stale snapshot URL and HTTP-auth fields from that camera entry and uses the generated/local RTSP command ahead of any legacy `url` value. This prevents placeholder snapshot templates such as `http://CAMERA_IP:HTTP_PORT/...` from being used after switching a camera to RTSP capture.
+
+If capture fails after at least one good frame, Fenetre now keeps the snap thread alive, marks the camera offline, waits `capture_failure_interval_s` seconds, and retries without letting the watchdog rapidly restart the thread. The default retry interval is 60 seconds. For fragile cameras that reboot or refuse RTSP for several minutes after a failed session, set this higher, such as `180` or `300`.
 
 If an RTSP/local-command camera logs `did not return a valid image`, the command ran but stdout was not a JPEG/PNG that Pillow could decode. Fenetre logs the command exit code, the first bytes of stdout, and the last stderr text so you can tell whether ffmpeg returned an auth error, protocol error, empty output, HTML, or another non-image response. To test the generated command manually, run an equivalent one-frame capture inside the container:
 
@@ -377,6 +380,19 @@ docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transpo
 Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an error, fix the RTSP URL, credentials, stream path, or transport before adding it back to Fenetre.
 
 Fenetre-generated RTSP snapshot commands are video-only. This avoids negotiating or decoding RTSP audio tracks on cameras where audio SETUP/probing is unstable. Older saved Fenetre-generated RTSP commands are upgraded in memory at capture time when `rtsp_url` is present; custom `local_command` values are left unchanged.
+
+Some older Sunba 601-D20X firmware appears unable to tolerate repeated direct RTSP session open/close cycles. A first Fenetre RTSP frame can succeed, the next scheduled frame can make the camera refuse port `554`, and the camera may recover only after it reboots. For those cameras, use a stable upstream that already holds the RTSP stream open, such as Frigate, and configure Fenetre as an HTTP snapshot camera:
+
+```yaml
+cameras:
+  k6kp-eoc:
+    url: http://FRIGATE_HOST:5000/api/k6kp-eoc/latest.jpg
+    cache_bust: true
+    timeout_s: 10
+    capture_failure_interval_s: 300
+```
+
+When using this pattern for a fragile D20, remove Fenetre's direct `local_command` and avoid direct `rtsp_url`/`ptz_rtsp_url` entries unless you have confirmed the camera remains stable. Newer Sunba models may work normally with direct RTSP and the Sunba PTZ profile.
 
 `rtsp_url` and `ptz_rtsp_url` are used for different workflows:
 

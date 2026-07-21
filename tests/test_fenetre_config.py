@@ -152,6 +152,22 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(cameras_conf["cam1"]["unavailable_command_timeout_s"], 7)
 
+    def test_config_load_camera_capture_failure_interval(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1",
+                    "capture_failure_interval_s": 300,
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        self.assertEqual(cameras_conf["cam1"]["capture_failure_interval_s"], 300)
+
     def test_config_load_camera_http_auth(self):
         test_data = {
             "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},

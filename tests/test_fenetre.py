@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
     active_live_view_count,
+    capture_failure_retry_interval,
     cleanup_frequent_timelapse_artifacts,
     cleanup_stale_timelapse_artifacts,
     discover_camera_timelapses,
@@ -641,6 +642,24 @@ class TestFenetre(unittest.TestCase):
                 "cam1",
                 {},
             )
+
+    def test_capture_failure_retry_interval_defaults_to_normal_interval(self):
+        self.assertEqual(
+            capture_failure_retry_interval({"snap_interval_s": 180}, 30),
+            60.0,
+        )
+        self.assertEqual(
+            capture_failure_retry_interval({"snap_interval_s": 180}),
+            180.0,
+        )
+
+    def test_capture_failure_retry_interval_honors_camera_override(self):
+        self.assertEqual(
+            capture_failure_retry_interval(
+                {"snap_interval_s": 60, "capture_failure_interval_s": 300}, 60
+            ),
+            300.0,
+        )
 
     def test_sanitize_url_for_logs_redacts_credentials(self):
         url = (

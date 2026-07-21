@@ -616,6 +616,20 @@ def get_pic_from_local_command(
         ) from exc
 
 
+def capture_failure_retry_interval(
+    camera_config: Dict, current_sleep_interval: Optional[float] = None
+) -> float:
+    configured = camera_config.get("capture_failure_interval_s")
+    if isinstance(configured, (int, float)) and configured > 0:
+        return float(configured)
+    if isinstance(current_sleep_interval, (int, float)) and current_sleep_interval > 0:
+        return max(60.0, float(current_sleep_interval))
+    fixed_snap_interval = camera_config.get("snap_interval_s")
+    if isinstance(fixed_snap_interval, (int, float)) and fixed_snap_interval > 0:
+        return max(60.0, float(fixed_snap_interval))
+    return 60.0
+
+
 def is_sunrise_or_sunset(
     camera_config: Dict, global_config: Dict, camera_name: str = ""
 ) -> bool:
@@ -822,14 +836,32 @@ def snap(camera_name, camera_config: Dict):
     previous_pic_dir, previous_pic_filename = get_pic_dir_and_filename(camera_name)
     previous_pic_fullpath = os.path.join(previous_pic_dir, previous_pic_filename)
     previous_mode = "unknown"
-    try:
-        with profiler.timed(f"camera.{camera_name}.capture"):
-            previous_pic = capture(mode=previous_mode)
-    except Exception as e:
-        error_msg = f"Failed to capture initial image for {camera_name}: {e}"
-        logger.error(error_msg, exc_info=True)
-        log_camera_error(camera_name, error_msg, global_config)
-        raise
+    previous_pic = None
+    while not exit_event.is_set():
+        try:
+            with profiler.timed(f"camera.{camera_name}.capture"):
+                previous_pic = capture(mode=previous_mode)
+            break
+        except Exception as e:
+            error_msg = f"Failed to capture initial image for {camera_name}: {e}"
+            logger.error(error_msg, exc_info=True)
+            log_camera_error(camera_name, error_msg, global_config)
+            metric_capture_failures_total.labels(camera_name=camera_name).inc()
+            camera_online_metric.set(0.0)
+            if mqtt_manager:
+                mqtt_manager.publish_camera_state(camera_name, False)
+            retry_interval = capture_failure_retry_interval(camera_config)
+            logger.info(
+                "%s: Initial capture failed; retrying in %.1fs without restarting the snap thread.",
+                camera_name,
+                retry_interval,
+            )
+            interruptible_sleep(retry_interval, exit_event)
+    if exit_event.is_set() or previous_pic is None:
+        logger.info(
+            "%s: Exiting snap loop before initial capture completed.", camera_name
+        )
+        return
     previous_exif_bytes = previous_pic.info.get("exif") or b""
     if len(camera_config.get("postprocessing", [])) > 0:
         with profiler.timed(f"camera.{camera_name}.postprocess"):
@@ -952,15 +984,31 @@ def snap(camera_name, camera_config: Dict):
                 )
             )
 
-        try:
-            with profiler.timed(f"camera.{camera_name}.capture"):
-                new_pic = capture(current_mode)
-        except Exception as e:
-            error_msg = f"Could not fetch picture for {camera_name}: {e}"
-            logger.warning(error_msg)
-            log_camera_error(camera_name, error_msg, global_config)
-            metric_capture_failures_total.labels(camera_name=camera_name).inc()
-            raise
+        new_pic = None
+        while not exit_event.is_set():
+            try:
+                with profiler.timed(f"camera.{camera_name}.capture"):
+                    new_pic = capture(current_mode)
+                break
+            except Exception as e:
+                error_msg = f"Could not fetch picture for {camera_name}: {e}"
+                logger.warning(error_msg, exc_info=True)
+                log_camera_error(camera_name, error_msg, global_config)
+                metric_capture_failures_total.labels(camera_name=camera_name).inc()
+                camera_online_metric.set(0.0)
+                if mqtt_manager:
+                    mqtt_manager.publish_camera_state(camera_name, False)
+                retry_interval = capture_failure_retry_interval(
+                    camera_config, current_sleep_interval
+                )
+                logger.info(
+                    "%s: Capture failed; retrying in %.1fs without restarting the snap thread.",
+                    camera_name,
+                    retry_interval,
+                )
+                interruptible_sleep(retry_interval, exit_event)
+        if exit_event.is_set():
+            return
         if new_pic is None:
             logger.error(f"{camera_name}: Could not fetch picture.")
             raise ValueError

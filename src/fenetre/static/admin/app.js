@@ -229,6 +229,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'tplink-stream1', label: 'Stream 1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream1' },
                 { id: 'tplink-stream2', label: 'Stream 2', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream2' }
             ]
+        },
+        frigate: {
+            snapshots: [
+                { id: 'frigate-latest', label: 'Frigate latest frame', url: 'http://FRIGATE_HOST:5000/api/CAMERA_NAME/latest.jpg', auth: 'basic' }
+            ],
+            rtsp: []
         }
     };
 
@@ -593,6 +599,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraCacheBust', true);
         setCheckboxValue('newCameraMozjpeg', true);
         setCheckboxValue('newCameraTimelapse', true);
+        setInputValue('newCameraFailureRetry', 60);
         setInputValue('newCameraTimeout', 15);
         setCheckboxValue('newCameraFixedIntervalEnabled', true);
         setInputValue('newCameraSnapInterval', 60);
@@ -679,6 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
         setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
+        setInputValue('newCameraFailureRetry', camera.capture_failure_interval_s ?? 60);
         setSelectValue('newCameraVisibility', visibilityForCamera(camera));
         setCheckboxValue('newCameraCacheBust', camera.cache_bust !== false);
         setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
@@ -975,6 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCameraTemplateUrl(templateUrl) {
         return templateUrl
+            .replaceAll('CAMERA_NAME', encodeURIComponent(newCameraName.value.trim() || 'CAMERA_NAME'))
             .replaceAll('USERNAME', encodeURIComponent(newCameraSnapshotUsername.value.trim() || 'USERNAME'))
             .replaceAll('PASSWORD', encodeURIComponent(newCameraSnapshotPassword.value || 'PASSWORD'));
     }
@@ -1084,6 +1093,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rtsp_url: captureSource === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
             ptz_rtsp_url: checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
+            capture_failure_interval_s: intValue('newCameraFailureRetry', 60),
             public: visibility === 'public',
             visibility,
             hidden: visibility === 'hidden',

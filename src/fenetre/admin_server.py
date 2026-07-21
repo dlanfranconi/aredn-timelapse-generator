@@ -673,6 +673,9 @@ def _build_camera_config(
 
     camera = {
         "timeout_s": int(payload.get("timeout_s") or 15),
+        "capture_failure_interval_s": int(
+            payload.get("capture_failure_interval_s") or 60
+        ),
         "cache_bust": bool(payload.get("cache_bust", True)),
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),

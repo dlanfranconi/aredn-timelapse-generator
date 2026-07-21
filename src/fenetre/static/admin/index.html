@@ -84,6 +84,7 @@
                     <option value="amcrest">Amcrest</option>
                     <option value="axis">Axis</option>
                     <option value="tplink">TP-Link</option>
+                    <option value="frigate">Frigate latest frame</option>
                 </select>
 
                 <label for="newCameraSnapshotTemplate">Snapshot template</label>
@@ -150,6 +151,8 @@
                     <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
                     <label for="newCameraTimeout">Timeout seconds</label>
                     <input id="newCameraTimeout" type="number" min="1" value="15">
+                    <label for="newCameraFailureRetry">Failure retry seconds</label>
+                    <input id="newCameraFailureRetry" type="number" min="1" value="60">
                 </fieldset>
 
                 <fieldset class="option-group">
@@ -334,6 +337,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js?v=20260720-camera-save-reload"></script>
+    <script src="/static/admin/app.js?v=20260720-frigate-retry"></script>
 </body>
 </html>
