@@ -1,30 +1,88 @@
+# Current AREDN/IP-camera deployment template.
+# Copy this to /srv/fenetre/config.yaml and edit hostnames, credentials, and
+# camera names from the admin dashboard or directly in YAML.
+
 global:
   work_dir: /srv/fenetre/data
   log_dir: /srv/fenetre/logs
   timezone: America/Los_Angeles
   logging_level: INFO
+  deployment_name: Fenetre Skywatch
+
+  ui:
+    landing_page: list
+    # true: anonymous visitors can view public cameras on port 8888.
+    # false: port 8888 shows a login landing page before camera data is served.
+    public_site: true
+    show_map_by_default: false
+    show_main_website_icon: true
+    show_github_icon: true
+    main_website_url: https://fenetre.cam
+    map_privacy_radius_m: 0
+    map_privacy_jitter_m: 0
+
+  go2rtc:
+    enabled: true
+    # Set this to the host/IP and port browsers can reach.
+    base_url: http://HOST_OR_IP:1984
+    # stream.html is the default compatibility player. Fenetre keeps generated
+    # player URLs video-only and muted by default.
+    player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    stream_name_prefix: fenetre_
+    api_listen: ":1984"
+    rtsp_listen: ":8554"
+    webrtc_listen: ":8555"
+    webrtc_candidates: []
+    live_view_idle_timeout_s: 60
 
   storage_management:
     enabled: true
     dry_run: false
     check_interval_s: 300
-
-    # Global hard ceiling.
     work_dir_max_size_GB: 50
-    # Default per-camera ceiling. Individual cameras can override with
-    # work_dir_max_size_GB.
     camera_max_size_GB: 5
-    # Delete snapshots and rolling timelapse artifacts before deleting daily
-    # archive timelapses.
     prune_snapshots_first: true
 
-  deployment_name: Fenetre Skywatch
-  ui:
-    landing_page: list
-    # true: anyone can view public cameras on port 8888.
-    # false: port 8888 shows a login landing page before camera data is served.
-    public_site: true
-    show_map_by_default: false
+  # Disabled by default so non-launch deployments look and behave like the
+  # normal camera/timelapse server.
+  launch_workflow:
+    enabled: false
+    dry_run: true
+    schedule_url: https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net
+    schedule_timeout_s: 10
+    refresh_interval_s: 300
+    lookahead_hours: 168
+    default_pre_seconds: 60
+    default_post_seconds: 900
+    state_file: /srv/fenetre/data/launch_workflow_state.json
+    plans:
+      vandenberg-spacex:
+        enabled: true
+        match:
+          providers:
+            - SpaceX
+          locations:
+            - Vandenberg
+          pads: []
+          names: []
+          statuses: []
+          keywords: []
+        pre_seconds: 60
+        post_seconds: 900
+        cameras:
+          Ridge-PTZ:
+            pause_tour: true
+            resume_tour: true
+            preset: launch-pad
+            image_profile: launch
+            record:
+              start_url: http://{host}/api/record/start?event={launch_id}
+              stop_url: http://{host}/api/record/stop?event={launch_id}
+              download_url: http://{host}/api/record/download?event={launch_id}
+              download_path: /srv/fenetre/data/launches/{launch_id}-{camera}.mp4
+              download_delay_seconds: 60
+              skip_when_full_viewers: true
 
 http_server:
   enabled: true
@@ -43,14 +101,11 @@ timelapse:
     max_height: 720
     ffmpeg_2pass: false
     output_format: hls
-
-    # CPU-only rolling timelapse. Keep this fast enough to update every interval.
     ffmpeg_options: >-
       -c:v libx264
       -preset veryfast
       -crf 30
       -pix_fmt yuv420p
-
     file_extension: mp4
 
   daily_timelapse:
@@ -59,47 +114,84 @@ timelapse:
     max_width: 1920
     max_height: 1080
     ffmpeg_2pass: false
-
-    # CPU-only daily archive timelapse. Increase preset quality only if runtime is acceptable.
     ffmpeg_options: >-
       -c:v libx264
       -preset medium
       -crf 28
       -pix_fmt yuv420p
       -movflags +faststart
-
     file_extension: mp4
 
 cameras:
-  slo-mesh-demo:
-    description: Example Reolink/Sunba camera
-
-    # Replace with actual snapshot URL.
-    url: http://192.168.1.50/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=admin&password=PASSWORD
-
-    timeout_s: 15
-    # public: shown to everyone when public_site is true.
-    # authenticated: shown only after login.
-    # hidden: kept in config/admin but removed from the main camera page.
+  Ridge-PTZ:
+    description: Example snapshot + RTSP + ONVIF PTZ camera.
     visibility: public
     public: true
-    cache_bust: true
+
+    url: http://192.0.2.50/images/snapshot.jpg
+    http_auth:
+      username: admin
+      password: CHANGE_ME
+      type: basic
+    cache_bust: false
+
+    # Main/full stream and optional low-resolution PTZ alignment stream.
+    go2rtc_enabled: true
+    rtsp_url: rtsp://admin:CHANGE_ME@192.0.2.50:554/main
+    ptz_rtsp_url: rtsp://admin:CHANGE_ME@192.0.2.50:554/sub
+
+    ptz:
+      enabled: true
+      host: 192.0.2.50
+      port: 80
+      username: admin
+      password: CHANGE_ME
+      allow_presets: true
+      allow_manual_control: true
+      access_level: presets
+      capabilities:
+        pan: true
+        tilt: true
+        zoom: true
+      tour:
+        enabled: true
+        auto_resume_s: 1800
+      presets:
+        - id: launch-pad
+          token: "1"
+          name: Launch Pad
+        - id: home
+          token: "2"
+          name: Home
+
+    image_profiles:
+      enabled: false
+      host: 192.0.2.50
+      http_port: 80
+      username: admin
+      password: CHANGE_ME
+      profiles:
+        launch:
+          actions:
+            - name: launch-exposure
+              method: POST
+              url: http://{host}/api/launch-image
+              json:
+                mode: launch
+
+    timeout_s: 15
+    capture_failure_interval_s: 180
     gather_metrics: true
     mozjpeg_optimize: true
-
-    # Activity detection area.
-    sky_area: 0,0,3840,1200
-
-    # SSIM motion analysis area.
-    ssim_area: 0,0,3840,2160
-    ssim_setpoint: 0.88
-
-    # Normal daytime interval.
     snap_interval_s: 60
-    # Fast interval when SSIM sees activity in ssim_area.
     activity_interval_s: 10
-
-    # Aggressive capture around sunrise/sunset.
+    ssim_area: 0,0,1,0.75
+    ssim_setpoint: 0.88
+    sky_area: 0,0,1,0.35
+    lat: 35.2828
+    lon: -120.6596
+    map_privacy_radius_m: 1200
+    timelapse_enabled: true
     sunrise_sunset:
       enabled: true
       interval_s: 10
@@ -107,15 +199,6 @@ cameras:
       sunrise_offset_end_minutes: 45
       sunset_offset_start_minutes: 45
       sunset_offset_end_minutes: 45
-
-    # Camera location.
-    lat: 35.2828
-    lon: -120.6596
-
-    # Set either key to false to exclude a camera from frequent and daily
-    # timelapse generation.
-    timelapse_enabled: true
-
     postprocessing:
       - type: timestamp
         enabled: true
@@ -131,3 +214,51 @@ cameras:
         overlay_width: 800
         padding: 20
         position: top_center
+
+  RTSP-Only:
+    description: Example camera where still captures come from RTSP.
+    visibility: authenticated
+    public: false
+    go2rtc_enabled: true
+    rtsp_url: rtsp://admin:CHANGE_ME@192.0.2.51:554/stream1
+    local_command: >-
+      ffmpeg -hide_banner -loglevel error -rtsp_transport tcp
+      -allowed_media_types video
+      -i rtsp://admin:CHANGE_ME@192.0.2.51:554/stream1
+      -an -map 0:v:0 -frames:v 1 -f image2pipe -vcodec mjpeg -
+    timeout_s: 20
+    capture_failure_interval_s: 180
+    snap_interval_s: 60
+    activity_interval_s: 10
+    ssim_area: 0,0,1,0.75
+    ssim_setpoint: 0.88
+    lat: 35.2828
+    lon: -120.6596
+    timelapse_enabled: true
+    postprocessing:
+      - type: timestamp
+        enabled: true
+        position: bottom_right
+        size: 24
+        color: white
+        format: "%Y-%m-%d %H:%M:%S %Z"
+
+  Hidden-Maintenance-Camera:
+    description: Hidden snapshot camera kept in admin/config only.
+    disabled: true
+    visibility: hidden
+    public: false
+    url: http://192.0.2.52/images/snapshot.jpg
+    http_auth:
+      username: admin
+      password: CHANGE_ME
+      type: basic
+    cache_bust: false
+    go2rtc_enabled: false
+    timeout_s: 15
+    snap_interval_s: 300
+    timelapse_enabled: false
+
+# Omit users on first setup to let Fenetre bootstrap admin/admin as a
+# superadmin. After the first login, change that password from the account menu
+# or Manage Users.

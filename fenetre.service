@@ -1,14 +1,22 @@
 [Unit]
-Description=Fetch images and build timelapses
+Description=Fenetre camera and timelapse server
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/srv/fenetre.cam/venv/bin/python -m fenetre.fenetre --config=/srv/fenetre.cam/config.yaml
+Type=simple
 User=fenetre
+Group=fenetre
+WorkingDirectory=/srv/fenetre/app
+ExecStart=/srv/fenetre/venv/bin/fenetre --config=/srv/fenetre/config.yaml
 Restart=always
-Environment=TZ=America/Los_Angeles
+RestartSec=10
 KillSignal=SIGINT
-
+TimeoutStopSec=45
+Environment=TZ=America/Los_Angeles
+Environment=PYTHONUNBUFFERED=1
+Environment=FENETRE_GO2RTC=auto
+Environment=FENETRE_PID_FILE=/tmp/fenetre.pid
 
 [Install]
 WantedBy=multi-user.target
-Alias=fenetre.service

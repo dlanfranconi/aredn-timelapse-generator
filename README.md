@@ -1,179 +1,54 @@
-# fenetre
+# Fenetre AREDN Camera Server
 
-Takes pictures periodically, build timelapses, archive the footage and share it on a self-hosted website. Check it out at https://fenetre.cam or try it with your own cameras!
+Fenetre is a self-hosted camera server for AREDN and other IP-camera networks. It captures still images from HTTP snapshot endpoints or RTSP streams, builds rolling and daily timelapses, serves a public or private camera dashboard, and can optionally run ONVIF PTZ and rocket-launch capture workflows.
 
+The current deployment path is Docker or Portainer with persistent host-mounted config, data, and logs. The legacy GoPro and Raspberry Pi capture backends are still available as optional extras, but they are no longer the primary documented setup.
 
-## Features
-- Support taking pictures from:
-  - Raspberry Pi camera, GoPro Hero 9+, local command or any URL)
-  - GoPro Hero 9+ via Bluetooth + WiFi with https://gopro.github.io/OpenGoPro/
-  - Raspberry Pi camera (tested with v2 and HQ)
-  - any local command yielding an image format supported by PIL https://pillow.readthedocs.io/en/latest/reference/features.html#features-module
-- Fixed interval or dynamic intervals (sunrise, sunset or fast changing landscape)
-- Continuous timelapses (every 20 minutes) + daily high quality ones.
-- Daylight browser to browser years of footage easily.
-- Produces a fully static website, easy to self-host and put behind Cloudflare.
-- Janky admin interface to help adjust picture settings
-- Premetheus exporter to collect metrics for monitoring 
+## What It Does
 
-## Installation
+- Captures still images from HTTP/HTTPS snapshot URLs, local commands, or RTSP streams through ffmpeg one-frame commands.
+- Builds frequent HLS timelapses and daily archive timelapses.
+- Serves the camera dashboard on `:8888` and the admin/config dashboard on `:8889`.
+- Supports public or private site access, per-camera visibility, and local users.
+- Supports roles: `superadmin`, `admin`, `operator`, and `viewer`.
+- Supports ONVIF PTZ presets, manual nudges, zoom-only cameras, per-user PTZ camera access, tour pause/resume, and editable preset names.
+- Starts bundled go2rtc for RTSP live views when enabled.
+- Keeps go2rtc playback video-only and muted by default.
+- Supports optional image-profile hooks for vendor camera tuning.
+- Supports optional rocket-launch automation with schedule polling, camera preset moves, tour pause/resume, recording hooks, download hooks, and launch dashboards.
 
-This is mostly written in Python and it's been tested on Linux but it could run on MacOS and Windows too.
+## Ports
 
+| Port | Purpose |
+| --- | --- |
+| `8888` | Public/private camera dashboard and API |
+| `8889` | Admin/config dashboard |
+| `1984` | go2rtc web UI/API |
+| `8554` | go2rtc RTSP restreaming |
+| `8555/tcp` and `8555/udp` | go2rtc WebRTC |
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/fenetre.cam.git
-    cd fenetre.cam
-    ```
+Expose `8888` as the viewer-facing site. Do not expose a separate static nginx server directly over `/srv/fenetre/data`; that bypasses private-site login and per-camera visibility controls.
 
-2.  **Create and activate a virtual environment:**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
+## Quick Start With Docker
 
-3.  **Install the package and its dependencies:**
-    The project uses `pyproject.toml` to manage dependencies. Installing in editable mode (`-e`) is recommended for development. This command installs the `fenetre` package and the base runtime dependencies from PyPI.
-    ```bash
-    pip install -e .
-    ```
-
-    Optional dependencies are exposed as package extras. Install only the extras you need for the machine you are setting up:
-
-    - `dev`: local development tools, including `pytest` and `black`.
-    - `gopro`: Bluetooth and network helpers for GoPro cameras.
-    - `picamera2`: Raspberry Pi camera support through `picamera2`.
-    - `pyexiv2`: optional EXIF support through `pyexiv2`.
-    - `ptz`: ONVIF PTZ camera control support through `onvif-zeep`.
-
-    For a development machine, install the dev extra:
-    ```bash
-    pip install -e '.[dev]'
-    ```
-
-    If you plan to control GoPro cameras over Bluetooth, install the GoPro extra:
-    ```bash
-    pip install -e '.[gopro]'
-    ```
-
-    If you plan to control ONVIF PTZ cameras, install the PTZ extra:
-    ```bash
-    pip install -e '.[ptz]'
-    ```
-
-    If you plan to capture from a Raspberry Pi camera with `capture_method: picamera2`, install the Picamera2 extra:
-    ```bash
-    pip install -e '.[picamera2]'
-    ```
-
-    On Raspberry Pi OS, `picamera2` and `libcamera` are often best installed from Debian packages instead of PyPI. In that case, install the OS packages, create the virtual environment with `--system-site-packages`, and keep the Python install as the base package:
-    ```bash
-    sudo apt-get install python3-picamera2
-    python3 -m venv --system-site-packages venv
-    pip install -e .
-    ```
-
-    Extras can be combined in one install command:
-    ```bash
-    pip install -e '.[dev,gopro,picamera2,pyexiv2,ptz]'
-    ```
-
-    Production deployments should usually install only the base package unless a specific camera or workflow requires an extra. The base install does not install Raspberry Pi camera libraries.
-
-## Usage
-
-The application is run using the `fenetre` command, which is made available in your virtual environment after installation.
-
-You must provide the path to a configuration file using the `--config` flag. A sample configuration is provided in `config.example.yaml`.
-
-1.  **Copy the example configuration:**
-    ```bash
-    cp config.example.yaml config.yaml
-    ```
-
-2.  **Edit `config.yaml`** to match your setup (camera URLs, paths, etc.).
-
-3.  **Run the application:**
-    ```bash
-    fenetre --config=config.yaml
-    ```
-
-The application will start, and based on your configuration, it will begin capturing images.
-
-## Running with systemd
-
-For a long-running deployment, create one systemd service per config file. The service should run the `fenetre` executable from the virtual environment, set the repository as the working directory, and pass the deployment-specific config with `--config`.
-
-Example service for `config.fenetre-main.yaml`:
-
-```ini
-[Unit]
-Description=fenetre.cam main capture service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=mathieu
-Group=mathieu
-WorkingDirectory=/home/mathieu/fenetre-playground/fenetre.cam
-ExecStart=/home/mathieu/fenetre-playground/venv/bin/fenetre --config=/home/mathieu/fenetre-playground/fenetre.cam/config.fenetre-main.yaml
-Restart=always
-RestartSec=10
-KillSignal=SIGINT
-TimeoutStopSec=45
-Environment=TZ=America/Los_Angeles
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Install it as a system service:
+Build locally:
 
 ```bash
-sudo install -m 0644 fenetre-main.service /etc/systemd/system/fenetre-main.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now fenetre-main.service
+docker build --network=host -t fenetre:local .
 ```
 
-Check that it started correctly:
-
-```bash
-systemctl status fenetre-main.service --no-pager
-journalctl -u fenetre-main.service -n 80 --no-pager
-```
-
-To run multiple deployments on the same machine, repeat the same pattern with a unique service name and config path for each deployment. For example:
-
-```text
-fenetre-sfbay.service     -> config.sfbay.yaml
-fenetre-camaredn.service  -> config.camaredn.yaml
-fenetre-main.service      -> config.fenetre-main.yaml
-```
-
-Make sure each config uses distinct ports and work directories before enabling multiple services.
-
-## Running with Docker on Intel
-
-The included `Dockerfile` builds an Ubuntu 26.04 image with Python and ffmpeg. It runs in CPU-only environments by default. The AMD64 image also includes Intel VA-API/QuickSync runtime packages for hosts that expose `/dev/dri`; the ARM64 image stays CPU-only.
-
-Build the image:
-
-```bash
-docker build --network=host -t fenetre:intel-vaapi .
-```
-
-Run it with the host render devices, config file, and data directories mounted:
+Seed persistent storage once:
 
 ```bash
 sudo mkdir -p /srv/fenetre/data /srv/fenetre/logs
 sudo install -m 0664 config.aredn-example.yaml /srv/fenetre/config.yaml
+```
 
+Run:
+
+```bash
 docker run --rm \
   --name fenetre \
-  --device /dev/dri:/dev/dri \
   -p 8888:8888 \
   -p 8889:8889 \
   -p 1984:1984 \
@@ -186,56 +61,26 @@ docker run --rm \
   -v /srv/fenetre/config.yaml:/srv/fenetre/config.yaml \
   -v /srv/fenetre/data:/srv/fenetre/data \
   -v /srv/fenetre/logs:/srv/fenetre/logs \
-  fenetre:intel-vaapi
+  fenetre:local
 ```
 
-Or use compose:
+Open:
 
-```bash
-docker compose up --build
-```
+- Camera dashboard: `http://HOST:8888/`
+- Admin dashboard: `http://HOST:8889/`
+- go2rtc dashboard: `http://HOST:1984/`
 
-## Portainer Stack Deployment
+On first startup, Fenetre creates `admin` / `admin` as a `superadmin` only if the config has no `users:` block. Change that password immediately.
 
-This is the recommended deployment path for Portainer. It uses the prebuilt
-GHCR image, keeps all runtime state on the host, and lets you update the
-container without losing config, snapshots, timelapses, or logs.
+## Portainer Stack
 
-The GitHub Actions workflow publishes multi-arch AMD64/ARM64 images to GHCR:
+Use the prebuilt GHCR image:
 
 ```text
 ghcr.io/dlanfranconi/aredn-timelapse-generator:latest-wip
 ```
 
-Use persistent host paths so container upgrades do not delete config, photos,
-timelapses, or logs:
-
-```text
-/srv/fenetre/config.yaml  -> /srv/fenetre/config.yaml
-/srv/fenetre/data         -> /srv/fenetre/data
-/srv/fenetre/logs         -> /srv/fenetre/logs
-```
-
-On the Docker host, create the directories and seed the config once:
-
-```bash
-sudo mkdir -p /srv/fenetre/data /srv/fenetre/logs
-sudo install -m 0664 config.aredn-example.yaml /srv/fenetre/config.yaml
-```
-
-In Portainer:
-
-1. Go to **Stacks**.
-2. Select **Add stack**.
-3. Name the stack, for example `fenetre`.
-4. Paste the stack YAML below.
-5. Deploy the stack.
-6. Open the public UI at `http://HOST:8888/`.
-7. Open the admin UI at `http://HOST:8889/` and log in.
-8. On first setup, log in as `admin` / `admin`, then change the password in
-   **Manage Users**.
-
-Example Portainer stack:
+Recommended stack:
 
 ```yaml
 services:
@@ -245,12 +90,12 @@ services:
     restart: unless-stopped
 
     ports:
-      - "8888:8888" # public, view-only site
-      - "8889:8889" # admin UI, Basic Auth protected
-      - "1984:1984" # go2rtc web/API for PTZ live alignment
-      - "8554:8554" # go2rtc RTSP restreaming
-      - "8555:8555" # go2rtc WebRTC TCP
-      - "8555:8555/udp" # go2rtc WebRTC UDP
+      - "8888:8888"
+      - "8889:8889"
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555"
+      - "8555:8555/udp"
 
     environment:
       TZ: America/Los_Angeles
@@ -263,142 +108,133 @@ services:
       - /srv/fenetre/logs:/srv/fenetre/logs
 
     # Optional AMD64 Intel VAAPI/QuickSync acceleration.
-    # Uncomment only on hosts with /dev/dri available.
     # devices:
     #   - /dev/dri:/dev/dri
 ```
 
-The config mount is intentionally read-write because the admin UI updates the
-YAML file and writes timestamped backups beside it.
+The config mount must be read-write. The admin UI writes camera settings, users, site settings, launch settings, and timestamped backups beside the YAML file.
 
-The admin UI on port `8889` requires HTTP Basic Auth. On first setup, Fenetre
-creates a config-backed superadmin user with username `admin` and password `admin`.
-This bootstrap only happens when the config has no `users:` block yet, so
-upgrading the container will not restore an admin user you removed or overwrite
-a password you changed.
-Admin UI config writes preserve the existing `users:` block, password hashes,
-roles, PTZ access levels, and assigned PTZ camera lists during generic config
-saves, even if an older browser tab submits stale or empty user data. Use
-**Manage Users** to intentionally add, change, or delete users. Deleted cameras
-are still removed from every user's PTZ camera list during config saves.
+## Persistence And Upgrades
 
-Change the password from **Manage Users** in the admin UI after the first login.
-If you lock yourself out, reset the admin user from the container CLI:
+Keep these host paths persistent:
+
+```text
+/srv/fenetre/config.yaml  -> /srv/fenetre/config.yaml
+/srv/fenetre/data         -> /srv/fenetre/data
+/srv/fenetre/logs         -> /srv/fenetre/logs
+```
+
+The `users:` block lives in `config.yaml`. Container rebuilds and upgrades do not reset users, password hashes, roles, PTZ access levels, or assigned PTZ camera lists as long as the same mounted config file is kept. Generic config saves preserve existing users even if an older browser tab submits stale or empty user data.
+
+Deleted cameras are automatically removed from every user's PTZ camera list during config saves.
+
+If you lock yourself out, reset the default admin user from the container:
 
 ```bash
 docker exec -it fenetre fenetre-user --config /srv/fenetre/config.yaml reset-admin
 ```
 
-Useful checks inside the built image:
+## Users And Roles
 
-```bash
-docker run --rm --device /dev/dri:/dev/dri --entrypoint vainfo fenetre:intel-vaapi
-docker run --rm --entrypoint ffmpeg fenetre:intel-vaapi -hide_banner -encoders | grep -E 'vaapi|qsv'
+- `superadmin`: full admin access, can edit users, set other users' passwords, assign PTZ cameras, and control every PTZ camera.
+- `admin`: admin dashboard access and camera control only for cameras assigned by a superadmin.
+- `operator`: public dashboard access plus assigned PTZ control; no admin dashboard.
+- `viewer`: view-only public dashboard access; no admin dashboard.
+
+Public-dashboard users can change their own password from the callsign/account menu in the top-right corner. Admin-dashboard users can also change their own password from the admin menu. Only a `superadmin` can set another user's password.
+
+Browsers are told not to save login and camera-secret fields by default. Some browsers may still offer password management, but the form hints are set to avoid automatic saving.
+
+## Website Access And Camera Visibility
+
+Set website access under `global.ui.public_site` or from the admin Site panel:
+
+```yaml
+global:
+  ui:
+    public_site: true
 ```
 
-When using hardware encoding, set `ffmpeg_options` in the relevant timelapse config to an encoder available on the host, such as `h264_vaapi`, `hevc_vaapi`, or a supported `*_qsv` encoder. The container provides the userspace libraries, but the host kernel driver and `/dev/dri` devices still determine what actually works.
+- `true`: anonymous visitors can view public cameras on `:8888`.
+- `false`: `:8888` shows a login landing page with the deployment name before camera data is served.
 
-Raspberry Pi camera deployments are better served by the systemd approach above because `picamera2`, `libcamera`, and device permissions are closely tied to Raspberry Pi OS.
-
-## Capture cadence and storage retention
-
-For HTTP/HTTPS snapshot cameras, use `snap_interval_s: 60` for one snapshot per minute and `activity_interval_s: 10` for fast capture when SSIM detects changes inside `ssim_area`. Sunrise/sunset windows use `sunrise_sunset.interval_s`, typically `10`.
-
-## Camera credentials, RTSP capture, PTZ, and go2rtc
-
-Use the admin UI at `http://HOST:8889/` for normal camera setup. The camera form has separate fields for snapshot credentials, RTSP stream URLs, and PTZ options, so credentials do not need to be embedded in the HTTP snapshot URL.
-
-![Admin camera setup fields](docs/images/go2rtc-admin-camera.svg)
-
-In the admin **Site** panel:
-
-- `Website access: Public` keeps the port `8888` camera page viewable without login.
-- `Website access: Private` shows a login landing page with the configured GUI name before any cameras, camera metadata, photos, or timelapse API results are served.
-
-The main **Save to config.yaml** button also applies the current **Site** panel GUI name and website access values before writing the YAML file. **Reload Application Config** refreshes the admin editor from the saved file after the reload request.
-
-Each camera has a **Main page visibility** setting:
-
-- `Public`: shown to everyone when the website is public.
-- `Logged-in users`: hidden from anonymous visitors, shown after login.
-- `Hidden`: removed from the main camera page for everyone, while still remaining in the admin config for maintenance.
-
-Existing configs with `public: false` are treated as `Logged-in users` for backwards compatibility.
-
-The **Template**, **Snapshot template**, and **RTSP template** dropdowns provide starting points for common cameras: Reolink, Sunba, Hikvision, Ubiquiti, Dahua, Amcrest, Axis, and TP-Link. Replace `CAMERA_IP` and `HTTP_PORT` in the generated snapshot URL with the camera address and web port. RTSP templates use `rtsp://USERNAME:PASSWORD@CAMERA_IP:554/...`; replace the placeholders, or use the snapshot username/password fields before selecting the RTSP template so Fenetre can prefill them. PTZ-capable cameras also have movement capability checkboxes, optional tour controls, and a preset row editor.
-
-For cameras that need HTTP Basic or Digest authentication for snapshots, keep the URL clean and set credentials in `http_auth`:
+Each camera can be independently visible:
 
 ```yaml
 cameras:
-  Authenticated-Snapshot:
-    url: http://camera.local/snapshot.jpg
-    http_auth:
-      username: admin
-      password: change-me
-      type: auto
+  Ridge-PTZ:
+    visibility: public
+  Maintenance-Camera:
+    visibility: hidden
 ```
 
-Some embedded camera CGI endpoints reject unknown query parameters. If a snapshot URL works in a browser but the admin snapshot test fails with a 404 containing `_fenetre_test=...`, disable cache busting for that camera by unchecking `Cache bust` in the admin form or setting `cache_bust: false`.
+- `public`: shown to everyone when the site is public.
+- `authenticated`: hidden from anonymous visitors, shown after login.
+- `hidden`: kept in config/admin but removed from the main camera page.
 
-Sunba cameras commonly use:
+Older configs with `public: false` are treated as `visibility: authenticated`.
+
+## Camera Capture
+
+Use the admin dashboard at `http://HOST:8889/` for normal camera add/edit work. The guided camera form has separate fields for snapshot URL, snapshot credentials, RTSP URLs, PTZ settings, presets, tours, and launch-camera settings. Saving a camera writes `config.yaml`, syncs public UI assets, rebuilds camera metadata, syncs go2rtc streams, and asks the running app to reload.
+
+HTTP snapshot camera:
+
+```yaml
+cameras:
+  Snapshot-Camera:
+    url: http://camera.local/images/snapshot.jpg
+    http_auth:
+      username: admin
+      password: CHANGE_ME
+      type: basic
+    snap_interval_s: 60
+    activity_interval_s: 10
+    timeout_s: 15
+```
+
+Use `type: basic` or `type: digest`. Some cameras reject unknown cache-busting query parameters; if a browser URL works but the admin test fails with `_fenetre_test=...`, set `cache_bust: false`.
+
+Sunba snapshot cameras commonly use:
 
 ```yaml
 url: http://CAMERA_IP:HTTP_PORT/images/snapshot.jpg
 http_auth:
   type: basic
   username: admin
-  password: change-me
+  password: CHANGE_ME
 ```
 
-If a vendor snapshot endpoint only accepts credentials as URL query parameters, use that vendor's legacy CGI template and understand that the camera password will be stored in the snapshot URL.
-
-For RTSP-only cameras that do not support HTTP/HTTPS snapshots, set `capture_source: rtsp`. Fenetre generates a local ffmpeg one-frame snapshot command from `rtsp_url`:
+RTSP-only camera:
 
 ```yaml
 cameras:
   RTSP-Only:
-    capture_source: rtsp
-    rtsp_url: rtsp://admin:change-me@camera.local:554/stream1
+    rtsp_url: rtsp://admin:CHANGE_ME@camera.local:554/stream1
+    local_command: >-
+      ffmpeg -hide_banner -loglevel error -rtsp_transport tcp
+      -allowed_media_types video
+      -i rtsp://admin:CHANGE_ME@camera.local:554/stream1
+      -an -map 0:v:0 -frames:v 1 -f image2pipe -vcodec mjpeg -
     snap_interval_s: 60
     capture_failure_interval_s: 180
 ```
 
-When a camera is saved in RTSP capture mode, Fenetre removes stale snapshot URL and HTTP-auth fields from that camera entry and uses the generated/local RTSP command ahead of any legacy `url` value. This prevents placeholder snapshot templates such as `http://CAMERA_IP:HTTP_PORT/...` from being used after switching a camera to RTSP capture.
+`capture_source: rtsp` is used by the admin form when saving a camera. In YAML, the persistent RTSP capture fields are `rtsp_url` and the generated `local_command`.
 
-If capture fails after at least one good frame, Fenetre now keeps the snap thread alive, marks the camera offline, waits `capture_failure_interval_s` seconds, and retries without letting the watchdog rapidly restart the thread. The default retry interval is 60 seconds. For fragile cameras that reboot or refuse RTSP for several minutes after a failed session, set this higher, such as `180` or `300`.
+Fenetre-generated RTSP snapshot commands are video-only. That avoids negotiating audio tracks on cameras where audio probing is unstable.
 
-If an RTSP/local-command camera logs `did not return a valid image`, the command ran but stdout was not a JPEG/PNG that Pillow could decode. Fenetre logs the command exit code, the first bytes of stdout, and the last stderr text so you can tell whether ffmpeg returned an auth error, protocol error, empty output, HTML, or another non-image response. To test the generated command manually, run an equivalent one-frame capture inside the container:
+If capture fails after at least one good frame, Fenetre marks the camera offline, waits `capture_failure_interval_s`, and retries. For fragile legacy cameras that reboot after failed RTSP sessions, raise this interval or disable the camera while troubleshooting.
 
-```bash
-docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
-  -allowed_media_types video \
-  -i 'rtsp://USER:PASSWORD@camera.local:554/stream1' \
-  -an -map 0:v:0 -frames:v 1 -f image2pipe -vcodec mjpeg - > /tmp/test.jpg"
-```
+## go2rtc Live Views
 
-Then confirm `/tmp/test.jpg` is a real JPEG. If the command hangs or prints an error, fix the RTSP URL, credentials, stream path, or transport before adding it back to Fenetre.
-
-Fenetre-generated RTSP snapshot commands are video-only. This avoids negotiating or decoding RTSP audio tracks on cameras where audio SETUP/probing is unstable. Older saved Fenetre-generated RTSP commands are upgraded in memory at capture time when `rtsp_url` is present; custom `local_command` values are left unchanged.
-
-`rtsp_url` and `ptz_rtsp_url` are used for different workflows:
-
-- `rtsp_url`: the stream Fenetre uses when the camera is RTSP-only and has no HTTP/HTTPS snapshot endpoint. This same stream is also the go2rtc live-view fallback.
-- `ptz_rtsp_url`: an optional low-latency or lower-resolution stream used for the embedded PTZ alignment view. If it is empty, go2rtc falls back to `rtsp_url`. The admin camera form shows this field whenever PTZ is enabled, including RTSP capture cameras, so RTSP-only cameras can use a main stream for captures and an optional substream for alignment.
-
-For an RTSP-only camera, set only `rtsp_url`; do not duplicate the same URL into `ptz_rtsp_url`. RTSP video URLs should normally use the camera's RTSP service, usually port `554`, for example `rtsp://user:password@camera.local:554/stream1`. For a snapshot camera with PTZ controls, keep the snapshot URL in `url`, set `ptz_rtsp_url` to a low-res/substream for aiming, and optionally set `rtsp_url` to the high-res/main stream for the **Open full live view** link. If both RTSP fields are set and differ, Fenetre creates two go2rtc streams: one alignment stream and one `_full` stream.
-
-If a camera is fragile, private, or should only be used for still-image capture, disable **Enable RTSP live view** in the admin camera form or set `go2rtc_enabled: false`. Fenetre will keep snapshot capture and timelapse behavior intact, but it will omit that camera from generated go2rtc streams and from authenticated live-view metadata.
-
-For PTZ alignment, the Docker image includes go2rtc and starts it automatically when all of these are true:
+go2rtc starts automatically when:
 
 - `global.go2rtc.enabled: true`
 - at least one camera has `rtsp_url` or `ptz_rtsp_url`
-- `FENETRE_GO2RTC` is unset, `auto`, `on`, `true`, or `1`
+- `FENETRE_GO2RTC` is `auto`, `on`, `true`, or unset
 
-The Docker image also includes the `ptz` Python extra, so ONVIF PTZ control is available without a separate dependency install. If you run Fenetre outside Docker, install `pip install -e '.[ptz]'` for ONVIF controls.
-
-The generated go2rtc config is written inside the container at `/tmp/fenetre-go2rtc.yaml`. Public `cameras.json` does not expose raw RTSP URLs or go2rtc player URLs. Logged-in public-page users receive go2rtc player URLs from `/api/cameras` only after authentication. When you add or edit a camera through the admin UI, Fenetre updates this generated config and asks the local go2rtc API to add/update/remove streams immediately. If `FENETRE_GO2RTC=auto` and go2rtc was not running yet because the container started with no RTSP streams, Fenetre starts the bundled go2rtc process and retries the sync. If go2rtc is disabled or unreachable, the save still succeeds and the admin status message includes the sync warning.
+Recommended defaults:
 
 ```yaml
 global:
@@ -411,50 +247,69 @@ global:
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
-    # Set this when WebRTC works poorly or fails from browsers outside the container network.
-    # Use the host/IP and port that browser clients can reach.
-    webrtc_candidates:
-      - HOST:8555
+    webrtc_candidates: []
     live_view_idle_timeout_s: 60
-
-cameras:
-  Ridge-PTZ:
-    url: http://ridge-camera.local/snapshot.jpg
-    go2rtc_enabled: true
-    rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream1
-    ptz_rtsp_url: rtsp://admin:password@ridge-camera.local:554/stream2
-    ptz:
-      enabled: true
-      allow_manual_control: true
 ```
 
-RTSP/go2rtc live view and ONVIF PTZ are separate camera services. RTSP should use an `rtsp://...` URL, normally on port `554`; do not put an ONVIF/PTZ port such as `8899` in the RTSP URL unless the camera documentation explicitly says RTSP is served there. A camera can stream correctly over RTSP while PTZ fails if `ptz.host` or `ptz.port` points at the wrong ONVIF endpoint. The ONVIF port is often `80`, `8000`, `8080`, or `8899`, but it is camera/vendor dependent; it is not necessarily the RTSP port and may not be the same as the camera's web UI or CGI PTZ port. If PTZ returns a connection refused error such as `/onvif/Media` on `10.1.64.69:8899`, enable ONVIF in the camera settings and change the configured ONVIF port to the port where the camera exposes ONVIF.
+The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted.
 
-Some ONVIF cameras handle short relative nudges better than continuous move plus stop. Fenetre exposes that as generic PTZ configuration instead of a vendor-specific profile: set `ptz.move_mode: relative` and adjust `relative_move_scale` if the nudge is too large or too small. If a camera cannot tolerate ONVIF `Stop`, set `disable_stop: true`; continuous manual movement will be rejected and nudge movement must use relative mode.
+`rtsp_url` and `ptz_rtsp_url` have different jobs:
+
+- `rtsp_url`: primary RTSP stream, used for full live view and RTSP still capture.
+- `ptz_rtsp_url`: optional low-resolution or low-latency PTZ alignment stream.
+
+If both are set and differ, Fenetre creates an alignment stream and a separate `_full` stream. If `ptz_rtsp_url` is empty, PTZ alignment falls back to `rtsp_url`.
+
+Disable `go2rtc_enabled` per camera if a camera should capture stills only:
 
 ```yaml
 cameras:
-  Relative-PTZ:
+  Fragile-Legacy-Camera:
+    go2rtc_enabled: false
+```
+
+Inspect the generated config:
+
+```bash
+docker exec -it fenetre cat /tmp/fenetre-go2rtc.yaml
+```
+
+If `http://HOST:1984/stream.html?src=fenetre_CAMERA` works but the Fenetre page does not, check `global.go2rtc.base_url` and confirm the browser can reach that exact host and port.
+
+## PTZ
+
+RTSP live view and ONVIF PTZ are separate services. RTSP usually uses port `554`. ONVIF commonly uses `80`, `8000`, `8080`, or `8899`, depending on the camera. Do not put the ONVIF port into the RTSP URL unless the camera documentation explicitly says RTSP is served there.
+
+Basic ONVIF PTZ:
+
+```yaml
+cameras:
+  Ridge-PTZ:
+    url: http://ridge-camera.local/images/snapshot.jpg
+    rtsp_url: rtsp://admin:CHANGE_ME@ridge-camera.local:554/main
+    ptz_rtsp_url: rtsp://admin:CHANGE_ME@ridge-camera.local:554/sub
     ptz:
       enabled: true
-      host: 10.1.64.69
-      port: 8899
+      host: ridge-camera.local
+      port: 80
       username: admin
       password: CHANGE_ME
-      profile_token: Profile_1
-      move_mode: relative
-      relative_move_scale: 0.05
-      disable_stop: true
+      allow_presets: true
+      allow_manual_control: true
+      access_level: presets
       capabilities:
         pan: true
         tilt: true
         zoom: true
-      tour:
-        enabled: true
-        auto_resume_s: 1800
+      presets:
+        - id: launch-pad
+          token: "1"
+          name: Launch Pad
 ```
 
-If a camera only supports zoom, disable Pan and Tilt in the admin editor or set:
+Preset rows are editable in the admin camera editor. `Load ONVIF Presets` imports named presets from the camera. Unnamed presets and numeric-only presets with no real name are treated as untaught and hidden.
+
+If a camera only supports zoom, disable pan and tilt:
 
 ```yaml
 ptz:
@@ -464,118 +319,48 @@ ptz:
     zoom: true
 ```
 
-Tour controls are per camera. When enabled, authenticated users with manual PTZ access see **Pause tour** and **Resume tour** controls. Pausing a tour schedules an automatic resume after `ptz.tour.auto_resume_s` seconds; set it to `0` to disable auto-resume. The default tour backend uses ONVIF `OperatePresetTour`. For cameras that need vendor HTTP tour commands, advanced config can use `ptz.tour.backend: http` with `pause_url` and `resume_url` templates.
-
-The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
-
-The default go2rtc player is the compatibility player with video-only muted playback: `{base_url}/stream.html?src={stream}&media=video&muted=1`. Older configs that still contain the former exact defaults, `{base_url}/webrtc.html?src={stream}` or `{base_url}/stream.html?src={stream}`, are migrated to the muted `stream.html` default during validation because WebRTC is often less reliable across routed mesh networks and public audio should stay disabled by default. Fenetre also appends or overrides `media=video&muted=1` on generated public go2rtc `stream.html` and `webrtc.html` URLs, including custom player templates. If you intentionally prefer a custom go2rtc page or playback mode, set:
+Some cameras handle short relative nudges better than continuous move plus stop:
 
 ```yaml
-global:
-  go2rtc:
-    player_url_template: "{base_url}/stream.html?src={stream}&mode=webrtc&media=video&muted=1"
+ptz:
+  move_mode: relative
+  relative_move_scale: 0.05
+  disable_stop: true
 ```
 
-If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published.
-
-Expose the go2rtc ports in Docker or Compose:
+Tour controls are configured per camera:
 
 ```yaml
-ports:
-  - "8888:8888"      # public Fenetre UI
-  - "8889:8889"      # admin UI
-  - "1984:1984"      # go2rtc web/API
-  - "8554:8554"      # go2rtc RTSP restreaming
-  - "8555:8555"      # go2rtc WebRTC TCP
-  - "8555:8555/udp"  # go2rtc WebRTC UDP
-
-environment:
-  TZ: America/Los_Angeles
-  FENETRE_PID_FILE: /tmp/fenetre.pid
-  FENETRE_GO2RTC: auto
+ptz:
+  tour:
+    enabled: true
+    auto_resume_s: 1800
 ```
 
-`FENETRE_GO2RTC` controls the bundled go2rtc process:
+When enabled, authorized manual-PTZ users see Pause Tour and Resume Tour controls. `auto_resume_s: 1800` resumes the tour 30 minutes after a manual pause. Set it to `0` to disable auto-resume.
 
-- `auto`: start go2rtc only when the Fenetre config enables it and has RTSP streams.
-- `off`: never start go2rtc.
-- `on`: require go2rtc; fail container startup if config generation fails.
+For legacy cameras that crash on ONVIF or RTSP sessions, keep the camera as snapshot-only or RTSP-capture-only and set `ptz.enabled: false` and `go2rtc_enabled: false`. That keeps the deployment clean without adding vendor-specific crash workarounds to the normal path.
 
-When the container starts correctly, logs include:
+## Image Profiles
 
-```text
-Starting go2rtc with generated config /tmp/fenetre-go2rtc.yaml
-```
-
-If `http://HOST:1984/` gives `connection refused`, go2rtc did not start or the port is not published. Check the container logs first:
-
-```bash
-docker logs fenetre | grep -i go2rtc
-```
-
-In `auto` mode, this message means go2rtc intentionally stayed off because the mounted `/srv/fenetre/config.yaml` did not enable it or did not have any RTSP streams:
-
-```text
-go2rtc not started; set global.go2rtc.enabled and at least one camera rtsp_url or ptz_rtsp_url to enable it
-```
-
-After editing camera RTSP fields in the guided admin form, go2rtc streams are synced automatically. After editing raw `global.go2rtc` settings in the advanced config editor, save the config and use **Reload Application Config** if Fenetre capture settings also changed. If the go2rtc status warning says the API sync failed, check that go2rtc is running and reachable on the configured API port, and confirm `FENETRE_GO2RTC` is not set to `off`, `false`, or `0`.
-
-You can inspect the generated go2rtc config:
-
-```bash
-docker exec -it fenetre cat /tmp/fenetre-go2rtc.yaml
-```
-
-And open the go2rtc UI:
-
-```text
-http://HOST:1984/
-```
-
-The camera add/edit dialog's **Test Capture and Streams** button checks the primary snapshot or RTSP capture source. If a camera also has a PTZ live RTSP URL, including RTSP capture cameras with an optional low-resolution alignment substream, the same test captures one frame from that stream too and reports it separately.
-
-Saving a camera from the admin add/edit dialog writes `config.yaml`, syncs bundled public UI files, rebuilds `cameras.json`, syncs go2rtc stream definitions, and asks the running Fenetre process to reload its configuration. If the reload signal fails, the config save still succeeds and the admin status line shows the reload warning.
-
-On the public Fenetre page, normal viewers remain view-only. Pressing `Login` opens the inline login form. The page marks login and secret fields with non-saving browser autocomplete hints, stores a short-lived public session token after login, reloads automatically, and shows manual PTZ controls only for configured PTZ cameras the user may control. Manual PTZ buttons are short bounded nudges: by default, each request sends a move at the selected speed, waits for the selected nudge duration, then sends stop from the server side. Cameras configured with `ptz.move_mode: relative` send a single relative nudge command instead. The public page hides unsupported controls based on `ptz.capabilities`, so zoom-only cameras show only zoom controls.
-
-Preset dropdowns use configured presets when present; otherwise Fenetre tries to discover named ONVIF presets on demand for authorized users. Unnamed ONVIF presets are treated as untaught and hidden. Numeric-only presets such as `1` with no real name are also hidden. Use the admin camera editor's **Load ONVIF Presets** button to import named presets into editable rows, then rename or remove rows before saving.
-
-The embedded alignment view is loaded lazily when you tap the preview box or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens a Fenetre live-view wrapper in a new window when a separate `rtsp_url` stream is configured; that wrapper embeds the full go2rtc player and sends authenticated heartbeats while the window is open.
-
-Those heartbeats let Fenetre know whether a logged-in user is actively watching an HD stream. Scheduled recording workflows, such as rocket-launch recording, can check active full-stream viewers before deciding whether to run hooks that might disturb an HD live stream.
-
-Camera image profiles are optional HTTP/API hooks for changing camera image settings by profile or by mode. They are intended for vendor APIs such as Reolink day/sunset/night tuning, but generic HTTP actions also work. Profiles are disabled unless `image_profiles.enabled: true`.
+Image profiles are optional HTTP/API hooks for camera tuning. They can be used for day, sunset, night, or launch-specific image settings.
 
 ```yaml
 cameras:
   Reolink-PTZ:
-    ptz:
-      enabled: true
-      host: camera.local
-      username: admin
-      password: change-me
     image_profiles:
       enabled: true
       vendor: reolink
-      host: camera.local
+      host: reolink.local
       http_port: 80
       channel: 0
       username: admin
-      password: change-me
+      password: CHANGE_ME
       mode_profiles:
         sunrise: sunrise
         sunset: sunset
         night: night
       profiles:
-        sunrise:
-          settings:
-            bright: 128
-            contrast: 64
-        night:
-          settings:
-            bright: 96
-            contrast: 80
         launch:
           actions:
             - name: launch-exposure
@@ -585,7 +370,7 @@ cameras:
                 mode: launch
 ```
 
-The admin API can dry-run or apply an image profile:
+Dry-run an image profile from the admin API:
 
 ```bash
 curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
@@ -593,28 +378,102 @@ curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
   -d '{"camera":"Reolink-PTZ","profile":"launch","dry_run":true}'
 ```
 
-Rocket-launch automation is configured under `global.launch_workflow`. It is disabled by default and defaults to `dry_run: true`; keep dry-run enabled until the preview and due actions look right. Schedule input can come from inline `schedule_events`, a local `schedule_file`, or a JSON `schedule_url`. The recommended live source is Launch Library 2.3.0 upcoming launches, for example `https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net`. Keep `refresh_interval_s` conservative because unauthenticated Launch Library requests are rate limited. Events are normalized from common fields such as `net`, `date_utc`, provider, pad, and location, then matched to one or more plans.
+## Rocket Launch Timer
 
-Use the admin **Launch Automation** panel to enable or disable the workflow, preview upcoming launches, and mark cameras as rocket launch cameras. When the workflow is disabled, Fenetre does not poll the launch schedule and the public timelapse behavior stays unchanged. The admin launch dashboard at `http://HOST:8889/static/admin/launches.html` shows the upcoming matched launch times, relevant cameras, presets, recording status, and configured recording download paths.
+Rocket-launch automation is optional and disabled by default. When disabled, Fenetre behaves like a normal camera/timelapse server and the launch dashboard link is hidden on the public page.
+
+Enable it only on deployments where launches matter:
 
 ```yaml
 global:
   launch_workflow:
     enabled: true
     dry_run: true
+```
+
+Keep `dry_run: true` until the preview shows the right launches, cameras, presets, and hooks.
+
+### How Launch Times Are Known
+
+Fenetre reads launch schedules from one of three sources:
+
+- `schedule_events`: inline events in `config.yaml`, useful for testing.
+- `schedule_file`: local JSON file.
+- `schedule_url`: remote JSON endpoint.
+
+The recommended remote source is Launch Library 2.3.0 upcoming launches:
+
+```yaml
+schedule_url: https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net
+refresh_interval_s: 300
+lookahead_hours: 168
+```
+
+Launch Library responses are normalized from fields such as `net`, launch provider, pad, location, mission name, and status.
+
+### Selecting Launch Locations
+
+Plans filter normalized events. For Vandenberg-only SpaceX launches:
+
+```yaml
+plans:
+  vandenberg-spacex:
+    enabled: true
+    match:
+      providers: [SpaceX]
+      locations: [Vandenberg]
+      pads: []
+      names: []
+      statuses: []
+      keywords: []
+```
+
+Use `locations`, `pads`, `providers`, `names`, `statuses`, and `keywords` to include or exclude launch sources. A deployment in Florida can use a different plan; a deployment with no launch use case should leave `enabled: false`.
+
+### Launch Phases And Actions
+
+For each matched launch, Fenetre computes:
+
+- `pending`: before `launch_time - pre_seconds`
+- `prelaunch`: from `launch_time - pre_seconds` until launch time
+- `recording`: from launch time through `launch_time + post_seconds`
+- `complete`: after the post window
+
+Due actions are scheduled once per launch/camera/action:
+
+- `pause_tour` at `launch_time - pre_seconds`
+- `image_profile` at `launch_time - pre_seconds`
+- `goto_preset` at `launch_time - pre_seconds`
+- `record_start` at `launch_time - pre_seconds`
+- `record_stop` at `launch_time + post_seconds`
+- `download_recording` after `record_stop + download_delay_seconds`
+- `resume_tour` at `launch_time + post_seconds`
+
+When `dry_run: false`, completed action keys are persisted to `state_file` so restarting the container does not repeat already-completed launch actions.
+
+### Launch Camera Example
+
+```yaml
+global:
+  launch_workflow:
+    enabled: true
+    dry_run: true
+    schedule_url: https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net
     refresh_interval_s: 300
+    lookahead_hours: 168
     default_pre_seconds: 60
     default_post_seconds: 900
-    lookahead_hours: 168
     state_file: /srv/fenetre/data/launch_workflow_state.json
-    schedule_url: https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net
     plans:
       vandenberg-spacex:
+        enabled: true
         match:
           providers: [SpaceX]
           locations: [Vandenberg]
+        pre_seconds: 60
+        post_seconds: 900
         cameras:
-          Reolink-PTZ:
+          Ridge-PTZ:
             pause_tour: true
             resume_tour: true
             preset: launch-pad
@@ -628,143 +487,100 @@ global:
               skip_when_full_viewers: true
 ```
 
-Launch actions are recorded in `state_file`, so real actions are not repeated after restarts. `pause_tour` and `resume_tour` use the camera's configured PTZ tour backend. `preset` uses the configured preset id/token. Record hooks can use `*_url` or `*_command`, and placeholders such as `{camera}`, `{launch_id}`, `{launch_name}`, `{launch_time_utc}`, `{provider}`, `{location}`, `{pad}`, `{host}`, `{username}`, and `{password}` are rendered at runtime.
+Hook URL and command templates can use:
 
-The admin API exposes:
-
-- `GET /api/launches/preview`: show upcoming matched launches and phases.
-- `POST /api/launches/run_due`: run due actions, with optional `{"dry_run": false}`.
-
-PTZ user roles are:
-
-- `superadmin`: can manage users and control every PTZ camera.
-- `admin`: can open the admin UI, but PTZ control is limited to the cameras and PTZ access level assigned by a superadmin.
-- `operator`: intended for public-page PTZ operation on assigned cameras.
-- `viewer`: view-only unless explicitly given PTZ access.
-
-`superuser` is accepted as a backwards-compatible alias for `superadmin`.
-
-For non-superadmin users, the **Manage Users** camera access table controls exactly which cameras they can move or send to presets. Manual movement also requires the camera's **Allow manual movement** PTZ option; otherwise the public page returns "Manual PTZ control is disabled for this camera" even if the user is logged in.
-New cameras are not added to any non-superadmin user's PTZ camera list automatically; a superadmin must grant access. When a camera is deleted from the config, Fenetre removes that camera name from every user's PTZ access list during the config save.
-
-![Public PTZ live alignment controls](docs/images/go2rtc-public-ptz.svg)
-
-Storage management is configured under `global.storage_management`. Set `work_dir_max_size_GB: 50` for the full deployment and `camera_max_size_GB: 5` for the default per-camera cap. When `prune_snapshots_first: true`, Fenetre removes old snapshots and rolling timelapse artifacts from days that already have a daily timelapse before trimming old daily timelapse files.
-
-## Recommended video encoding options
-
-Timelapse encoding is controlled per deployment in `config.yaml` under `timelapse.daily_timelapse.ffmpeg_options` and `timelapse.frequent_timelapse.ffmpeg_options`.
-
-The frequent timelapse usually benefits most from hardware encoding because it runs repeatedly and is normally viewed as HLS. The daily timelapse can use slower CPU encoding if quality or compression matters more than encode time.
-
-Good default CPU options:
-
-```yaml
-timelapse:
-  frequent_timelapse:
-    ffmpeg_2pass: false
-    framerate: 30
-    max_width: 1280
-    max_height: 720
-    ffmpeg_options: -c:v libx264 -preset veryfast -crf 26 -movflags +faststart
-    file_extension: mp4
-    output_format: hls
-  daily_timelapse:
-    framerate: 60
-    max_width: 1920
-    max_height: 1080
+```text
+{camera} {plan} {launch_id} {launch_name} {launch_time_utc}
+{provider} {location} {pad} {host} {ip} {username} {password}
+{active_full_viewers}
 ```
 
-For low-bandwidth deployments, keep the frequent timelapse at 720p HLS and the daily archive at 1080p MP4 unless you have confirmed the network and CPU can handle more. Per-camera timelapse generation can be disabled with `timelapse_enabled: false`; the legacy `generate_timelapse: false` key is also honored.
+`skip_when_full_viewers: true` skips recording/download hooks when an authenticated user is actively watching the camera's full HD stream. This is intended for cameras where a local camera recording API or stream switch could disturb a live viewer.
 
-Recommended Intel VAAPI options:
+### Launch Dashboards
 
-```yaml
-timelapse:
-  frequent_timelapse:
-    ffmpeg_2pass: false
-    ffmpeg_options: -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v h264_vaapi -qp 24 -movflags +faststart
-    file_extension: mp4
-    output_format: hls
+Admin launch dashboard:
+
+```text
+http://HOST:8889/static/admin/launches.html
 ```
 
-The service user must be able to open the render device. For a systemd deployment, add a drop-in like this:
+Public launch dashboard:
 
-```ini
-[Service]
-SupplementaryGroups=render video
+```text
+http://HOST:8888/launches.html
 ```
 
-Then reload and restart the service:
+The public launch dashboard is linked from the main camera page only when launch automation is enabled. It shows upcoming matched launch times, matching plans, relevant launch cameras, presets, image profiles, recording status, and configured download paths.
+
+Use the admin Launch Automation panel to preview schedules before disabling dry-run.
+
+## Config Files In This Repo
+
+- `config.aredn-example.yaml`: current Docker/Portainer template for AREDN/IP camera deployments.
+- `config.smaller.local.yaml`: local ffmpeg test-source config for quick development checks.
+- `docker-compose.yaml`: local build compose file.
+- `docker-compose.ghcr.yml`: compose file that pulls the GHCR image.
+- `docker-compose.portainer.yml`: Portainer-friendly compose file.
+
+Old personal deployment configs and static nginx configs from the original fork were removed because they no longer match the authenticated camera server.
+
+## Development
+
+Create a venv and install the package:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl restart fenetre.service
+python3 -m venv venv
+source venv/bin/activate
+pip install -e '.[dev,ptz]'
 ```
 
-For Docker deployments, pass the render device through to the container:
+Run the server from a config file:
 
 ```bash
-docker run --device /dev/dri:/dev/dri ...
+venv/bin/fenetre --config=config.aredn-example.yaml
 ```
 
-or in compose:
-
-```yaml
-services:
-  fenetre:
-    devices:
-      - /dev/dri:/dev/dri
-```
-
-Useful host checks:
+Run tests:
 
 ```bash
-ffmpeg -hide_banner -encoders | grep -E 'h264_vaapi|hevc_vaapi|h264_qsv|h264_v4l2m2m|libx264'
-ls -l /dev/dri
+venv/bin/pytest
 ```
 
-Validate VAAPI before enabling it in a production config:
+Optional extras:
+
+- `ptz`: ONVIF PTZ support.
+- `gopro`: legacy GoPro support.
+- `picamera2`: legacy Raspberry Pi camera support.
+- `pyexiv2`: optional EXIF support.
+
+## Troubleshooting
+
+Check container logs:
 
 ```bash
-ffmpeg -hide_banner -loglevel error \
-  -f lavfi -i testsrc2=size=640x360:rate=30 \
-  -frames:v 30 \
-  -vaapi_device /dev/dri/renderD128 \
-  -vf format=nv12,hwupload \
-  -c:v h264_vaapi -qp 24 \
-  -f mp4 -y /tmp/fenetre-vaapi-test.mp4
+docker logs fenetre
 ```
 
-If that command fails with a render-device permission error, fix the service user or container device access. If it fails with a VAAPI device or driver error, use CPU `libx264` until the host graphics driver stack is fixed.
+Check go2rtc startup:
 
-Quick Sync (`h264_qsv`) can be faster on some Intel systems, but it is more sensitive to driver and ffmpeg build details. Prefer VAAPI on Linux unless QSV has been tested on the exact host:
-
-```yaml
-ffmpeg_options: -c:v h264_qsv -global_quality 24 -look_ahead 0 -movflags +faststart
+```bash
+docker logs fenetre | grep -i go2rtc
 ```
 
-Raspberry Pi deployments can use the V4L2 mem2mem encoder when available:
+Test a one-frame RTSP capture inside the container:
 
-```yaml
-ffmpeg_options: -c:v h264_v4l2m2m -b:v 5M
+```bash
+docker exec -it fenetre sh -c "ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
+  -allowed_media_types video \
+  -i 'rtsp://USER:PASSWORD@camera.local:554/stream1' \
+  -an -map 0:v:0 -frames:v 1 -f image2pipe -vcodec mjpeg - > /tmp/test.jpg"
 ```
 
-For high-quality daily archives, VP9 CPU encoding is still reasonable when encode time is acceptable:
+Inspect go2rtc streams:
 
-```yaml
-timelapse:
-  daily_timelapse:
-    ffmpeg_2pass: true
-    ffmpeg_options: -c:v libvpx-vp9 -b:v 7M
-    file_extension: webm
+```text
+http://HOST:1984/
 ```
 
-### GoPro
-
-On the first run:
-- Put the GoPro in Pairing mode (Menu connections wireless Quic)
-- Open bluetoothctl and locate the Mac address of the GoPro (use `scan le` if it's not already showing) then type `trust <MAC_ADDR>` and `pair <MAC_ADDR>`. You can then exit bluetoothctl with `quit`. Remeber to `scan off` if you had to turn ont he scan.
-- In the app logs, you should see the Wi-Fi SSID and the password to connect to the GoPro. You may want to configure your system (netplan, wpa_supplicant ...) to autoconnect to the GoPro.
-
-**By default, the admin server runs on `http://0.0.0.0:8889`.**
+If ONVIF PTZ fails while RTSP works, test the ONVIF host and port separately from the RTSP URL. A `405 Method Not Allowed` response to a plain browser or curl GET on `/onvif/device_service` can still mean the ONVIF service is present, because ONVIF expects SOAP POST requests.

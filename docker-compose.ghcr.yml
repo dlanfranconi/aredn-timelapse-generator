@@ -17,9 +17,9 @@ services:
       FENETRE_PID_FILE: /tmp/fenetre.pid
       # auto: start bundled go2rtc only when global.go2rtc.enabled is true.
       # Use "off" to disable it or "on" to require it at startup.
-      # Alignment live views default to WebRTC and unload after
+      # Alignment live views default to go2rtc stream.html and unload after
       # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
-      # If WebRTC fails while MSE/HLS works, set
+      # If WebRTC mode fails while MSE/HLS works, set
       # global.go2rtc.webrtc_candidates to HOST:8555 in config.yaml.
       FENETRE_GO2RTC: auto
 
