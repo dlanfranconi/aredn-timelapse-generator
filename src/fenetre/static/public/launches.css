@@ -54,6 +54,50 @@ body {
     text-decoration: none;
 }
 
+.account-menu-root {
+    position: relative;
+}
+
+.account-menu-panel {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    display: grid;
+    gap: 4px;
+    min-width: 180px;
+    padding: 6px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 40;
+}
+
+.account-menu-role {
+    border-bottom: 1px solid #eee;
+    color: #666;
+    font-size: 0.85rem;
+    padding: 7px 8px 8px;
+}
+
+.account-menu-panel button {
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: #333;
+    cursor: pointer;
+    font: inherit;
+    min-height: 34px;
+    padding: 7px 8px;
+    text-align: left;
+}
+
+.account-menu-panel button:hover,
+.account-menu-panel button:focus {
+    background: #f2f2f2;
+    outline: none;
+}
+
 .control-link {
     align-items: center;
     display: inline-flex;
@@ -245,6 +289,26 @@ body.dark-mode .private-landing button {
     color: #e0e0e0;
 }
 
+body.dark-mode .account-menu-panel {
+    background: #2a2a2a;
+    border-color: #555;
+}
+
+body.dark-mode .account-menu-role {
+    border-color: #444;
+    color: #bdbdbd;
+}
+
+body.dark-mode .account-menu-panel button {
+    background: transparent;
+    color: #e0e0e0;
+}
+
+body.dark-mode .account-menu-panel button:hover,
+body.dark-mode .account-menu-panel button:focus {
+    background: #363636;
+}
+
 body.dark-mode .login-panel input {
     background: #1f1f1f;
     border-color: #555;
@@ -289,6 +353,15 @@ body.dark-mode .launch-camera-card {
     .login-panel {
         align-items: stretch;
         width: 100%;
+    }
+
+    .account-menu-root,
+    .account-menu-panel {
+        width: 100%;
+    }
+
+    .account-menu-panel {
+        position: static;
     }
 
     .control-link,

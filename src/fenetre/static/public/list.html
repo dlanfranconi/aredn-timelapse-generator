@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-    <link rel="stylesheet" href="list.css?v=20260718-private-site-camera-visibility">
+    <link rel="stylesheet" href="list.css?v=20260721-public-account-menu">
 </head>
 <body>
     <div id="main-container">
@@ -76,15 +76,20 @@
                             <path d="M15.5 3.5A8.5 8.5 0 1 0 20.5 17a6.5 6.5 0 0 1-5-13.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                         </svg>
                     </button>
-                    <button id="login-toggle" type="button">Login</button>
+                    <div class="account-menu-root">
+                        <button id="login-toggle" type="button" aria-haspopup="menu" aria-expanded="false">Login</button>
+                        <div id="account-menu" class="account-menu-panel" role="menu" hidden>
+                            <div id="account-menu-role" class="account-menu-role"></div>
+                            <button id="change-password-toggle" type="button" role="menuitem">Change Password</button>
+                            <button id="logout-submit" type="button" role="menuitem">Logout</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div id="login-panel" hidden>
                 <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username">
                 <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Password">
                 <button id="login-submit" type="button">Login</button>
-                <button id="change-password-toggle" type="button" hidden>Change Password</button>
-                <button id="logout-submit" type="button" hidden>Logout</button>
                 <span id="login-status"></span>
             </div>
             <div id="password-panel" hidden>
@@ -106,6 +111,6 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-    <script src="list.js?v=20260720-muted-go2rtc"></script>
+    <script src="list.js?v=20260721-public-account-menu"></script>
 </body>
 </html>

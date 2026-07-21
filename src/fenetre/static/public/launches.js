@@ -4,6 +4,8 @@
     const pageSubtitle = document.getElementById('page-subtitle');
     const refreshButton = document.getElementById('refresh-button');
     const loginToggle = document.getElementById('login-toggle');
+    const accountMenu = document.getElementById('account-menu');
+    const accountMenuRole = document.getElementById('account-menu-role');
     const loginPanel = document.getElementById('login-panel');
     const loginUsername = document.getElementById('login-username');
     const loginPassword = document.getElementById('login-password');
@@ -108,13 +110,16 @@
 
     function syncLoginUi() {
         loginToggle.textContent = authUser ? authUser.username : 'Login';
+        loginToggle.setAttribute('aria-expanded', authUser && !accountMenu.hidden ? 'true' : 'false');
         loginSubmit.hidden = Boolean(authUser);
-        changePasswordToggle.hidden = !authUser;
-        logoutSubmit.hidden = !authUser;
         loginUsername.hidden = Boolean(authUser);
         loginPassword.hidden = Boolean(authUser);
-        loginStatus.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
-        if (!authUser) {
+        loginStatus.textContent = '';
+        accountMenuRole.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
+        if (authUser) {
+            loginPanel.hidden = true;
+        } else {
+            closeAccountMenu();
             passwordPanel.hidden = true;
         }
         updatePrivateLanding();
@@ -137,13 +142,21 @@
     }
 
     function openLoginPanel() {
-        if (authUser) {
-            loginPanel.hidden = !loginPanel.hidden;
-            return;
-        }
+        closeAccountMenu();
         loginPanel.hidden = false;
         loginStatus.textContent = '';
         window.setTimeout(() => loginUsername.focus(), 0);
+    }
+
+    function closeAccountMenu() {
+        accountMenu.hidden = true;
+        loginToggle.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleAccountMenu() {
+        loginPanel.hidden = true;
+        accountMenu.hidden = !accountMenu.hidden;
+        loginToggle.setAttribute('aria-expanded', accountMenu.hidden ? 'false' : 'true');
     }
 
     async function loginWithJsonCredentials() {
@@ -172,11 +185,13 @@
     }
 
     async function logout() {
+        closeAccountMenu();
         if (authToken) {
             await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
         }
         storeAuthToken('');
         authUser = null;
+        passwordPanel.hidden = true;
         syncLoginUi();
         await loadLaunchDashboard();
     }
@@ -332,12 +347,19 @@
         }
     }
 
-    loginToggle.addEventListener('click', openLoginPanel);
+    loginToggle.addEventListener('click', () => {
+        if (authUser) {
+            toggleAccountMenu();
+            return;
+        }
+        openLoginPanel();
+    });
     privateLoginButton.addEventListener('click', openLoginPanel);
     loginSubmit.addEventListener('click', loginWithJsonCredentials);
     logoutSubmit.addEventListener('click', logout);
     changePasswordToggle.addEventListener('click', () => {
-        passwordPanel.hidden = !passwordPanel.hidden;
+        closeAccountMenu();
+        passwordPanel.hidden = false;
         passwordStatus.textContent = '';
         if (!passwordPanel.hidden) {
             currentPassword.focus();
@@ -348,6 +370,21 @@
         passwordPanel.hidden = true;
     });
     passwordSubmit.addEventListener('click', changeOwnPassword);
+    document.addEventListener('click', event => {
+        if (
+            authUser
+            && !accountMenu.hidden
+            && !accountMenu.contains(event.target)
+            && event.target !== loginToggle
+        ) {
+            closeAccountMenu();
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            closeAccountMenu();
+        }
+    });
     refreshButton.addEventListener('click', loadLaunchDashboard);
     loginUsername.addEventListener('keydown', event => {
         if (event.key === 'Enter') {

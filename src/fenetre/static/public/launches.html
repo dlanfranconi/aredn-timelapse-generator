@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <title>Launch Dashboard</title>
-    <link rel="stylesheet" href="launches.css?v=20260721-public-launch-dashboard">
+    <link rel="stylesheet" href="launches.css?v=20260721-public-account-menu">
 </head>
 <body>
     <header class="site-header">
@@ -16,7 +16,14 @@
         <nav class="header-controls" aria-label="Page controls">
             <a class="control-link" href="/">Cameras</a>
             <button id="refresh-button" type="button">Refresh</button>
-            <button id="login-toggle" type="button">Login</button>
+            <div class="account-menu-root">
+                <button id="login-toggle" type="button" aria-haspopup="menu" aria-expanded="false">Login</button>
+                <div id="account-menu" class="account-menu-panel" role="menu" hidden>
+                    <div id="account-menu-role" class="account-menu-role"></div>
+                    <button id="change-password-toggle" type="button" role="menuitem">Change Password</button>
+                    <button id="logout-submit" type="button" role="menuitem">Logout</button>
+                </div>
+            </div>
         </nav>
     </header>
 
@@ -24,8 +31,6 @@
         <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username">
         <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Password">
         <button id="login-submit" type="button">Login</button>
-        <button id="change-password-toggle" type="button" hidden>Change Password</button>
-        <button id="logout-submit" type="button" hidden>Logout</button>
         <span id="login-status"></span>
     </section>
 
@@ -54,6 +59,6 @@
         </section>
     </main>
 
-    <script src="launches.js?v=20260721-public-launch-dashboard"></script>
+    <script src="launches.js?v=20260721-public-account-menu"></script>
 </body>
 </html>
