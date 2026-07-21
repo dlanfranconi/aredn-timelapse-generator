@@ -512,13 +512,17 @@ function createCameraListItem(camera) {
                             <option value="1000">Very long</option>
                         </select>
                     </label>
-                    <button type="button" data-pan="0" data-tilt="1">Up</button>
-                    <button type="button" data-pan="-1" data-tilt="0">Left</button>
+                    <button type="button" data-axis="tilt" data-pan="0" data-tilt="1">Up</button>
+                    <button type="button" data-axis="pan" data-pan="-1" data-tilt="0">Left</button>
                     <button type="button" data-stop="1">Stop</button>
-                    <button type="button" data-pan="1" data-tilt="0">Right</button>
-                    <button type="button" data-pan="0" data-tilt="-1">Down</button>
-                    <button type="button" data-zoom="1">Zoom +</button>
-                    <button type="button" data-zoom="-1">Zoom -</button>
+                    <button type="button" data-axis="pan" data-pan="1" data-tilt="0">Right</button>
+                    <button type="button" data-axis="tilt" data-pan="0" data-tilt="-1">Down</button>
+                    <button type="button" data-axis="zoom" data-zoom="1">Zoom +</button>
+                    <button type="button" data-axis="zoom" data-zoom="-1">Zoom -</button>
+                </div>
+                <div class="ptz-tour" hidden>
+                    <button type="button" data-tour="pause">Pause tour</button>
+                    <button type="button" data-tour="resume">Resume tour</button>
                 </div>
                 <div class="ptz-live-view" hidden>
                     <button class="ptz-live-preview" type="button" aria-label="Start PTZ alignment preview">
@@ -554,6 +558,7 @@ function configurePtzPresets(camera, listItem) {
     const select = listItem.querySelector('.select-ptz-preset');
     const button = listItem.querySelector('.btn-ptz-preset');
     const manual = listItem.querySelector('.ptz-manual');
+    const tourControls = listItem.querySelector('.ptz-tour');
     const speedInput = listItem.querySelector('.input-ptz-speed');
     const durationSelect = listItem.querySelector('.select-ptz-duration');
     const liveView = listItem.querySelector('.ptz-live-view');
@@ -569,6 +574,10 @@ function configurePtzPresets(camera, listItem) {
         ['superadmin', 'superuser'].includes(authUser.role) || userCameras.includes(camera.title)
     );
     const go2rtc = camera.go2rtc || {};
+    const capabilities = ptz.capabilities || {};
+    const supportsPan = capabilities.pan !== false;
+    const supportsTilt = capabilities.tilt !== false;
+    const supportsZoom = capabilities.zoom !== false;
     const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
     const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_player_url || go2rtc.player_url) : '';
@@ -586,6 +595,7 @@ function configurePtzPresets(camera, listItem) {
         && ptz.allow_manual_control
         && userAllowedCamera
         && ['manual', 'admin'].includes(userAccess);
+    const canUseTour = canUseManual && ptz.tour && ptz.tour.enabled;
     if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
         if (liveIdleTimer) {
@@ -616,6 +626,16 @@ function configurePtzPresets(camera, listItem) {
     select.hidden = !canUsePresets;
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
+    tourControls.hidden = !canUseTour;
+    manual.querySelectorAll('[data-axis]').forEach(manualButton => {
+        const axis = manualButton.dataset.axis;
+        manualButton.hidden = (axis === 'pan' && !supportsPan)
+            || (axis === 'tilt' && !supportsTilt)
+            || (axis === 'zoom' && !supportsZoom);
+    });
+    manual.querySelectorAll('[data-stop]').forEach(manualButton => {
+        manualButton.hidden = ptz.stop_disabled === true;
+    });
     liveView.hidden = !(canUseManual && livePreviewUrl);
     if (canUseManual && livePreviewUrl) {
         liveLink.href = fullLivePlayerUrl;
@@ -765,6 +785,33 @@ function configurePtzPresets(camera, listItem) {
                 status.textContent = error.message;
             } finally {
                 manual.querySelectorAll('button').forEach(item => { item.disabled = false; });
+            }
+        };
+    });
+    tourControls.querySelectorAll('button').forEach(tourButton => {
+        tourButton.onclick = async () => {
+            tourControls.querySelectorAll('button').forEach(item => { item.disabled = true; });
+            const action = tourButton.dataset.tour || 'pause';
+            status.textContent = action === 'pause' ? 'Pausing tour...' : 'Resuming tour...';
+            try {
+                const response = await fetch('/api/ptz/tour', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ camera: camera.title, action })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || `Tour request failed: ${response.status}`);
+                }
+                if (action === 'pause' && result.auto_resume_s > 0) {
+                    status.textContent = `Tour paused; resumes in ${result.auto_resume_s}s`;
+                } else {
+                    status.textContent = action === 'pause' ? 'Tour paused' : 'Tour resumed';
+                }
+            } catch (error) {
+                status.textContent = error.message;
+            } finally {
+                tourControls.querySelectorAll('button').forEach(item => { item.disabled = false; });
             }
         };
     });

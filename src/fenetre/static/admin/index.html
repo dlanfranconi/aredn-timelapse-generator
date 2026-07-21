@@ -230,6 +230,21 @@
                             <option value="manual">Manual controls</option>
                             <option value="admin">Admin only</option>
                         </select>
+                        <label for="newCameraPtzCompatibility">PTZ profile</label>
+                        <select id="newCameraPtzCompatibility">
+                            <option value="">Generic ONVIF</option>
+                            <option value="sunba">Sunba safe</option>
+                        </select>
+                        <label>Movement controls</label>
+                        <div class="inline-options">
+                            <label><input id="newCameraPtzCapabilityPan" type="checkbox" checked> Pan</label>
+                            <label><input id="newCameraPtzCapabilityTilt" type="checkbox" checked> Tilt</label>
+                            <label><input id="newCameraPtzCapabilityZoom" type="checkbox" checked> Zoom</label>
+                        </div>
+                        <label><input id="newCameraPtzTourEnabled" type="checkbox"> Tour controls</label>
+                        <span></span>
+                        <label for="newCameraPtzTourAutoResume">Tour auto-resume seconds</label>
+                        <input id="newCameraPtzTourAutoResume" type="number" min="0" max="86400" value="1800">
                         <label for="newCameraPtzHost">ONVIF host/IP</label>
                         <input id="newCameraPtzHost" type="text" autocomplete="off" placeholder="192.0.2.10">
                         <label for="newCameraPtzPort">ONVIF/PTZ port</label>
@@ -240,9 +255,13 @@
                         <input id="newCameraPtzPassword" type="password" autocomplete="new-password">
                         <label for="newCameraPtzProfileToken">Profile token</label>
                         <input id="newCameraPtzProfileToken" type="text" autocomplete="off" placeholder="Optional">
-                        <label for="newCameraPtzPresets">Presets JSON</label>
+                        <label>Presets</label>
                         <button id="loadNewCameraPtzPresetsBtn" type="button">Load ONVIF Presets</button>
-                        <textarea id="newCameraPtzPresets" rows="5" placeholder='[{"id":"launch","name":"Launch Pad","token":"1"}]'></textarea>
+                        <div id="newCameraPtzPresetEditor" class="preset-editor">
+                            <div id="newCameraPtzPresetRows" class="preset-rows"></div>
+                            <button id="addNewCameraPtzPresetBtn" type="button">Add Preset</button>
+                        </div>
+                        <textarea id="newCameraPtzPresets" rows="5" hidden></textarea>
                     </div>
                 </fieldset>
             </div>

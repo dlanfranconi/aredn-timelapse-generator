@@ -122,6 +122,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzRtspUrl = document.getElementById('newCameraPtzRtspUrl');
     const newCameraRtspRow = document.getElementById('newCameraRtspRow');
     const newCameraPtzRtspRow = document.getElementById('newCameraPtzRtspRow');
+    const newCameraPtzCompatibility = document.getElementById('newCameraPtzCompatibility');
+    const newCameraPtzCapabilityPan = document.getElementById('newCameraPtzCapabilityPan');
+    const newCameraPtzCapabilityTilt = document.getElementById('newCameraPtzCapabilityTilt');
+    const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
+    const newCameraPtzTourEnabled = document.getElementById('newCameraPtzTourEnabled');
+    const newCameraPtzTourAutoResume = document.getElementById('newCameraPtzTourAutoResume');
+    const newCameraPtzPresetRows = document.getElementById('newCameraPtzPresetRows');
+    const addNewCameraPtzPresetBtn = document.getElementById('addNewCameraPtzPresetBtn');
     const toggleNewCameraUrlBtn = document.getElementById('toggleNewCameraUrlBtn');
     const toggleNewCameraSnapshotPasswordBtn = document.getElementById('toggleNewCameraSnapshotPasswordBtn');
     const toggleNewCameraRtspUrlBtn = document.getElementById('toggleNewCameraRtspUrlBtn');
@@ -248,6 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleNewCameraRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraRtspUrl, toggleNewCameraRtspUrlBtn));
     toggleNewCameraPtzRtspUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraPtzRtspUrl, toggleNewCameraPtzRtspUrlBtn));
     loadNewCameraPtzPresetsBtn.addEventListener('click', loadNewCameraPtzPresets);
+    addNewCameraPtzPresetBtn.addEventListener('click', () => appendPtzPresetRow({ name: '', token: '', id: '' }));
     newCameraVendor.addEventListener('change', applyNewCameraTemplate);
     newCameraSnapshotTemplate.addEventListener('change', () => applySelectedSnapshotTemplate({ force: true }));
     newCameraRtspTemplate.addEventListener('change', () => applySelectedRtspTemplate({ force: true }));
@@ -448,6 +457,82 @@ document.addEventListener('DOMContentLoaded', () => {
         if (input) input.value = value ?? input.value;
     }
 
+    function presetHasUsableName(preset) {
+        const id = String((preset && preset.id) || '').trim();
+        const token = String((preset && preset.token) || '').trim();
+        const name = String((preset && preset.name) || '').trim();
+        if (!name) {
+            return false;
+        }
+        return !(name === id && /^\d+$/.test(id) && (!token || token === id));
+    }
+
+    function appendPtzPresetRow(preset = {}) {
+        const row = document.createElement('div');
+        row.className = 'preset-row';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'preset-name';
+        nameInput.placeholder = 'Display name';
+        nameInput.setAttribute('aria-label', 'Preset display name');
+        nameInput.value = preset.name || '';
+
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'text';
+        tokenInput.className = 'preset-token';
+        tokenInput.placeholder = 'Token';
+        tokenInput.setAttribute('aria-label', 'Preset token');
+        tokenInput.value = preset.token || preset.id || '';
+
+        const idInput = document.createElement('input');
+        idInput.type = 'text';
+        idInput.className = 'preset-id';
+        idInput.placeholder = 'ID';
+        idInput.setAttribute('aria-label', 'Preset ID');
+        idInput.value = preset.id || preset.token || '';
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => row.remove());
+
+        row.appendChild(nameInput);
+        row.appendChild(tokenInput);
+        row.appendChild(idInput);
+        row.appendChild(removeButton);
+        newCameraPtzPresetRows.appendChild(row);
+    }
+
+    function renderPtzPresetEditor(presets = []) {
+        newCameraPtzPresetRows.innerHTML = '';
+        presets
+            .filter(preset => preset && typeof preset === 'object')
+            .map(preset => ({
+                id: String(preset.id || preset.token || '').trim(),
+                name: String(preset.name || '').trim(),
+                token: String(preset.token || preset.id || '').trim()
+            }))
+            .filter(presetHasUsableName)
+            .forEach(appendPtzPresetRow);
+    }
+
+    function collectPtzPresets() {
+        return Array.from(newCameraPtzPresetRows.querySelectorAll('.preset-row'))
+            .map(row => {
+                const name = row.querySelector('.preset-name').value.trim();
+                const token = row.querySelector('.preset-token').value.trim();
+                const id = row.querySelector('.preset-id').value.trim();
+                const preset = {
+                    id: id || token || name,
+                    name,
+                    token: token || id || name
+                };
+                return presetHasUsableName(preset) ? preset : null;
+            })
+            .filter(Boolean);
+    }
+
     function syncAllOptionGroups() {
         document.querySelectorAll('.option-toggle').forEach(toggle => syncOptionGroup(toggle));
         syncCaptureStreamFields();
@@ -522,12 +607,18 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzAllowPresets', true);
         setCheckboxValue('newCameraPtzAllowManual', false);
         setSelectValue('newCameraPtzAccessLevel', 'presets');
+        setSelectValue('newCameraPtzCompatibility', '');
+        setCheckboxValue('newCameraPtzCapabilityPan', true);
+        setCheckboxValue('newCameraPtzCapabilityTilt', true);
+        setCheckboxValue('newCameraPtzCapabilityZoom', true);
+        setCheckboxValue('newCameraPtzTourEnabled', false);
+        setInputValue('newCameraPtzTourAutoResume', 1800);
         setInputValue('newCameraPtzHost', '');
         setInputValue('newCameraPtzPort', 80);
         setInputValue('newCameraPtzUsername', '');
         setInputValue('newCameraPtzPassword', '');
         setInputValue('newCameraPtzProfileToken', '');
-        setInputValue('newCameraPtzPresets', '');
+        renderPtzPresetEditor([]);
         applyNewCameraTemplate();
         resetNewCameraTest();
         syncAllOptionGroups();
@@ -613,12 +704,21 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzAllowPresets', ptz.allow_presets !== false);
         setCheckboxValue('newCameraPtzAllowManual', ptz.allow_manual_control === true);
         setSelectValue('newCameraPtzAccessLevel', ptz.access_level || 'presets');
+        setSelectValue('newCameraPtzCompatibility', ptz.compatibility || ptz.ptz_profile || ptz.vendor || '');
+        const capabilities = ptz.capabilities || {};
+        const zoomOnly = ptz.zoom_only === true;
+        setCheckboxValue('newCameraPtzCapabilityPan', capabilities.pan ?? ptz.supports_pan ?? !zoomOnly);
+        setCheckboxValue('newCameraPtzCapabilityTilt', capabilities.tilt ?? ptz.supports_tilt ?? !zoomOnly);
+        setCheckboxValue('newCameraPtzCapabilityZoom', capabilities.zoom ?? ptz.supports_zoom ?? true);
+        const tour = ptz.tour || {};
+        setCheckboxValue('newCameraPtzTourEnabled', tour.enabled === true || ptz.tour_enabled === true);
+        setInputValue('newCameraPtzTourAutoResume', tour.auto_resume_s ?? 1800);
         setInputValue('newCameraPtzHost', ptz.host || ptz.ip || '');
         setInputValue('newCameraPtzPort', ptz.port ?? 80);
         setInputValue('newCameraPtzUsername', ptz.username || '');
         setInputValue('newCameraPtzPassword', '');
         setInputValue('newCameraPtzProfileToken', ptz.profile_token || '');
-        setInputValue('newCameraPtzPresets', ptz.presets ? JSON.stringify(ptz.presets, null, 2) : '');
+        renderPtzPresetEditor(ptz.presets || []);
         syncAllOptionGroups();
         newCameraLastTest = {
             key: cameraTestKey({
@@ -919,6 +1019,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyNewCameraTemplate() {
         syncTemplateSelects();
+        if (newCameraVendor.value === 'sunba' && !newCameraPtzCompatibility.value) {
+            newCameraPtzCompatibility.value = 'sunba';
+        }
         applySelectedSnapshotTemplate();
         applySelectedRtspTemplate();
     }
@@ -1012,16 +1115,20 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.work_dir_max_size_GB = intValue('newCameraStorageGb', 5);
         }
         if (checked('newCameraPtzEnabled')) {
-            const presetsText = document.getElementById('newCameraPtzPresets').value.trim();
-            let presets = [];
-            if (presetsText) {
-                presets = JSON.parse(presetsText);
-            }
+            const presets = collectPtzPresets();
             payload.ptz_enabled = true;
             payload.ptz_public = checked('newCameraPtzPublic');
             payload.ptz_allow_presets = checked('newCameraPtzAllowPresets');
             payload.ptz_allow_manual_control = checked('newCameraPtzAllowManual');
             payload.ptz_access_level = document.getElementById('newCameraPtzAccessLevel').value || 'presets';
+            payload.ptz_compatibility = newCameraPtzCompatibility.value;
+            payload.ptz_capabilities = {
+                pan: newCameraPtzCapabilityPan.checked,
+                tilt: newCameraPtzCapabilityTilt.checked,
+                zoom: newCameraPtzCapabilityZoom.checked
+            };
+            payload.ptz_tour_enabled = newCameraPtzTourEnabled.checked;
+            payload.ptz_tour_auto_resume_s = intValue('newCameraPtzTourAutoResume', 1800);
             payload.ptz_host = document.getElementById('newCameraPtzHost').value.trim();
             payload.ptz_port = intValue('newCameraPtzPort', 80);
             payload.ptz_username = document.getElementById('newCameraPtzUsername').value.trim();
@@ -1109,14 +1216,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadNewCameraPtzPresets() {
-        const presetsField = document.getElementById('newCameraPtzPresets');
-        const previousPresetsText = presetsField.value;
+        const previousPresets = collectPtzPresets();
         try {
             if (!checked('newCameraPtzEnabled')) {
                 throw new Error('Enable PTZ controls before loading presets.');
             }
             loadNewCameraPtzPresetsBtn.disabled = true;
-            presetsField.value = presetsField.value || 'Loading ONVIF presets...';
+            setStatus('Loading ONVIF presets...', 'info');
             const response = await fetch('/api/camera/ptz_presets', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1139,15 +1245,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: preset.name,
                 token: preset.token || preset.id
             }));
-            presetsField.value = JSON.stringify(presets, null, 2);
+            renderPtzPresetEditor(presets);
             setStatus(
                 presets.length
-                    ? `Loaded ${presets.length} ONVIF preset(s). Edit names here to override display labels.`
+                    ? `Loaded ${presets.length} named ONVIF preset(s). Rename or remove rows before saving.`
                     : 'No named ONVIF presets were found. Unnamed presets are treated as untaught.',
                 presets.length ? 'success' : 'info'
             );
         } catch (error) {
-            presetsField.value = previousPresetsText;
+            renderPtzPresetEditor(previousPresets);
             setStatus(`Could not load ONVIF presets: ${error.message}`, 'error');
         } finally {
             loadNewCameraPtzPresetsBtn.disabled = false;

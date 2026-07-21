@@ -414,6 +414,12 @@ body.dark-mode .camera-metadata {
     gap: 6px;
 }
 
+.ptz-tour {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
 .ptz-speed-control,
 .ptz-duration-control {
     align-items: center;
@@ -428,6 +434,7 @@ body.dark-mode .camera-metadata {
 }
 
 .ptz-manual button,
+.ptz-tour button,
 .btn-ptz-preset {
     min-height: 32px;
 }
@@ -743,7 +750,12 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
         width: 100%;
     }
 
-    .ptz-manual button {
+    .ptz-tour {
+        width: 100%;
+    }
+
+    .ptz-manual button,
+    .ptz-tour button {
         min-height: 52px;
         padding: 10px 6px;
     }

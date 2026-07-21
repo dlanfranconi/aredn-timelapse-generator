@@ -676,22 +676,67 @@ def _build_camera_config(
         presets = payload.get("ptz_presets") or []
         if isinstance(presets, str):
             presets = json.loads(presets) if presets.strip() else []
-        camera["ptz"] = {
-            "enabled": True,
-            "public": bool(payload.get("ptz_public", False)),
-            "allow_presets": bool(payload.get("ptz_allow_presets", True)),
-            "allow_manual_control": bool(
-                payload.get("ptz_allow_manual_control", False)
-            ),
-            "access_level": payload.get("ptz_access_level") or "presets",
-            "host": (payload.get("ptz_host") or "").strip(),
-            "port": int(payload.get("ptz_port") or 80),
-            "username": (payload.get("ptz_username") or "").strip(),
-            "password": payload.get("ptz_password")
-            or (existing_camera.get("ptz") or {}).get("password", ""),
-            "profile_token": (payload.get("ptz_profile_token") or "").strip(),
-            "presets": presets,
-        }
+        existing_ptz = existing_camera.get("ptz") or {}
+        ptz_config = dict(existing_ptz) if isinstance(existing_ptz, dict) else {}
+        ptz_config.update(
+            {
+                "enabled": True,
+                "public": bool(payload.get("ptz_public", False)),
+                "allow_presets": bool(payload.get("ptz_allow_presets", True)),
+                "allow_manual_control": bool(
+                    payload.get("ptz_allow_manual_control", False)
+                ),
+                "access_level": payload.get("ptz_access_level") or "presets",
+                "host": (payload.get("ptz_host") or "").strip(),
+                "port": int(payload.get("ptz_port") or 80),
+                "username": (payload.get("ptz_username") or "").strip(),
+                "password": payload.get("ptz_password")
+                or ptz_config.get("password", ""),
+                "profile_token": (payload.get("ptz_profile_token") or "").strip(),
+                "presets": presets,
+            }
+        )
+        compatibility = (
+            payload.get("ptz_compatibility")
+            or payload.get("ptz_profile")
+            or ptz_config.get("compatibility")
+            or ""
+        )
+        if compatibility:
+            ptz_config["compatibility"] = str(compatibility).strip()
+        capabilities = payload.get("ptz_capabilities")
+        if isinstance(capabilities, dict):
+            ptz_config["capabilities"] = {
+                "pan": bool(capabilities.get("pan", True)),
+                "tilt": bool(capabilities.get("tilt", True)),
+                "zoom": bool(capabilities.get("zoom", True)),
+            }
+        elif any(
+            key in payload
+            for key in (
+                "ptz_capability_pan",
+                "ptz_capability_tilt",
+                "ptz_capability_zoom",
+            )
+        ):
+            ptz_config["capabilities"] = {
+                "pan": bool(payload.get("ptz_capability_pan", True)),
+                "tilt": bool(payload.get("ptz_capability_tilt", True)),
+                "zoom": bool(payload.get("ptz_capability_zoom", True)),
+            }
+        existing_tour = ptz_config.get("tour") or {}
+        tour_config = dict(existing_tour) if isinstance(existing_tour, dict) else {}
+        if "ptz_tour_enabled" in payload:
+            tour_config["enabled"] = bool(payload.get("ptz_tour_enabled"))
+        if "ptz_tour_auto_resume_s" in payload:
+            tour_config["auto_resume_s"] = int(
+                payload.get("ptz_tour_auto_resume_s") or 1800
+            )
+        if payload.get("ptz_tour_backend"):
+            tour_config["backend"] = str(payload.get("ptz_tour_backend")).strip()
+        if tour_config:
+            ptz_config["tour"] = tour_config
+        camera["ptz"] = ptz_config
     if payload.get("timelapse_enabled") is not None:
         camera["timelapse_enabled"] = bool(payload.get("timelapse_enabled"))
     if payload.get("work_dir_max_size_GB"):

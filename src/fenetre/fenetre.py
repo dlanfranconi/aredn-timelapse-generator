@@ -87,6 +87,7 @@ from fenetre.ptz import (
     normalize_presets,
     nudge_move,
     ptz_status,
+    set_tour_state,
     stop_move,
 )
 from fenetre.timelapse import (
@@ -162,6 +163,8 @@ mqtt_manager: Optional[MQTTManager] = None
 public_auth_sessions = {}
 public_config_cache = {}
 public_config_cache_lock = threading.Lock()
+ptz_tour_resume_timers = {}
+ptz_tour_resume_lock = threading.Lock()
 daylight_q = deque()
 archive_q = deque()
 frequent_timelapse_q = deque()
@@ -1468,6 +1471,57 @@ window.location.replace({json.dumps(next_url)});
             return user.get("username") or "authenticated"
         return self.client_address[0] if self.client_address else "public"
 
+    def _cancel_ptz_tour_resume(self, camera_name: str):
+        with ptz_tour_resume_lock:
+            timer = ptz_tour_resume_timers.pop(camera_name, None)
+        if timer:
+            timer.cancel()
+
+    def _schedule_ptz_tour_resume(
+        self, camera_name: str, auto_resume_s: int, owner: str
+    ):
+        if auto_resume_s <= 0:
+            self._cancel_ptz_tour_resume(camera_name)
+            return
+
+        def resume_tour():
+            with ptz_tour_resume_lock:
+                current = ptz_tour_resume_timers.get(camera_name)
+                if current is not timer:
+                    return
+                ptz_tour_resume_timers.pop(camera_name, None)
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                logger.warning(
+                    "PTZ tour auto-resume skipped camera=%s reason=missing-camera",
+                    camera_name,
+                )
+                return
+            try:
+                set_tour_state(
+                    camera_name,
+                    camera_config,
+                    "resume",
+                    owner=f"{owner}-auto-resume",
+                    duration_s=1,
+                )
+                logger.info("PTZ tour auto-resumed camera=%s", camera_name)
+            except Exception as exc:
+                logger.warning(
+                    "PTZ tour auto-resume failed camera=%s error=%s",
+                    camera_name,
+                    exc,
+                )
+
+        timer = threading.Timer(auto_resume_s, resume_tour)
+        timer.daemon = True
+        with ptz_tour_resume_lock:
+            previous = ptz_tour_resume_timers.pop(camera_name, None)
+            if previous:
+                previous.cancel()
+            ptz_tour_resume_timers[camera_name] = timer
+        timer.start()
+
     def _handle_ptz_status_api(self, parsed_url):
         query = parse_qs(parsed_url.query)
         camera_name = (query.get("camera") or [""])[0]
@@ -1678,6 +1732,52 @@ window.location.replace({json.dumps(next_url)});
             logger.error("Unexpected PTZ stop error.", exc_info=True)
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_ptz_tour_api(self):
+        try:
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            action = (payload.get("action") or "").strip().lower()
+            if not camera_name or not action:
+                self._send_json(400, {"error": "camera and action are required"})
+                return
+            logger.info("PTZ tour request camera=%s action=%s", camera_name, action)
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not (
+                ptz_config.get("allow_manual_control", False)
+                and self._user_can_control_ptz(camera_name, ptz_config, "manual")
+            ):
+                logger.warning("PTZ tour denied camera=%s", camera_name)
+                self._send_json(403, {"error": "Manual PTZ control is not allowed"})
+                return
+            owner = self._ptz_owner()
+            result = set_tour_state(
+                camera_name,
+                camera_config,
+                action,
+                owner=owner,
+                duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            if result.get("tour") == "pause":
+                self._schedule_ptz_tour_resume(
+                    camera_name, int(result.get("auto_resume_s") or 0), owner
+                )
+            elif result.get("tour") == "resume":
+                self._cancel_ptz_tour_resume(camera_name)
+            self._send_json(200, result)
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ tour error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def do_GET(self):
         parsed_url = urlparse(self.path)
         if parsed_url.path == "/api/cameras":
@@ -1731,6 +1831,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/ptz/stop":
             self._handle_ptz_stop_api()
+            return
+        if parsed_url.path == "/api/ptz/tour":
+            self._handle_ptz_tour_api()
             return
         self.send_error(405, "Method Not Allowed")
 

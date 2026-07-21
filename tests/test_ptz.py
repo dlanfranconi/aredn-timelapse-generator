@@ -12,6 +12,7 @@ from fenetre.ptz import (
     normalize_presets,
     public_ptz_metadata,
     set_lock,
+    set_tour_state,
     stop_move,
     _endpoint_failure_backoffs,
     _profile_token_cache,
@@ -52,6 +53,24 @@ class PTZTestCase(unittest.TestCase):
         self.assertEqual(
             normalize_presets({"presets": {"home": {"name": "Home", "token": "1"}}}),
             [{"id": "home", "name": "Home", "token": "1"}],
+        )
+
+    def test_normalize_presets_hides_numeric_unnamed_presets(self):
+        self.assertEqual(
+            normalize_presets(
+                {
+                    "presets": [
+                        {"id": "1", "token": "1"},
+                        {"id": "2", "name": "2", "token": "2"},
+                        {"id": "launch", "token": "1"},
+                        {"id": "3", "name": "Launch Pad", "token": "3"},
+                    ]
+                }
+            ),
+            [
+                {"id": "launch", "name": "launch", "token": "1"},
+                {"id": "3", "name": "Launch Pad", "token": "3"},
+            ],
         )
 
     def test_lock_blocks_session(self):
@@ -354,6 +373,99 @@ class PTZTestCase(unittest.TestCase):
         ptz.RelativeMove.assert_called_once_with(request)
         ptz.Stop.assert_not_called()
         mock_sleep.assert_not_called()
+
+    def test_sunba_safe_mode_uses_small_relative_nudge_without_stop(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        request = MagicMock()
+        ptz.create_type.return_value = request
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "compatibility": "sunba",
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}), patch(
+            "fenetre.ptz.time.sleep"
+        ) as mock_sleep:
+            result = nudge_move("cam1", camera_config, pan=1, tilt=0, zoom=0)
+
+        self.assertTrue(result["ok"])
+        ptz.create_type.assert_called_once_with("RelativeMove")
+        self.assertEqual(
+            request.Translation,
+            {"PanTilt": {"x": 0.03, "y": 0.0}, "Zoom": {"x": 0.0}},
+        )
+        ptz.RelativeMove.assert_called_once_with(request)
+        ptz.Stop.assert_not_called()
+        mock_sleep.assert_not_called()
+
+    def test_stop_move_can_be_disabled_for_fragile_cameras(self):
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "disable_stop": True,
+            }
+        }
+
+        result = stop_move("cam1", camera_config)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["skipped"])
+
+    def test_tour_control_uses_onvif_preset_tour_operation(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        request = MagicMock()
+        ptz.create_type.return_value = request
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "profile_token": "profile-1",
+                "tour": {
+                    "enabled": True,
+                    "preset_tour_token": "tour-1",
+                    "auto_resume_s": 1800,
+                },
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            result = set_tour_state("cam1", camera_config, "pause")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tour"], "pause")
+        self.assertEqual(result["auto_resume_s"], 1800)
+        ptz.create_type.assert_called_once_with("OperatePresetTour")
+        self.assertEqual(request.ProfileToken, "profile-1")
+        self.assertEqual(request.PresetTourToken, "tour-1")
+        self.assertEqual(request.Operation, "Stop")
+        ptz.OperatePresetTour.assert_called_once_with(request)
 
     def test_failed_ptz_operation_sets_endpoint_cooldown(self):
         media = MagicMock()

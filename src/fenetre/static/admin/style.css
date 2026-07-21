@@ -185,6 +185,44 @@ h1 {
     flex: 1;
 }
 
+.inline-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.inline-options label {
+    align-items: center;
+    display: inline-flex;
+    gap: 5px;
+}
+
+.preset-editor {
+    display: grid;
+    gap: 8px;
+}
+
+.preset-rows {
+    display: grid;
+    gap: 8px;
+}
+
+.preset-row {
+    align-items: center;
+    display: grid;
+    gap: 6px;
+    grid-template-columns: minmax(120px, 1fr) minmax(80px, 0.65fr) minmax(80px, 0.65fr) auto;
+}
+
+.preset-row input {
+    margin: 0;
+    min-width: 0;
+}
+
+.preset-row button {
+    min-height: 34px;
+}
+
 .stream-field-row {
     display: grid;
     grid-column: 1 / -1;
@@ -445,6 +483,10 @@ h1 {
     .checkbox-line,
     .user-actions {
         grid-column: auto;
+    }
+
+    .preset-row {
+        grid-template-columns: 1fr;
     }
 }
 
