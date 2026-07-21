@@ -473,6 +473,83 @@ class ConfigServerTestCase(unittest.TestCase):
             mock_delete.call_args.kwargs["params"], {"src": "fenetre_cam1"}
         )
 
+    def test_apply_camera_image_profile_dry_run(self):
+        self.test_config_data["cameras"]["cam1"]["image_profiles"] = {
+            "enabled": True,
+            "host": "camera.local",
+            "profiles": {
+                "launch": {
+                    "actions": [{"url": "http://{host}/image/launch", "method": "POST"}]
+                }
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.post(
+            "/api/camera/image_profile",
+            data=json.dumps({"camera": "cam1", "profile": "launch", "dry_run": True}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["dry_run"])
+        self.assertEqual(
+            response.json["actions"][0]["url"], "http://camera.local/image/launch"
+        )
+
+    def test_launch_preview_and_run_due_dry_run(self):
+        self.test_config_data["global"] = {
+            "work_dir": tempfile.gettempdir(),
+            "launch_workflow": {
+                "enabled": True,
+                "dry_run": True,
+                "default_pre_seconds": 60,
+                "default_post_seconds": 120,
+                "lookahead_hours": 1000000,
+                "schedule_events": [
+                    {
+                        "id": "launch-1",
+                        "name": "Falcon 9",
+                        "net": "2099-07-21T12:00:00Z",
+                        "provider": "SpaceX",
+                        "location": "Vandenberg",
+                    }
+                ],
+                "plans": {
+                    "vandenberg": {
+                        "match": {"providers": ["SpaceX"]},
+                        "cameras": {"cam1": {"preset": "launch"}},
+                    }
+                },
+            },
+        }
+        self.test_config_data["cameras"]["cam1"]["ptz"] = {
+            "enabled": True,
+            "host": "camera.local",
+            "username": "admin",
+            "password": "secret",
+            "presets": [{"id": "launch", "name": "Launch", "token": "1"}],
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        preview = self.app.get("/api/launches/preview")
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json["events"][0]["plans"][0]["id"], "vandenberg")
+
+        with patch("fenetre.admin_server.run_due_launch_actions") as mock_run_due:
+            mock_run_due.return_value = {"ok": True, "enabled": True, "actions": []}
+            response = self.app.post(
+                "/api/launches/run_due",
+                data=json.dumps({"dry_run": True}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        mock_run_due.assert_called_once()
+
     @patch("fenetre.admin_server._fetch_local_command_bytes")
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_snapshot_test_checks_ptz_rtsp_url(self, mock_snapshot, mock_stream):

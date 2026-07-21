@@ -30,6 +30,8 @@ from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.gopro import GoPro
 from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
+from fenetre.image_profiles import ImageProfileError, apply_image_profile
+from fenetre.launch_workflow import preview_launch_workflow, run_due_launch_actions
 from fenetre.ptz import discover_presets, set_lock
 from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
 from fenetre.ui_utils import copy_public_html_files
@@ -1329,6 +1331,55 @@ def load_ptz_presets():
                 "count": len(result.get("presets", [])),
             }
         )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/camera/image_profile", methods=["POST"])
+def apply_camera_image_profile():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = (payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"error": "camera is required."}), 400
+        _, config = _load_effective_config_with_raw()
+        camera_config = (config.get("cameras") or {}).get(camera_name)
+        if not isinstance(camera_config, dict):
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        result = apply_image_profile(
+            camera_name,
+            camera_config,
+            profile_name=(payload.get("profile") or "").strip() or None,
+            mode=(payload.get("mode") or "").strip() or None,
+            dry_run=payload.get("dry_run", True) is not False,
+        )
+        return jsonify(result)
+    except ImageProfileError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/preview", methods=["GET", "POST"])
+def preview_launches():
+    try:
+        _, config = _load_effective_config_with_raw()
+        return jsonify(preview_launch_workflow(config))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/run_due", methods=["POST"])
+def run_due_launches():
+    try:
+        payload = request.get_json(silent=True) or {}
+        _, config = _load_effective_config_with_raw()
+        dry_run = payload.get("dry_run")
+        result = run_due_launch_actions(
+            config,
+            dry_run=None if dry_run is None else dry_run is not False,
+        )
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

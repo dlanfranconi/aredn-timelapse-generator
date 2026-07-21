@@ -543,7 +543,95 @@ Preset dropdowns use configured presets when present; otherwise Fenetre tries to
 
 The embedded alignment view is loaded lazily when you tap the preview box or use a manual PTZ control, so normal page loads do not keep RTSP streams open. By default this in-card preview embeds go2rtc's `stream.html` player via `preview_url_template`, which works with H.264 RTSP streams without requiring MJPEG transcoding. You can override `preview_url_template` to `{base_url}/api/stream.mjpeg?src={stream}` only for cameras or go2rtc setups that can serve MJPEG. The embedded alignment view is unloaded after `global.go2rtc.live_view_idle_timeout_s` seconds of PTZ inactivity, defaulting to 60 seconds. **Open full live view** opens a Fenetre live-view wrapper in a new window when a separate `rtsp_url` stream is configured; that wrapper embeds the full go2rtc player and sends authenticated heartbeats while the window is open.
 
-Those heartbeats let Fenetre know whether a logged-in user is actively watching an HD stream. Future scheduled recording workflows, such as rocket-launch recording, can check active full-stream viewers before deciding whether to tear down or keep an HD live stream open.
+Those heartbeats let Fenetre know whether a logged-in user is actively watching an HD stream. Scheduled recording workflows, such as rocket-launch recording, can check active full-stream viewers before deciding whether to run hooks that might disturb an HD live stream.
+
+Camera image profiles are optional HTTP/API hooks for changing camera image settings by profile or by mode. They are intended for vendor APIs such as Reolink day/sunset/night tuning, but generic HTTP actions also work. Profiles are disabled unless `image_profiles.enabled: true`.
+
+```yaml
+cameras:
+  Reolink-PTZ:
+    ptz:
+      enabled: true
+      host: camera.local
+      username: admin
+      password: change-me
+    image_profiles:
+      enabled: true
+      vendor: reolink
+      host: camera.local
+      http_port: 80
+      channel: 0
+      username: admin
+      password: change-me
+      mode_profiles:
+        sunrise: sunrise
+        sunset: sunset
+        night: night
+      profiles:
+        sunrise:
+          settings:
+            bright: 128
+            contrast: 64
+        night:
+          settings:
+            bright: 96
+            contrast: 80
+        launch:
+          actions:
+            - name: launch-exposure
+              method: POST
+              url: http://{host}/api/launch-image
+              json:
+                mode: launch
+```
+
+The admin API can dry-run or apply an image profile:
+
+```bash
+curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
+  -H 'Content-Type: application/json' \
+  -d '{"camera":"Reolink-PTZ","profile":"launch","dry_run":true}'
+```
+
+Rocket-launch automation is configured under `global.launch_workflow`. It is disabled by default and defaults to `dry_run: true`; keep dry-run enabled until the preview and due actions look right. Schedule input can come from inline `schedule_events`, a local `schedule_file`, or a JSON `schedule_url`. Events are normalized from common fields such as `net`, `date_utc`, provider, pad, and location, then matched to one or more plans.
+
+```yaml
+global:
+  launch_workflow:
+    enabled: true
+    dry_run: true
+    refresh_interval_s: 300
+    default_pre_seconds: 60
+    default_post_seconds: 900
+    lookahead_hours: 168
+    state_file: /srv/fenetre/data/launch_workflow_state.json
+    schedule_url: https://example.invalid/launches.json
+    plans:
+      vandenberg-spacex:
+        match:
+          providers: [SpaceX]
+          locations: [Vandenberg]
+        cameras:
+          Reolink-PTZ:
+            pause_tour: true
+            resume_tour: true
+            preset: launch-pad
+            image_profile: launch
+            record:
+              start_url: http://{host}/api/record/start?event={launch_id}
+              stop_url: http://{host}/api/record/stop?event={launch_id}
+              download_url: http://{host}/api/record/download?event={launch_id}
+              download_path: /srv/fenetre/data/launches/{launch_id}-{camera}.mp4
+              download_delay_seconds: 60
+              skip_when_full_viewers: true
+```
+
+Launch actions are recorded in `state_file`, so real actions are not repeated after restarts. `pause_tour` and `resume_tour` use the camera's configured PTZ tour backend. `preset` uses the configured preset id/token. Record hooks can use `*_url` or `*_command`, and placeholders such as `{camera}`, `{launch_id}`, `{launch_name}`, `{launch_time_utc}`, `{provider}`, `{location}`, `{pad}`, `{host}`, `{username}`, and `{password}` are rendered at runtime.
+
+The admin API exposes:
+
+- `GET /api/launches/preview`: show upcoming matched launches and phases.
+- `POST /api/launches/run_due`: run due actions, with optional `{"dry_run": false}`.
 
 PTZ user roles are:
 

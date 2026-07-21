@@ -114,6 +114,40 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertFalse(global_conf["ui"]["public_site"])
 
+    def test_config_load_launch_workflow(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "launch_workflow": {
+                    "enabled": True,
+                    "dry_run": True,
+                    "refresh_interval_s": 120,
+                    "schedule_events": [
+                        {"name": "Mission", "net": "2026-07-21T12:00:00Z"}
+                    ],
+                    "plans": {
+                        "vandenberg": {
+                            "match": {"locations": ["Vandenberg"]},
+                            "cameras": {"cam1": {"preset": "launch"}},
+                        }
+                    },
+                },
+            },
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        launch_workflow = global_conf["launch_workflow"]
+        self.assertTrue(launch_workflow["enabled"])
+        self.assertEqual(launch_workflow["refresh_interval_s"], 120)
+        self.assertEqual(
+            launch_workflow["plans"]["vandenberg"]["cameras"]["cam1"]["preset"],
+            "launch",
+        )
+
     def test_config_load_storage_management_defaults(self):
         test_data = {
             "global": {
@@ -183,6 +217,41 @@ class FenetreConfigTestCase(unittest.TestCase):
         _, cameras_conf, _, _, _ = config_load(config_path)
 
         self.assertFalse(cameras_conf["cam1"]["go2rtc_enabled"])
+
+    def test_config_load_camera_image_profiles(self):
+        test_data = {
+            "global": {"work_dir": self.mock_work_dir, "timezone": "UTC"},
+            "cameras": {
+                "cam1": {
+                    "url": "http://cam1",
+                    "image_profiles": {
+                        "enabled": True,
+                        "vendor": "reolink",
+                        "host": "cam1",
+                        "mode_profiles": {"night": "low-light"},
+                        "profiles": {
+                            "low-light": {
+                                "actions": [
+                                    {
+                                        "url": "http://{host}/api/night",
+                                        "method": "POST",
+                                    }
+                                ]
+                            }
+                        },
+                    },
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, cameras_conf, _, _, _ = config_load(config_path)
+
+        image_profiles = cameras_conf["cam1"]["image_profiles"]
+        self.assertTrue(image_profiles["enabled"])
+        self.assertEqual(image_profiles["vendor"], "reolink")
+        self.assertEqual(image_profiles["mode_profiles"], {"night": "low-light"})
+        self.assertIn("low-light", image_profiles["profiles"])
 
     def test_config_load_camera_http_auth(self):
         test_data = {

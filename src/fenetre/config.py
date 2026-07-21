@@ -139,6 +139,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "mqtt",
         "profiler",
         "serialize_background_jobs",
+        "launch_workflow",
+        "rocket_launches",
     }
     _warn_unknown_keys("global", cfg, allowed)
 
@@ -582,6 +584,108 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         min_value=1,
     )
     out["profiler"] = profiler_out
+
+    launch_cfg = _dict(
+        cfg.get("launch_workflow") or cfg.get("rocket_launches"),
+        "global.launch_workflow",
+        errors,
+    )
+    if launch_cfg:
+        launch_out = {}
+        _warn_unknown_keys(
+            "global.launch_workflow",
+            launch_cfg,
+            {
+                "enabled",
+                "dry_run",
+                "schedule_url",
+                "schedule_file",
+                "schedule_events",
+                "schedule_timeout_s",
+                "refresh_interval_s",
+                "lookahead_hours",
+                "default_pre_seconds",
+                "default_post_seconds",
+                "state_file",
+                "plans",
+            },
+        )
+        launch_out["enabled"] = _bool(
+            launch_cfg.get("enabled"),
+            "global.launch_workflow.enabled",
+            errors,
+            default=False,
+        )
+        launch_out["dry_run"] = _bool(
+            launch_cfg.get("dry_run"),
+            "global.launch_workflow.dry_run",
+            errors,
+            default=True,
+        )
+        launch_out["schedule_url"] = _str(
+            launch_cfg.get("schedule_url"),
+            "global.launch_workflow.schedule_url",
+            errors,
+            default="",
+        )
+        launch_out["schedule_file"] = _str(
+            launch_cfg.get("schedule_file"),
+            "global.launch_workflow.schedule_file",
+            errors,
+            default="",
+        )
+        launch_out["schedule_timeout_s"] = _float(
+            launch_cfg.get("schedule_timeout_s"),
+            "global.launch_workflow.schedule_timeout_s",
+            errors,
+            default=10.0,
+            min_value=0.1,
+        )
+        launch_out["refresh_interval_s"] = _int(
+            launch_cfg.get("refresh_interval_s"),
+            "global.launch_workflow.refresh_interval_s",
+            errors,
+            default=300,
+            min_value=10,
+        )
+        launch_out["lookahead_hours"] = _float(
+            launch_cfg.get("lookahead_hours"),
+            "global.launch_workflow.lookahead_hours",
+            errors,
+            default=168.0,
+            min_value=0.1,
+        )
+        launch_out["default_pre_seconds"] = _int(
+            launch_cfg.get("default_pre_seconds"),
+            "global.launch_workflow.default_pre_seconds",
+            errors,
+            default=60,
+            min_value=0,
+        )
+        launch_out["default_post_seconds"] = _int(
+            launch_cfg.get("default_post_seconds"),
+            "global.launch_workflow.default_post_seconds",
+            errors,
+            default=600,
+            min_value=0,
+        )
+        launch_out["state_file"] = _str(
+            launch_cfg.get("state_file"),
+            "global.launch_workflow.state_file",
+            errors,
+            default="",
+        )
+        if launch_cfg.get("schedule_events") is not None:
+            if isinstance(launch_cfg.get("schedule_events"), list):
+                launch_out["schedule_events"] = launch_cfg.get("schedule_events")
+            else:
+                errors.append("global.launch_workflow.schedule_events: expected list")
+        if launch_cfg.get("plans") is not None:
+            if isinstance(launch_cfg.get("plans"), (dict, list)):
+                launch_out["plans"] = launch_cfg.get("plans")
+            else:
+                errors.append("global.launch_workflow.plans: expected mapping or list")
+        out["launch_workflow"] = launch_out
     return out
 
 
@@ -873,6 +977,91 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
     return out
 
 
+def _validate_image_profiles(cam_config: Dict, cam_name: str, errors: list) -> Dict:
+    image_profiles = cam_config.get("image_profiles") or cam_config.get(
+        "image_settings_profiles"
+    )
+    if image_profiles is None:
+        return {}
+    image_profiles = _dict(image_profiles, f"cameras.{cam_name}.image_profiles", errors)
+    if not image_profiles:
+        return {"image_profiles": {}}
+
+    _warn_unknown_keys(
+        f"cameras.{cam_name}.image_profiles",
+        image_profiles,
+        {
+            "enabled",
+            "vendor",
+            "host",
+            "port",
+            "http_port",
+            "channel",
+            "username",
+            "password",
+            "timeout_s",
+            "mode_profiles",
+            "mode_map",
+            "profiles",
+        },
+    )
+    out = {
+        "enabled": _bool(
+            image_profiles.get("enabled"),
+            f"cameras.{cam_name}.image_profiles.enabled",
+            errors,
+            default=False,
+        ),
+        "vendor": _str(
+            image_profiles.get("vendor"),
+            f"cameras.{cam_name}.image_profiles.vendor",
+            errors,
+            default="generic",
+        ),
+    }
+    for key in ("host", "username", "password"):
+        if image_profiles.get(key) is not None:
+            out[key] = _str(
+                image_profiles.get(key),
+                f"cameras.{cam_name}.image_profiles.{key}",
+                errors,
+            )
+    for key in ("port", "http_port", "channel"):
+        if image_profiles.get(key) is not None:
+            out[key] = _int(
+                image_profiles.get(key),
+                f"cameras.{cam_name}.image_profiles.{key}",
+                errors,
+                min_value=0 if key == "channel" else 1,
+            )
+    if image_profiles.get("timeout_s") is not None:
+        out["timeout_s"] = _float(
+            image_profiles.get("timeout_s"),
+            f"cameras.{cam_name}.image_profiles.timeout_s",
+            errors,
+            min_value=0.1,
+        )
+    mode_map = image_profiles.get("mode_profiles") or image_profiles.get("mode_map")
+    if mode_map is not None:
+        if isinstance(mode_map, dict):
+            out["mode_profiles"] = mode_map
+        else:
+            errors.append(
+                f"cameras.{cam_name}.image_profiles.mode_profiles: expected mapping"
+            )
+    profiles = image_profiles.get("profiles")
+    if profiles is not None:
+        if isinstance(profiles, dict):
+            out["profiles"] = profiles
+        else:
+            errors.append(
+                f"cameras.{cam_name}.image_profiles.profiles: expected mapping"
+            )
+    else:
+        out["profiles"] = {}
+    return {"image_profiles": out}
+
+
 def _validate_cameras(cfg: Dict, errors) -> Dict:
     if cfg is None:
         return {}
@@ -1151,6 +1340,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
 
         # Day/Night settings
         cam_out.update(_validate_day_night_settings(cam, name, errors))
+        cam_out.update(_validate_image_profiles(cam, name, errors))
 
         # Optional postprocessing list (pass-through, validated elsewhere)
         if cam.get("postprocessing") is not None:
@@ -1198,6 +1388,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "gopro_usb",
             "name",
             "iface",
+            "recording",
         ):
             if k in cam:
                 cam_out[k] = cam[k]

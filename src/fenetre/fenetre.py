@@ -77,6 +77,7 @@ from fenetre.camera_utils import (
 )
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
+from fenetre.launch_workflow import run_due_launch_actions
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.rtsp_capture import camera_local_command
 from fenetre.ptz import (
@@ -2252,6 +2253,7 @@ archive_thread_global = None
 frequent_timelapse_loop_thread_global = None
 frequent_timelapse_scheduler_thread_global = None
 disk_management_thread_global = None
+launch_workflow_thread_global = None
 
 
 def main(argv):
@@ -2286,7 +2288,7 @@ def main(argv):
     frequent_timelapse_scheduler_offset = 0
 
     # All threads are started here. We don't start all at the same time to prevent cluttering the stdout and hiding some potentially useful warnings.
-    global timelapse_thread_global, daylight_thread_global, archive_thread_global, frequent_timelapse_loop_thread_global
+    global timelapse_thread_global, daylight_thread_global, archive_thread_global, frequent_timelapse_loop_thread_global, launch_workflow_thread_global
 
     # This starts the camera threads.
     load_and_apply_configuration(initial_load=True)  # Uses FLAGS.config by default
@@ -2359,6 +2361,14 @@ def main(argv):
         )
     else:
         logger.warning("Frequent timelapse scheduler is disabled.")
+
+    logger.info("Launch workflow thread will start in 5s...")
+    interruptible_sleep(5, exit_event)
+    launch_workflow_thread_global = Thread(
+        target=launch_workflow_loop, daemon=True, name="launch_workflow_loop"
+    )
+    launch_workflow_thread_global.start()
+    logger.info(f"Starting thread {launch_workflow_thread_global.name}")
 
     try:
         while not exit_event.is_set():
@@ -2708,7 +2718,7 @@ def shutdown_application():
     profiler.stop()
 
     # Stop Timelapse and Daylight threads
-    global timelapse_thread_global, daylight_thread_global
+    global timelapse_thread_global, daylight_thread_global, launch_workflow_thread_global
     if timelapse_thread_global and timelapse_thread_global.is_alive():
         timelapse_thread_global.join(timeout=10)
         if timelapse_thread_global.is_alive():
@@ -2717,6 +2727,10 @@ def shutdown_application():
         daylight_thread_global.join(timeout=10)
         if daylight_thread_global.is_alive():
             logger.warning("Daylight thread did not exit gracefully.")
+    if launch_workflow_thread_global and launch_workflow_thread_global.is_alive():
+        launch_workflow_thread_global.join(timeout=10)
+        if launch_workflow_thread_global.is_alive():
+            logger.warning("Launch workflow thread did not exit gracefully.")
 
     # Clean up PID file
     try:
@@ -2729,6 +2743,30 @@ def shutdown_application():
     logger.info("Application shutdown complete.")
     # sys.exit(0) # Explicitly exit. This might be too abrupt if called from signal handler context.
     # Rely on main thread exiting naturally after exit_event is processed.
+
+
+def launch_workflow_loop():
+    while not exit_event.is_set():
+        workflow_config = (global_config or {}).get("launch_workflow") or {}
+        if not workflow_config.get("enabled", False):
+            interruptible_sleep(10, exit_event)
+            continue
+        try:
+            result = run_due_launch_actions(
+                {"global": global_config or {}, "cameras": cameras_config or {}},
+                active_view_counter=active_live_view_count,
+            )
+            action_count = len(result.get("actions") or [])
+            if action_count:
+                logger.info(
+                    "Launch workflow processed %s due action(s) dry_run=%s",
+                    action_count,
+                    result.get("dry_run"),
+                )
+        except Exception as exc:
+            logger.warning("Launch workflow run failed: %s", exc, exc_info=True)
+        interval_s = int(workflow_config.get("refresh_interval_s") or 300)
+        interruptible_sleep(max(10, interval_s), exit_event)
 
 
 def frequent_timelapse_scheduler_loop():
