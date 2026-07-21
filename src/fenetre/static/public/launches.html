@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <title>Launch Dashboard</title>
+    <link rel="stylesheet" href="launches.css?v=20260721-public-launch-dashboard">
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <h1 id="page-title">Launch Dashboard</h1>
+            <p id="page-subtitle">Upcoming launches and configured cameras</p>
+        </div>
+        <nav class="header-controls" aria-label="Page controls">
+            <a class="control-link" href="/">Cameras</a>
+            <button id="refresh-button" type="button">Refresh</button>
+            <button id="login-toggle" type="button">Login</button>
+        </nav>
+    </header>
+
+    <section id="login-panel" class="login-panel" hidden>
+        <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username">
+        <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Password">
+        <button id="login-submit" type="button">Login</button>
+        <button id="logout-submit" type="button" hidden>Logout</button>
+        <span id="login-status"></span>
+    </section>
+
+    <main class="page-shell">
+        <section id="private-landing" class="private-landing" hidden>
+            <h2 id="private-landing-name">Fenetre</h2>
+            <p>Log in to view launch details.</p>
+            <button id="private-login-button" type="button">Login</button>
+        </section>
+
+        <section id="dashboard-panel" class="dashboard-panel">
+            <div class="dashboard-heading">
+                <h2>Upcoming Launches</h2>
+                <span id="dashboard-status">Loading...</span>
+            </div>
+            <div id="dashboard" class="dashboard-grid"></div>
+        </section>
+    </main>
+
+    <script src="launches.js?v=20260721-public-launch-dashboard"></script>
+</body>
+</html>

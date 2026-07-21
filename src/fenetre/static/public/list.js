@@ -11,9 +11,11 @@ const loginStatus = document.getElementById('login-status');
 const privateLanding = document.getElementById('private-landing');
 const privateLandingName = document.getElementById('private-landing-name');
 const privateLoginButton = document.getElementById('private-login-button');
+const launchDashboardLink = document.getElementById('launch-dashboard-link');
 let authToken = localStorage.getItem('fenetreAuthToken') || '';
 let authUser = null;
 let siteIsPublic = true;
+let launchWorkflowEnabled = false;
 let deploymentName = 'Fenetre';
 
 function syncThemeToggleIcon() {
@@ -132,6 +134,12 @@ function setDeploymentName(name) {
     document.title = `${deploymentName} Cameras`;
 }
 
+function updateLaunchDashboardLink() {
+    if (launchDashboardLink) {
+        launchDashboardLink.hidden = !launchWorkflowEnabled;
+    }
+}
+
 function updatePrivateLanding() {
     const locked = !siteIsPublic && !authUser;
     privateLanding.hidden = !locked;
@@ -158,6 +166,7 @@ async function loadAuthStatus() {
         const response = await fetch('/api/auth/status', { headers: authHeaders() });
         const data = await response.json();
         siteIsPublic = data.public_site !== false;
+        launchWorkflowEnabled = data.launch_workflow_enabled === true;
         setDeploymentName(data.deployment_name || deploymentName);
         authUser = data.authenticated ? data.user : null;
         if (!authUser) {
@@ -166,6 +175,7 @@ async function loadAuthStatus() {
     } catch (error) {
         authUser = null;
     }
+    updateLaunchDashboardLink();
     syncLoginUi();
 }
 

@@ -1,0 +1,315 @@
+body {
+    background: #f4f4f4;
+    color: #333;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.site-header {
+    align-items: center;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    box-sizing: border-box;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    padding: 14px 20px;
+}
+
+.site-header h1 {
+    font-size: 1.45rem;
+    margin: 0;
+}
+
+.site-header p {
+    color: #666;
+    margin: 3px 0 0;
+}
+
+.header-controls {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.control-link,
+.header-controls button,
+.login-panel button,
+.private-landing button {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    color: #333;
+    cursor: pointer;
+    font: inherit;
+    min-height: 40px;
+    padding: 0 12px;
+    text-decoration: none;
+}
+
+.control-link {
+    align-items: center;
+    display: inline-flex;
+}
+
+.header-controls button:disabled {
+    color: #888;
+    cursor: wait;
+}
+
+.login-panel {
+    align-items: center;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    gap: 8px;
+    padding: 10px 20px;
+}
+
+.login-panel input {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    height: 34px;
+    max-width: 190px;
+    padding: 6px 8px;
+}
+
+#login-status,
+#dashboard-status {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.page-shell {
+    box-sizing: border-box;
+    margin: 0 auto;
+    max-width: 1180px;
+    padding: 18px 20px 40px;
+}
+
+.private-landing {
+    display: grid;
+    gap: 14px;
+    justify-items: center;
+    margin: 36px auto;
+    max-width: 480px;
+    text-align: center;
+}
+
+.private-landing h2 {
+    font-size: 1.8rem;
+    margin: 0;
+}
+
+.private-landing p {
+    margin: 0;
+}
+
+.dashboard-panel {
+    display: grid;
+    gap: 14px;
+}
+
+.dashboard-heading {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.dashboard-heading h2 {
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+.dashboard-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.launch-event-card,
+.launch-empty {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.launch-event-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+}
+
+.launch-empty {
+    color: #666;
+    padding: 16px;
+}
+
+.launch-event-header,
+.launch-plan-title {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.launch-event-header h3 {
+    font-size: 1.08rem;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.launch-time {
+    color: #333;
+    font-weight: bold;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.launch-meta,
+.launch-camera-card span,
+.launch-camera-card small,
+.launch-plan-timing {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.launch-plan {
+    border-top: 1px solid #eee;
+    display: grid;
+    gap: 10px;
+    padding-top: 10px;
+}
+
+.launch-plan-title strong {
+    overflow-wrap: anywhere;
+}
+
+.phase-badge {
+    background: #e7f3ff;
+    border-radius: 999px;
+    color: #0056b3;
+    display: inline-block;
+    font-size: 0.85rem;
+    padding: 3px 8px;
+}
+
+.launch-camera-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.launch-camera-card {
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    display: grid;
+    gap: 3px;
+    padding: 9px;
+}
+
+.launch-camera-card strong {
+    overflow-wrap: anywhere;
+}
+
+body.dark-mode {
+    background: #121212;
+    color: #e0e0e0;
+}
+
+body.dark-mode .site-header,
+body.dark-mode .login-panel,
+body.dark-mode .launch-event-card,
+body.dark-mode .launch-empty {
+    background: #1e1e1e;
+    border-color: #333;
+}
+
+body.dark-mode .control-link,
+body.dark-mode .header-controls button,
+body.dark-mode .login-panel button,
+body.dark-mode .private-landing button {
+    background: #333;
+    border-color: #555;
+    color: #e0e0e0;
+}
+
+body.dark-mode .login-panel input {
+    background: #1f1f1f;
+    border-color: #555;
+    color: #e0e0e0;
+}
+
+body.dark-mode .site-header p,
+body.dark-mode #login-status,
+body.dark-mode #dashboard-status,
+body.dark-mode .launch-meta,
+body.dark-mode .launch-camera-card span,
+body.dark-mode .launch-camera-card small,
+body.dark-mode .launch-plan-timing,
+body.dark-mode .launch-empty {
+    color: #bbb;
+}
+
+body.dark-mode .launch-time {
+    color: #e0e0e0;
+}
+
+body.dark-mode .launch-plan {
+    border-color: #333;
+}
+
+body.dark-mode .launch-camera-card {
+    background: #242424;
+    border-color: #333;
+}
+
+@media (max-width: 700px) {
+    .site-header,
+    .dashboard-heading,
+    .launch-event-header,
+    .launch-plan-title {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .header-controls,
+    .login-panel {
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .control-link,
+    .header-controls button,
+    .login-panel input,
+    .login-panel button {
+        box-sizing: border-box;
+        justify-content: center;
+        max-width: none;
+        width: 100%;
+    }
+
+    .login-panel {
+        flex-direction: column;
+        padding: 10px;
+    }
+
+    .page-shell {
+        padding: 12px 10px 32px;
+    }
+
+    .launch-time {
+        text-align: left;
+        white-space: normal;
+    }
+}

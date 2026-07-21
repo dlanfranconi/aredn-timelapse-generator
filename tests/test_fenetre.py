@@ -92,6 +92,68 @@ class TestFenetre(unittest.TestCase):
             fenetre_module.global_config = old_global_config
             fenetre_module.cameras_config = old_cameras_config
 
+    def test_public_launch_preview_filters_hidden_and_private_cameras(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        snapshot = (
+            {
+                "public-cam": {"url": "http://public", "visibility": "public"},
+                "auth-cam": {"url": "http://auth", "public": False},
+                "hidden-cam": {"url": "http://hidden", "visibility": "hidden"},
+            },
+            {"deployment_name": "Launch Site", "ui": {"public_site": True}},
+            {},
+        )
+        preview = {
+            "ok": True,
+            "enabled": True,
+            "events": [
+                {
+                    "name": "Falcon 9",
+                    "plans": [
+                        {
+                            "id": "vandenberg",
+                            "cameras": ["public-cam", "auth-cam", "hidden-cam"],
+                            "camera_details": [
+                                {"name": "public-cam"},
+                                {"name": "auth-cam"},
+                                {"name": "hidden-cam"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with patch.object(
+            fenetre_module, "load_public_config_snapshot", return_value=snapshot
+        ):
+            public_preview = handler._filter_public_launch_preview(preview, None)
+            authed_preview = handler._filter_public_launch_preview(
+                preview, {"username": "operator"}
+            )
+
+        self.assertEqual(
+            public_preview["events"][0]["plans"][0]["cameras"],
+            ["public-cam"],
+        )
+        self.assertEqual(
+            authed_preview["events"][0]["plans"][0]["cameras"],
+            ["public-cam", "auth-cam"],
+        )
+
+    def test_launch_workflow_enabled_flag_reads_current_public_config(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        with patch.object(
+            fenetre_module,
+            "load_public_config_snapshot",
+            return_value=(
+                {},
+                {"launch_workflow": {"enabled": "yes"}},
+                {},
+            ),
+        ):
+            self.assertTrue(handler._launch_workflow_enabled())
+
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()
 

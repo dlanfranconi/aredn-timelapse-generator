@@ -156,7 +156,8 @@ body.dark-mode .marker-cluster-large div {
 }
 
 #main-website-link svg,
-#github-link svg {
+#github-link svg,
+#launch-dashboard-link svg {
     width: 22px;
     height: 22px;
 }

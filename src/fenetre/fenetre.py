@@ -77,7 +77,7 @@ from fenetre.camera_utils import (
 )
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
-from fenetre.launch_workflow import run_due_launch_actions
+from fenetre.launch_workflow import preview_launch_workflow, run_due_launch_actions
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.rtsp_capture import camera_local_command
 from fenetre.ptz import (
@@ -1285,6 +1285,20 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _site_is_public(self) -> bool:
         return self._ui_config().get("public_site", True) is not False
 
+    def _launch_workflow_enabled(self) -> bool:
+        _, current_global_config, _ = load_public_config_snapshot()
+        workflow = current_global_config.get(
+            "launch_workflow"
+        ) or current_global_config.get("rocket_launches")
+        if not isinstance(workflow, dict):
+            return False
+        value = workflow.get("enabled")
+        if isinstance(value, bool):
+            return value
+        if value is None or value == "":
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
     def _send_public_auth_required(self):
         self._send_json(
             401,
@@ -1354,6 +1368,50 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             include_go2rtc=bool(user),
         )
         self._send_json(200, metadata)
+
+    def _filter_public_launch_preview(
+        self, preview: Dict, user: Optional[Dict]
+    ) -> Dict:
+        filtered = dict(preview or {})
+        events = []
+        for event in filtered.get("events") or []:
+            event_copy = dict(event)
+            plans = []
+            for plan in event_copy.get("plans") or []:
+                plan_copy = dict(plan)
+                camera_details = [
+                    dict(camera)
+                    for camera in plan_copy.get("camera_details") or []
+                    if isinstance(camera, dict)
+                    and self._camera_visible_to_public_user(
+                        camera.get("name", ""), user
+                    )
+                ]
+                plan_copy["camera_details"] = camera_details
+                plan_copy["cameras"] = [camera["name"] for camera in camera_details]
+                plans.append(plan_copy)
+            event_copy["plans"] = plans
+            events.append(event_copy)
+        filtered["events"] = events
+        return filtered
+
+    def _handle_launches_preview_api(self):
+        user = self._public_session_user()
+        if not self._site_is_public() and not user:
+            self._send_public_auth_required()
+            return
+        current_cameras_config, current_global_config, _ = load_public_config_snapshot()
+        try:
+            preview = preview_launch_workflow(
+                {
+                    "global": current_global_config or {},
+                    "cameras": current_cameras_config or {},
+                }
+            )
+            self._send_json(200, self._filter_public_launch_preview(preview, user))
+        except Exception as exc:
+            logger.error("Unexpected launch preview error.", exc_info=True)
+            self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _handle_timelapses_api(self, parsed_url):
         query = parse_qs(parsed_url.query)
@@ -1561,6 +1619,7 @@ window.location.replace({json.dumps(next_url)});
                 "user": user,
                 "public_site": self._site_is_public(),
                 "deployment_name": self._deployment_name(),
+                "launch_workflow_enabled": self._launch_workflow_enabled(),
             },
         )
 
@@ -1940,6 +1999,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/timelapses":
             self._handle_timelapses_api(parsed_url)
+            return
+        if parsed_url.path == "/api/launches/preview":
+            self._handle_launches_preview_api()
             return
         if parsed_url.path == "/api/ptz/status":
             self._handle_ptz_status_api(parsed_url)
