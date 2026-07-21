@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncUiBtn = document.getElementById('syncUiBtn');
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     const addCameraBtn = document.getElementById('addCameraBtn');
+    const changeAdminPasswordBtn = document.getElementById('changeAdminPasswordBtn');
     const adminLogoutBtn = document.getElementById('adminLogoutBtn');
     const editCameraBtn = document.getElementById('editCameraBtn');
     const editCameraSelect = document.getElementById('editCameraSelect');
@@ -121,6 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const userPtzAccess = document.getElementById('userPtzAccess');
     const userPtzCameras = document.getElementById('userPtzCameras');
     const userDisabled = document.getElementById('userDisabled');
+    const passwordModal = document.getElementById('passwordModal');
+    const closePasswordModalBtn = document.getElementById('closePasswordModalBtn');
+    const passwordForm = document.getElementById('passwordForm');
+    const adminCurrentPassword = document.getElementById('adminCurrentPassword');
+    const adminNewPassword = document.getElementById('adminNewPassword');
+    const adminConfirmPassword = document.getElementById('adminConfirmPassword');
     const siteNameInput = document.getElementById('siteNameInput');
     const sitePublicInput = document.getElementById('sitePublicInput');
     const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
@@ -255,6 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     reloadAppBtn.addEventListener('click', reloadApplication);
     rebuildCamerasBtn.addEventListener('click', rebuildCamerasJson);
     syncUiBtn.addEventListener('click', syncUI);
+    changeAdminPasswordBtn.addEventListener('click', openPasswordModal);
     adminLogoutBtn.addEventListener('click', logoutAdmin);
     addCameraBtn.addEventListener('click', handleAddCamera);
     editCameraBtn.addEventListener('click', handleEditCamera);
@@ -264,12 +272,14 @@ document.addEventListener('DOMContentLoaded', () => {
     closeAddCameraModalBtn.addEventListener('click', () => hideModal(addCameraModal));
     manageUsersBtn.addEventListener('click', openUserManager);
     closeUserModalBtn.addEventListener('click', () => hideModal(userModal));
+    closePasswordModalBtn.addEventListener('click', () => hideModal(passwordModal));
     refreshStorageBtn.addEventListener('click', loadStorageSummary);
     previewLaunchWorkflowBtn.addEventListener('click', previewLaunchWorkflow);
     saveLaunchWorkflowBtn.addEventListener('click', saveLaunchWorkflow);
     launchWorkflowEnabled.addEventListener('change', syncLaunchWorkflowEnabledState);
     newUserBtn.addEventListener('click', clearUserForm);
     userForm.addEventListener('submit', saveUser);
+    passwordForm.addEventListener('submit', changeAdminPassword);
     deleteUserBtn.addEventListener('click', deleteUser);
     saveSiteNameBtn.addEventListener('click', saveSiteName);
     toggleNewCameraUrlBtn.addEventListener('click', () => toggleSensitiveInput(newCameraUrl, toggleNewCameraUrlBtn));
@@ -300,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
     newCameraName.addEventListener('input', resetNewCameraTest);
     testNewCameraBtn.addEventListener('click', testNewCameraSnapshot);
     confirmNewCameraBtn.addEventListener('click', confirmNewCameraAdd);
-    [addCameraModal, userModal].forEach(modal => {
+    [addCameraModal, userModal, passwordModal].forEach(modal => {
         modal.addEventListener('click', event => {
             if (event.target === modal) {
                 hideModal(modal);
@@ -1252,6 +1262,13 @@ document.addEventListener('DOMContentLoaded', () => {
         userForm.querySelectorAll('input, select, button').forEach(control => {
             control.disabled = !canManage;
         });
+        if (usersPayload.can_set_user_passwords === false) {
+            userPassword.disabled = true;
+            userPassword.placeholder = 'Only superadmins can set user passwords';
+        } else {
+            userPassword.disabled = !canManage;
+            userPassword.placeholder = 'Leave blank to keep current password';
+        }
         userPtzCameras.querySelectorAll('input').forEach(control => {
             control.disabled = !canManage;
         });
@@ -1355,6 +1372,43 @@ document.addEventListener('DOMContentLoaded', () => {
             clearUserForm();
         } catch (error) {
             setStatus(`Error deleting user: ${error.message}`, 'error');
+        }
+    }
+
+    function openPasswordModal() {
+        adminCurrentPassword.value = '';
+        adminNewPassword.value = '';
+        adminConfirmPassword.value = '';
+        showModal(passwordModal);
+        adminCurrentPassword.focus();
+    }
+
+    async function changeAdminPassword(event) {
+        event.preventDefault();
+        if (adminNewPassword.value !== adminConfirmPassword.value) {
+            setStatus('New passwords do not match.', 'error');
+            return;
+        }
+        try {
+            const response = await fetch('/api/users/password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    current_password: adminCurrentPassword.value,
+                    new_password: adminNewPassword.value
+                })
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `HTTP error! status: ${response.status}`);
+            }
+            hideModal(passwordModal);
+            setStatus((result.message || 'Password changed.') + configWriteDetails(result), 'success');
+            window.setTimeout(() => {
+                window.location.href = '/logout';
+            }, 900);
+        } catch (error) {
+            setStatus(`Error changing password: ${error.message}`, 'error');
         }
     }
 

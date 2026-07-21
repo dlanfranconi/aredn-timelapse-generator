@@ -25,6 +25,7 @@ from fenetre.auth import (
     ensure_default_admin_user,
     hash_password,
     user_has_password,
+    verify_password,
 )
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.gopro import GoPro
@@ -187,6 +188,17 @@ def _current_user_can_manage_users(config: dict) -> bool:
     # superadmin until one exists, then reserve user permission edits for
     # superadmins.
     return role == "admin" and not _has_superadmin(config.get("users") or {})
+
+
+def _current_user_can_set_user_password(target_username: str) -> bool:
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    if effective_user_role(user) == "superadmin":
+        return True
+    return user.get("username") == target_username
 
 
 @app.before_request
@@ -899,6 +911,18 @@ def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, d
     return username, user
 
 
+def _ptz_capable_camera_names(config: dict) -> list[str]:
+    cameras = config.get("cameras") or {}
+    names = []
+    for camera_name, camera_config in cameras.items():
+        if not isinstance(camera_config, dict):
+            continue
+        ptz_config = camera_config.get("ptz") or {}
+        if isinstance(ptz_config, dict) and ptz_config.get("enabled"):
+            names.append(str(camera_name))
+    return sorted(names)
+
+
 def _work_dir_from_config(config: dict) -> str | None:
     return (config.get("global") or {}).get("work_dir")
 
@@ -989,6 +1013,12 @@ def list_users():
         ensure_default_admin_user(_config_file_path())
         _, config = _load_effective_config_with_raw()
         users = config.get("users") or {}
+        ptz_cameras = _ptz_capable_camera_names(config)
+        current_user = _current_admin_user()
+        current_role = effective_user_role(current_user)
+        can_set_user_passwords = (not _admin_auth_enabled()) or (
+            current_role == "superadmin"
+        )
         public_users = []
         for username, user in users.items():
             public_users.append(
@@ -1004,8 +1034,17 @@ def list_users():
         return jsonify(
             {
                 "users": public_users,
-                "cameras": sorted((config.get("cameras") or {}).keys()),
+                "cameras": ptz_cameras,
                 "can_manage_users": _current_user_can_manage_users(config),
+                "can_set_user_passwords": can_set_user_passwords,
+                "current_user": (
+                    {
+                        "username": current_user.get("username"),
+                        "role": current_role,
+                    }
+                    if current_user
+                    else None
+                ),
             }
         )
     except Exception as e:
@@ -1021,6 +1060,29 @@ def upsert_user():
         if not _current_user_can_manage_users(config):
             return jsonify({"error": "Only superadmins can manage users."}), 403
         users = config.setdefault("users", {})
+        username = (payload.get("username") or "").strip()
+        if payload.get("password") and not _current_user_can_set_user_password(
+            username
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Only superadmins can change another user's password. "
+                            "Use Change Password to update your own password."
+                        )
+                    }
+                ),
+                403,
+            )
+        ptz_cameras = set(_ptz_capable_camera_names(config))
+        if isinstance(payload.get("ptz_cameras"), list):
+            payload = dict(payload)
+            payload["ptz_cameras"] = [
+                camera_name
+                for camera_name in payload.get("ptz_cameras", [])
+                if camera_name in ptz_cameras
+            ]
         username, user = _normalize_user(payload, users.get(payload.get("username")))
         users[username] = user
         config_to_write = _merge_effective_config(raw_config, config)
@@ -1036,6 +1098,74 @@ def upsert_user():
         return jsonify({"error": str(exc)}), 400
     except Exception as e:
         return jsonify({"error": f"Failed to save user: {str(e)}"}), 500
+
+
+@app.route("/api/users/password", methods=["POST"])
+def change_current_user_password():
+    try:
+        payload = request.get_json(force=True) or {}
+        current_password = str(payload.get("current_password") or "")
+        new_password = str(payload.get("new_password") or "")
+        if not current_password or not new_password:
+            return (
+                jsonify({"error": "current_password and new_password are required."}),
+                400,
+            )
+        if len(new_password) < 8:
+            return (
+                jsonify({"error": "New password must be at least 8 characters."}),
+                400,
+            )
+
+        current_user = _current_admin_user()
+        if not current_user:
+            return jsonify({"error": "Authentication is required."}), 401
+        username = (current_user.get("username") or "").strip()
+        if not username:
+            return jsonify({"error": "Current user is unknown."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        users = config.setdefault("users", {})
+        user = users.get(username)
+        if not isinstance(user, dict):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "The current admin user is not managed in config.yaml. "
+                            "Set a config-backed user before changing passwords here."
+                        )
+                    }
+                ),
+                400,
+            )
+        if user.get("disabled", False) or not verify_password(user, current_password):
+            return jsonify({"error": "Current password is incorrect."}), 401
+
+        updated_user = dict(user)
+        updated_user["password_hash"] = hash_password(new_password)
+        updated_user.pop("password", None)
+        updated_user["password_changed_at"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        users[username] = updated_user
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        return jsonify(
+            {
+                "message": "Password changed. Sign in again with the new password.",
+                **metadata,
+            }
+        )
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to change password: {str(e)}"}), 500
 
 
 @app.route("/api/users/<path:username>", methods=["DELETE"])

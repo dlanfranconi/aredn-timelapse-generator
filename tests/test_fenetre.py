@@ -9,6 +9,7 @@ from io import BytesIO
 import sys
 from types import SimpleNamespace
 from requests.auth import HTTPBasicAuth
+import yaml
 
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
@@ -27,6 +28,7 @@ from fenetre.fenetre import (
     run_camera_unavailable_command,
 )
 import fenetre.fenetre as fenetre_module
+from fenetre.auth import authenticate_config_user_record, hash_password
 from fenetre.camera_utils import sanitize_url_for_logs
 from fenetre.picamera import Picamera2Capture
 
@@ -91,6 +93,74 @@ class TestFenetre(unittest.TestCase):
         finally:
             fenetre_module.global_config = old_global_config
             fenetre_module.cameras_config = old_cameras_config
+
+    def test_public_user_can_change_own_password_without_admin_dashboard(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "config.yaml")
+            with open(config_path, "w") as f:
+                yaml.safe_dump(
+                    {
+                        "users": {
+                            "viewer": {
+                                "role": "viewer",
+                                "password_hash": hash_password("old-pass"),
+                                "ptz_access": "none",
+                                "ptz_cameras": [],
+                            }
+                        }
+                    },
+                    f,
+                )
+
+            handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+            responses = []
+            handler._public_session_user = lambda: {
+                "username": "viewer",
+                "role": "viewer",
+            }
+            handler._read_json_body = lambda: {
+                "current_password": "old-pass",
+                "new_password": "new-pass",
+            }
+            handler._send_json = lambda status, payload: responses.append(
+                (status, payload)
+            )
+
+            old_flags = fenetre_module.FLAGS
+            try:
+                fenetre_module.FLAGS = SimpleNamespace(config=config_path)
+                fenetre_module.public_auth_sessions.clear()
+                fenetre_module.public_auth_sessions.update(
+                    {
+                        "viewer-token": {
+                            "user": {"username": "viewer"},
+                            "expires_at": 9999999999,
+                        },
+                        "other-token": {
+                            "user": {"username": "other"},
+                            "expires_at": 9999999999,
+                        },
+                    }
+                )
+                fenetre_module.public_config_cache.update({"path": config_path})
+
+                handler._handle_public_change_password_api()
+
+                self.assertEqual(responses[0][0], 200)
+                self.assertTrue(responses[0][1]["ok"])
+                self.assertIsNone(
+                    authenticate_config_user_record(config_path, "viewer", "old-pass")
+                )
+                self.assertIsNotNone(
+                    authenticate_config_user_record(config_path, "viewer", "new-pass")
+                )
+                self.assertNotIn("viewer-token", fenetre_module.public_auth_sessions)
+                self.assertIn("other-token", fenetre_module.public_auth_sessions)
+                self.assertEqual(fenetre_module.public_config_cache, {})
+            finally:
+                fenetre_module.FLAGS = old_flags
+                fenetre_module.public_auth_sessions.clear()
+                fenetre_module.public_config_cache.clear()
 
     def test_public_launch_preview_filters_hidden_and_private_cameras(self):
         handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)

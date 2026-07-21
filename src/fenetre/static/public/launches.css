@@ -83,6 +83,7 @@ body {
 }
 
 #login-status,
+#password-status,
 #dashboard-status {
     color: #666;
     font-size: 0.9rem;
@@ -252,6 +253,7 @@ body.dark-mode .login-panel input {
 
 body.dark-mode .site-header p,
 body.dark-mode #login-status,
+body.dark-mode #password-status,
 body.dark-mode #dashboard-status,
 body.dark-mode .launch-meta,
 body.dark-mode .launch-camera-card span,

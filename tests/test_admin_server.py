@@ -799,6 +799,11 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.json["cameras"][0]["limit_GB"], 5)
 
     def test_user_management_crud(self):
+        self.test_config_data["cameras"]["cam1"]["ptz"] = {"enabled": True}
+        self.test_config_data["cameras"]["fixed-cam"] = {"url": "http://fixed"}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
         create = self.app.post(
             "/api/users",
             data=json.dumps(
@@ -808,7 +813,7 @@ class ConfigServerTestCase(unittest.TestCase):
                     "role": "operator",
                     "disabled": False,
                     "ptz_access": "manual",
-                    "ptz_cameras": ["cam1"],
+                    "ptz_cameras": ["cam1", "fixed-cam"],
                 }
             ),
             content_type="application/json",
@@ -820,11 +825,31 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(listed.json["users"][0]["username"], "operator")
         self.assertTrue(listed.json["users"][0]["has_password"])
         self.assertEqual(listed.json["users"][0]["ptz_access"], "manual")
+        self.assertEqual(listed.json["users"][0]["ptz_cameras"], ["cam1"])
+        self.assertEqual(listed.json["cameras"], ["cam1"])
 
         delete = self.app.delete("/api/users/operator")
         self.assertEqual(delete.status_code, 200)
         listed_again = self.app.get("/api/users")
         self.assertEqual(listed_again.json["users"], [])
+
+    def test_list_users_only_returns_ptz_capable_cameras(self):
+        self.test_config_data["cameras"] = {
+            "fixed-cam": {"url": "http://fixed"},
+            "ptz-cam": {"url": "http://ptz", "ptz": {"enabled": True}},
+            "disabled-ptz": {"url": "http://off", "ptz": {"enabled": False}},
+            "zoom-cam": {
+                "url": "http://zoom",
+                "ptz": {"enabled": True, "capabilities": {"pan": False, "tilt": False}},
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        listed = self.app.get("/api/users")
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json["cameras"], ["ptz-cam", "zoom-cam"])
 
     def test_list_users_bootstraps_default_admin_user(self):
         listed = self.app.get("/api/users")
@@ -920,6 +945,84 @@ class ConfigServerTestCase(unittest.TestCase):
             headers={"Authorization": f"Basic {root_token}"},
         )
         self.assertEqual(allowed.status_code, 200)
+
+    def test_non_superadmin_cannot_change_another_users_password(self):
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "admin",
+                "ptz_cameras": [],
+            },
+            "operator": {
+                "role": "operator",
+                "password_hash": hash_password("oldpw"),
+                "ptz_access": "presets",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        denied = self.app.post(
+            "/api/users",
+            data=json.dumps(
+                {
+                    "username": "operator",
+                    "password": "new-secret",
+                    "role": "operator",
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(
+            authenticate_config_user_record(
+                self.temp_config_file.name, "operator", "oldpw"
+            )
+        )
+
+    def test_current_admin_can_change_own_password(self):
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "superadmin",
+                "password_hash": hash_password("old-secret"),
+                "ptz_access": "admin",
+                "ptz_cameras": [],
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        token = base64.b64encode(b"admin:old-secret").decode("ascii")
+        changed = self.app.post(
+            "/api/users/password",
+            data=json.dumps(
+                {
+                    "current_password": "old-secret",
+                    "new_password": "new-secret",
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {token}"},
+        )
+
+        self.assertEqual(changed.status_code, 200)
+        self.assertFalse(
+            authenticate_config_user_record(
+                self.temp_config_file.name, "admin", "old-secret"
+            )
+        )
+        self.assertTrue(
+            authenticate_config_user_record(
+                self.temp_config_file.name, "admin", "new-secret"
+            )
+        )
 
     def test_ptz_lock_endpoint_updates_runtime_lock(self):
         response = self.app.post(

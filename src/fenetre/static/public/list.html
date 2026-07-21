@@ -83,8 +83,17 @@
                 <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username">
                 <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Password">
                 <button id="login-submit" type="button">Login</button>
+                <button id="change-password-toggle" type="button" hidden>Change Password</button>
                 <button id="logout-submit" type="button" hidden>Logout</button>
                 <span id="login-status"></span>
+            </div>
+            <div id="password-panel" hidden>
+                <input id="current-password" type="password" autocomplete="current-password" placeholder="Current password">
+                <input id="new-password" type="password" autocomplete="new-password" placeholder="New password">
+                <input id="confirm-password" type="password" autocomplete="new-password" placeholder="Confirm password">
+                <button id="password-submit" type="button">Save Password</button>
+                <button id="password-cancel" type="button">Cancel</button>
+                <span id="password-status"></span>
             </div>
             <section id="private-landing" class="private-landing" hidden>
                 <h2 id="private-landing-name">Fenetre</h2>

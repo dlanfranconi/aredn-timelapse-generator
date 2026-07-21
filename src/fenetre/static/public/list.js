@@ -6,8 +6,16 @@ const loginPanel = document.getElementById('login-panel');
 const loginUsername = document.getElementById('login-username');
 const loginPassword = document.getElementById('login-password');
 const loginSubmit = document.getElementById('login-submit');
+const changePasswordToggle = document.getElementById('change-password-toggle');
 const logoutSubmit = document.getElementById('logout-submit');
 const loginStatus = document.getElementById('login-status');
+const passwordPanel = document.getElementById('password-panel');
+const currentPassword = document.getElementById('current-password');
+const newPassword = document.getElementById('new-password');
+const confirmPassword = document.getElementById('confirm-password');
+const passwordSubmit = document.getElementById('password-submit');
+const passwordCancel = document.getElementById('password-cancel');
+const passwordStatus = document.getElementById('password-status');
 const privateLanding = document.getElementById('private-landing');
 const privateLandingName = document.getElementById('private-landing-name');
 const privateLoginButton = document.getElementById('private-login-button');
@@ -154,10 +162,14 @@ function updatePrivateLanding() {
 function syncLoginUi() {
     loginToggle.textContent = authUser ? authUser.username : 'Login';
     loginSubmit.hidden = Boolean(authUser);
+    changePasswordToggle.hidden = !authUser;
     logoutSubmit.hidden = !authUser;
     loginUsername.hidden = Boolean(authUser);
     loginPassword.hidden = Boolean(authUser);
     loginStatus.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
+    if (!authUser) {
+        passwordPanel.hidden = true;
+    }
     updatePrivateLanding();
 }
 
@@ -237,6 +249,69 @@ logoutSubmit.addEventListener('click', async () => {
     authUser = null;
     syncLoginUi();
     updateAllCameras();
+});
+
+changePasswordToggle.addEventListener('click', () => {
+    passwordPanel.hidden = !passwordPanel.hidden;
+    passwordStatus.textContent = '';
+    if (!passwordPanel.hidden) {
+        currentPassword.focus();
+    }
+});
+
+passwordCancel.addEventListener('click', () => {
+    currentPassword.value = '';
+    newPassword.value = '';
+    confirmPassword.value = '';
+    passwordStatus.textContent = '';
+    passwordPanel.hidden = true;
+});
+
+async function changeOwnPassword() {
+    if (!authToken) {
+        passwordStatus.textContent = 'Login required.';
+        return;
+    }
+    if (newPassword.value !== confirmPassword.value) {
+        passwordStatus.textContent = 'New passwords do not match.';
+        return;
+    }
+    passwordSubmit.disabled = true;
+    passwordStatus.textContent = 'Saving...';
+    try {
+        const response = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({
+                current_password: currentPassword.value,
+                new_password: newPassword.value
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || `Password change failed: ${response.status}`);
+        }
+        currentPassword.value = '';
+        newPassword.value = '';
+        confirmPassword.value = '';
+        passwordStatus.textContent = result.message || 'Password changed.';
+        storeAuthToken('');
+        authUser = null;
+        window.setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+        passwordStatus.textContent = error.message;
+    } finally {
+        passwordSubmit.disabled = false;
+    }
+}
+
+passwordSubmit.addEventListener('click', changeOwnPassword);
+[currentPassword, newPassword, confirmPassword].forEach(input => {
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            changeOwnPassword();
+        }
+    });
 });
 
 function applyMapTheme(isDark) {

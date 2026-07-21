@@ -22,6 +22,7 @@
             <button id="manageUsersBtn" type="button">Manage Users</button>
             <button id="addCameraBtn" type="button">Add New Camera</button>
             <a class="button-link" href="/static/admin/launches.html">Launch Dashboard</a>
+            <button id="changeAdminPasswordBtn" type="button">Change Password</button>
             <button id="adminLogoutBtn" type="button">Logout</button>
         </div>
 
@@ -384,6 +385,29 @@
                         </div>
                     </form>
                 </div>
+            </div>
+        </div>
+
+        <div id="passwordModal" class="modal" hidden>
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h2>Change Password</h2>
+                    <button id="closePasswordModalBtn" type="button">Close</button>
+                </div>
+                <form id="passwordForm" class="user-form" autocomplete="off">
+                    <label for="adminCurrentPassword">Current password</label>
+                    <input id="adminCurrentPassword" type="password" autocomplete="current-password">
+
+                    <label for="adminNewPassword">New password</label>
+                    <input id="adminNewPassword" type="password" autocomplete="new-password">
+
+                    <label for="adminConfirmPassword">Confirm password</label>
+                    <input id="adminConfirmPassword" type="password" autocomplete="new-password">
+
+                    <div class="user-actions">
+                        <button id="saveAdminPasswordBtn" type="submit">Save Password</button>
+                    </div>
+                </form>
             </div>
         </div>
 

@@ -67,6 +67,7 @@ from fenetre.archive import (
 )
 from fenetre.auth import (
     authenticate_config_user_record,
+    change_config_user_password,
     effective_user_role,
     ensure_default_admin_user,
 )
@@ -1610,6 +1611,45 @@ window.location.replace({json.dumps(next_url)});
             public_auth_sessions.pop(cookie_token.value, None)
         self._send_json(200, {"ok": True})
 
+    def _clear_public_sessions_for_user(self, username: str):
+        for token, session in list(public_auth_sessions.items()):
+            session_user = session.get("user") or {}
+            if session_user.get("username") == username:
+                public_auth_sessions.pop(token, None)
+
+    def _handle_public_change_password_api(self):
+        user = self._public_session_user()
+        if not user:
+            self._send_json(401, {"error": "Authentication required"})
+            return
+        try:
+            payload = self._read_json_body()
+            current_password = payload.get("current_password") or ""
+            new_password = payload.get("new_password") or ""
+            change_config_user_password(
+                FLAGS.config,
+                user.get("username") or "",
+                current_password,
+                new_password,
+            )
+            self._clear_public_sessions_for_user(user.get("username") or "")
+            with public_config_cache_lock:
+                public_config_cache.clear()
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "message": "Password changed. Sign in again with the new password.",
+                },
+            )
+        except PermissionError as exc:
+            self._send_json(401, {"error": str(exc)})
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected public password change error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def _handle_public_auth_status_api(self):
         user = self._public_session_user()
         self._send_json(
@@ -2039,6 +2079,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/auth/logout":
             self._handle_public_logout_api()
+            return
+        if parsed_url.path == "/api/auth/change-password":
+            self._handle_public_change_password_api()
             return
         if parsed_url.path == "/api/live-view/heartbeat":
             self._handle_live_view_heartbeat_api()

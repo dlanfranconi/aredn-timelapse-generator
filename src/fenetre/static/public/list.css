@@ -234,16 +234,27 @@ body.dark-mode #theme-toggle {
     border-bottom: 1px solid #ddd;
 }
 
-#login-panel[hidden] {
+#login-panel[hidden],
+#password-panel[hidden] {
     display: none;
 }
 
-#login-panel input {
+#password-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    border-bottom: 1px solid #ddd;
+}
+
+#login-panel input,
+#password-panel input {
     height: 30px;
     max-width: 180px;
 }
 
-#login-panel button {
+#login-panel button,
+#password-panel button {
     height: 32px;
 }
 
@@ -287,7 +298,12 @@ body.dark-mode #login-panel {
     border-color: #333;
 }
 
-body.dark-mode #login-panel input {
+body.dark-mode #password-panel {
+    border-color: #333;
+}
+
+body.dark-mode #login-panel input,
+body.dark-mode #password-panel input {
     background: #1f1f1f;
     color: #e0e0e0;
     border: 1px solid #555;
@@ -798,8 +814,16 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
         padding: 10px;
     }
 
+    #password-panel {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 10px;
+    }
+
     #login-panel input,
-    #login-panel button {
+    #login-panel button,
+    #password-panel input,
+    #password-panel button {
         box-sizing: border-box;
         max-width: none;
         width: 100%;

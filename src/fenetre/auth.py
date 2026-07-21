@@ -148,6 +148,41 @@ def reset_admin_user(config_file_path: str, password: str) -> None:
     _write_yaml(config_file_path, _merge_effective_config(raw_config, config))
 
 
+def change_config_user_password(
+    config_file_path: str,
+    username: str,
+    current_password: str,
+    new_password: str,
+) -> dict:
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username is required.")
+    if not current_password or not new_password:
+        raise ValueError("current_password and new_password are required.")
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters.")
+
+    raw_config = _load_raw_config(config_file_path)
+    config = _get_effective_config(raw_config)
+    users = config.get("users") or {}
+    user = users.get(username)
+    if not isinstance(user, dict) or user.get("disabled", False):
+        raise PermissionError("Current user was not found.")
+    if not verify_password(user, current_password):
+        raise PermissionError("Current password is incorrect.")
+
+    updated_user = dict(user)
+    updated_user["password_hash"] = hash_password(new_password)
+    updated_user.pop("password", None)
+    updated_user["password_changed_at"] = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    users[username] = updated_user
+    config["users"] = users
+    _write_yaml(config_file_path, _merge_effective_config(raw_config, config))
+    return dict(updated_user)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Manage Fenetre admin users.")
     parser.add_argument("--config", default="/srv/fenetre/config.yaml")
