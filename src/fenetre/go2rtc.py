@@ -1,7 +1,7 @@
 import re
 import sys
 from typing import Any, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import yaml
 
@@ -56,13 +56,37 @@ def _stream_url_from_template(
 ) -> str:
     encoded_stream = quote(stream_name, safe="")
     try:
-        return template.format(
+        rendered = template.format(
             base_url=base_url,
             stream=encoded_stream,
             stream_name=stream_name,
         )
     except (IndexError, KeyError, ValueError):
-        return f"{base_url}/stream.html?src={encoded_stream}&media=video&muted=1"
+        rendered = f"{base_url}/stream.html?src={encoded_stream}&media=video&muted=1"
+    return _force_muted_player_url(rendered)
+
+
+def _force_muted_player_url(url: str) -> str:
+    parsed = urlsplit(url)
+    player_path = parsed.path.rsplit("/", 1)[-1]
+    if player_path not in {"stream.html", "webrtc.html"}:
+        return url
+
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in {"media", "muted"}
+    ]
+    query.extend([("media", "video"), ("muted", "1")])
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query, doseq=True),
+            parsed.fragment,
+        )
+    )
 
 
 def build_go2rtc_metadata(

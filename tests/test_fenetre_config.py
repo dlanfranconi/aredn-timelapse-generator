@@ -480,11 +480,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             camera["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=mse",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=mse&media=video&muted=1",
         )
         self.assertEqual(
             camera["go2rtc"]["full_player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full&mode=mse",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full&mode=mse&media=video&muted=1",
         )
         self.assertEqual(
             camera["go2rtc"]["full_view_url"],

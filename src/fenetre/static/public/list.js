@@ -66,6 +66,27 @@ let mapVisible = false;
 let mapVisibilityInitialized = false;
 let remoteFetchGeneration = 0;
 
+function mutedGo2rtcPlayerUrl(rawUrl) {
+    if (!rawUrl) {
+        return rawUrl;
+    }
+    try {
+        const url = new URL(rawUrl, window.location.href);
+        const page = url.pathname.split('/').pop();
+        if (page === 'stream.html' || page === 'webrtc.html') {
+            url.searchParams.set('media', 'video');
+            url.searchParams.set('muted', '1');
+            return url.href;
+        }
+    } catch (error) {
+        if (/(^|\/)(stream|webrtc)\.html(?:\?|$)/.test(rawUrl)) {
+            const separator = rawUrl.includes('?') ? '&' : '?';
+            return `${rawUrl}${separator}media=video&muted=1`;
+        }
+    }
+    return rawUrl;
+}
+
 function fitMapToMarkers() {
     setTimeout(() => {
         map.invalidateSize();
@@ -578,9 +599,11 @@ function configurePtzPresets(camera, listItem) {
     const supportsPan = capabilities.pan !== false;
     const supportsTilt = capabilities.tilt !== false;
     const supportsZoom = capabilities.zoom !== false;
-    const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';
+    const livePreviewUrl = go2rtc.enabled ? mutedGo2rtcPlayerUrl(go2rtc.preview_url || go2rtc.player_url) : '';
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
-    const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_view_url || go2rtc.full_player_url || go2rtc.player_url) : '';
+    const fullLivePlayerUrl = go2rtc.enabled
+        ? (go2rtc.full_view_url || mutedGo2rtcPlayerUrl(go2rtc.full_player_url || go2rtc.player_url))
+        : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
         : 60;

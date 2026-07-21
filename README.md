@@ -457,12 +457,12 @@ Tour controls are per camera. When enabled, authenticated users with manual PTZ 
 
 The default stream name is `fenetre_` plus the camera name with unsafe characters replaced by `_`. For example, `Ridge-PTZ` becomes `fenetre_Ridge-PTZ`.
 
-The default go2rtc player is the compatibility player with video-only muted playback: `{base_url}/stream.html?src={stream}&media=video&muted=1`. Older configs that still contain the former exact defaults, `{base_url}/webrtc.html?src={stream}` or `{base_url}/stream.html?src={stream}`, are migrated to the muted `stream.html` default during validation because WebRTC is often less reliable across routed mesh networks and public audio should stay disabled by default. If you intentionally prefer a custom go2rtc page, set:
+The default go2rtc player is the compatibility player with video-only muted playback: `{base_url}/stream.html?src={stream}&media=video&muted=1`. Older configs that still contain the former exact defaults, `{base_url}/webrtc.html?src={stream}` or `{base_url}/stream.html?src={stream}`, are migrated to the muted `stream.html` default during validation because WebRTC is often less reliable across routed mesh networks and public audio should stay disabled by default. Fenetre also appends or overrides `media=video&muted=1` on generated public go2rtc `stream.html` and `webrtc.html` URLs, including custom player templates. If you intentionally prefer a custom go2rtc page or playback mode, set:
 
 ```yaml
 global:
   go2rtc:
-    player_url_template: "{base_url}/stream.html?src={stream}&mode=webrtc"
+    player_url_template: "{base_url}/stream.html?src={stream}&mode=webrtc&media=video&muted=1"
 ```
 
 If WebRTC fails in the go2rtc portal but MSE or HLS works, the RTSP source is healthy and the issue is usually WebRTC candidate/connectivity. Set `global.go2rtc.webrtc_candidates` to the hostname or IP and port that browsers can reach, such as `camera-host.local.mesh:8555` or `10.218.x.x:8555`, and make sure TCP and UDP `8555` are published.

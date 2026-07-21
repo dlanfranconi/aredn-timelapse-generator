@@ -24,6 +24,27 @@
         status.textContent = 'Unavailable';
     }
 
+    function mutedGo2rtcPlayerUrl(rawUrl) {
+        if (!rawUrl) {
+            return rawUrl;
+        }
+        try {
+            const url = new URL(rawUrl, window.location.href);
+            const page = url.pathname.split('/').pop();
+            if (page === 'stream.html' || page === 'webrtc.html') {
+                url.searchParams.set('media', 'video');
+                url.searchParams.set('muted', '1');
+                return url.href;
+            }
+        } catch (error) {
+            if (/(^|\/)(stream|webrtc)\.html(?:\?|$)/.test(rawUrl)) {
+                const separator = rawUrl.includes('?') ? '&' : '?';
+                return `${rawUrl}${separator}media=video&muted=1`;
+            }
+        }
+        return rawUrl;
+    }
+
     async function heartbeat(active = true) {
         const payload = {
             camera: cameraName,
@@ -84,9 +105,10 @@
             return;
         }
         const go2rtc = camera.go2rtc;
-        const playerUrl = streamKind === 'preview'
+        const rawPlayerUrl = streamKind === 'preview'
             ? (go2rtc.player_url || go2rtc.preview_url)
             : (go2rtc.full_player_url || go2rtc.player_url);
+        const playerUrl = mutedGo2rtcPlayerUrl(rawPlayerUrl);
         if (!playerUrl) {
             showMessage('Live view URL is not available.');
             return;
