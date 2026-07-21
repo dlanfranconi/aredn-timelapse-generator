@@ -580,7 +580,7 @@ function configurePtzPresets(camera, listItem) {
     const supportsZoom = capabilities.zoom !== false;
     const livePreviewUrl = go2rtc.enabled ? (go2rtc.preview_url || go2rtc.player_url) : '';
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
-    const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_player_url || go2rtc.player_url) : '';
+    const fullLivePlayerUrl = go2rtc.enabled ? (go2rtc.full_view_url || go2rtc.full_player_url || go2rtc.player_url) : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
         : 60;

@@ -486,6 +486,10 @@ class FenetreConfigTestCase(unittest.TestCase):
             camera["go2rtc"]["full_player_url"],
             "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera_full&mode=mse",
         )
+        self.assertEqual(
+            camera["go2rtc"]["full_view_url"],
+            "live.html?camera=North%20Ridge%20Camera&stream=full",
+        )
         encoded = yaml.dump(camera)
         self.assertNotIn("rtsp://", encoded)
         self.assertNotIn("secret", encoded)
@@ -519,6 +523,10 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["preview_url"],
             "http://go2rtc.local:1984/api/stream.mjpeg?src=site_North_Ridge_Camera",
+        )
+        self.assertEqual(
+            metadata["cameras"][0]["go2rtc"]["full_view_url"],
+            "live.html?camera=North%20Ridge%20Camera&stream=full",
         )
         self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
 

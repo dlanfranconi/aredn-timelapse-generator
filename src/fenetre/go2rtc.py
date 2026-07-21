@@ -93,6 +93,7 @@ def build_go2rtc_metadata(
         "enabled": True,
         "stream": stream_name,
         "full_stream": full_stream_name,
+        "full_view_url": f"live.html?camera={quote(camera_name, safe='')}&stream=full",
         "player_url": _player_url(config, base_url, stream_name),
         "full_player_url": _player_url(config, base_url, full_stream_name),
         "preview_url": _preview_url(config, base_url, stream_name),

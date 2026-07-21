@@ -12,6 +12,7 @@ from requests.auth import HTTPBasicAuth
 
 from fenetre.fenetre import (
     FenetreHTTPRequestHandler,
+    active_live_view_count,
     cleanup_frequent_timelapse_artifacts,
     cleanup_stale_timelapse_artifacts,
     discover_camera_timelapses,
@@ -21,6 +22,7 @@ from fenetre.fenetre import (
     is_sunrise_or_sunset,
     is_camera_timelapse_enabled,
     queue_missing_daily_timelapses,
+    record_live_view_heartbeat,
     run_camera_unavailable_command,
 )
 import fenetre.fenetre as fenetre_module
@@ -88,6 +90,33 @@ class TestFenetre(unittest.TestCase):
         finally:
             fenetre_module.global_config = old_global_config
             fenetre_module.cameras_config = old_cameras_config
+
+    def test_live_view_heartbeat_tracks_and_expires_sessions(self):
+        fenetre_module.live_view_sessions.clear()
+
+        result = record_live_view_heartbeat(
+            "cam1", "full", "session-1", "operator", ttl_s=5
+        )
+
+        self.assertEqual(result["active_count"], 1)
+        self.assertEqual(active_live_view_count("cam1", "full"), 1)
+
+        fenetre_module.live_view_sessions["session-1"]["expires_at"] = 0
+
+        self.assertEqual(active_live_view_count("cam1", "full"), 0)
+        self.assertEqual(fenetre_module.live_view_sessions, {})
+
+    def test_live_view_heartbeat_can_remove_session(self):
+        fenetre_module.live_view_sessions.clear()
+
+        record_live_view_heartbeat("cam1", "full", "session-1", "operator")
+        result = record_live_view_heartbeat(
+            "cam1", "full", "session-1", "operator", active=False
+        )
+
+        self.assertFalse(result["active"])
+        self.assertEqual(result["active_count"], 0)
+        self.assertEqual(active_live_view_count("cam1", "full"), 0)
 
     def test_discover_camera_timelapses_reports_existing_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <title>Live View</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: #050505;
+            color: #f5f5f5;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        #live-shell {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            height: 100%;
+            min-height: 0;
+        }
+
+        #live-header {
+            align-items: center;
+            background: #111;
+            border-bottom: 1px solid #2a2a2a;
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+            min-height: 44px;
+            padding: 8px 12px;
+        }
+
+        #camera-name {
+            font-size: 1rem;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #live-status {
+            color: #c9d3df;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        #live-frame {
+            border: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        #message {
+            align-self: center;
+            color: #d8dee9;
+            justify-self: center;
+            padding: 24px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <main id="live-shell">
+        <header id="live-header">
+            <div id="camera-name">Live View</div>
+            <div id="live-status">Loading</div>
+        </header>
+        <iframe id="live-frame" title="Live camera view" allow="autoplay; fullscreen" hidden></iframe>
+        <div id="message" hidden></div>
+    </main>
+    <script src="live.js?v=20260720-live-heartbeat"></script>
+</body>
+</html>

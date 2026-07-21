@@ -165,10 +165,79 @@ public_config_cache = {}
 public_config_cache_lock = threading.Lock()
 ptz_tour_resume_timers = {}
 ptz_tour_resume_lock = threading.Lock()
+live_view_sessions = {}
+live_view_sessions_lock = threading.Lock()
 daylight_q = deque()
 archive_q = deque()
 frequent_timelapse_q = deque()
 frequent_timelapse_scheduler_offset = 0
+
+
+def _prune_live_view_sessions(now: float | None = None):
+    now = time.time() if now is None else now
+    expired = [
+        session_id
+        for session_id, session in live_view_sessions.items()
+        if session.get("expires_at", 0) <= now
+    ]
+    for session_id in expired:
+        live_view_sessions.pop(session_id, None)
+
+
+def active_live_view_count(
+    camera_name: str | None = None, stream_name: str | None = None, prune: bool = True
+) -> int:
+    if prune:
+        with live_view_sessions_lock:
+            _prune_live_view_sessions()
+            return active_live_view_count(camera_name, stream_name, prune=False)
+    camera_name = str(camera_name or "").strip()
+    stream_name = str(stream_name or "").strip()
+    return sum(
+        1
+        for session in live_view_sessions.values()
+        if (not camera_name or session.get("camera") == camera_name)
+        and (not stream_name or session.get("stream") == stream_name)
+    )
+
+
+def record_live_view_heartbeat(
+    camera_name: str,
+    stream_name: str,
+    session_id: str,
+    owner: str,
+    ttl_s: int = 45,
+    active: bool = True,
+) -> Dict[str, int | str | bool]:
+    camera_name = str(camera_name or "").strip()
+    stream_name = str(stream_name or "full").strip() or "full"
+    session_id = str(session_id or "").strip()
+    owner = str(owner or "authenticated").strip() or "authenticated"
+    ttl_s = max(5, min(300, int(ttl_s or 45)))
+    if not camera_name or not session_id:
+        raise ValueError("camera and session_id are required")
+
+    with live_view_sessions_lock:
+        _prune_live_view_sessions()
+        if not active:
+            live_view_sessions.pop(session_id, None)
+        else:
+            now = time.time()
+            live_view_sessions[session_id] = {
+                "camera": camera_name,
+                "stream": stream_name,
+                "owner": owner,
+                "last_seen": now,
+                "expires_at": now + ttl_s,
+            }
+        count = active_live_view_count(camera_name, stream_name, prune=False)
+    return {
+        "ok": True,
+        "camera": camera_name,
+        "stream": stream_name,
+        "active": bool(active),
+        "active_count": count,
+    }
 
 
 def configure_mqtt_manager(global_cfg: Dict) -> None:
@@ -1446,6 +1515,43 @@ window.location.replace({json.dumps(next_url)});
             },
         )
 
+    def _handle_live_view_heartbeat_api(self):
+        try:
+            user = self._public_session_user()
+            if not user:
+                self._send_json(401, {"error": "Authentication required"})
+                return
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            session_id = (payload.get("session_id") or "").strip()
+            stream_name = (payload.get("stream") or "full").strip() or "full"
+            active = payload.get("active", True) is not False
+            ttl_s = int(payload.get("ttl_s") or 45)
+            if not camera_name or not session_id:
+                self._send_json(400, {"error": "camera and session_id are required"})
+                return
+            current_cameras_config, _, _ = load_public_config_snapshot()
+            if camera_name not in current_cameras_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            if not self._camera_visible_to_public_user(camera_name, user):
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            result = record_live_view_heartbeat(
+                camera_name,
+                stream_name,
+                session_id,
+                user.get("username") or "authenticated",
+                ttl_s=ttl_s,
+                active=active,
+            )
+            self._send_json(200, result)
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected live view heartbeat error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def _user_can_control_ptz(self, camera_name: str, ptz_config: Dict, action: str):
         if not ptz_config.get("enabled"):
             return False
@@ -1822,6 +1928,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/auth/logout":
             self._handle_public_logout_api()
+            return
+        if parsed_url.path == "/api/live-view/heartbeat":
+            self._handle_live_view_heartbeat_api()
             return
         if parsed_url.path == "/api/ptz/preset":
             self._handle_ptz_preset_api()
