@@ -554,6 +554,102 @@ document.addEventListener('DOMContentLoaded', () => {
         return profiles && typeof profiles === 'object' ? Object.keys(profiles).sort() : [];
     }
 
+    function cameraHasPtz(camera) {
+        const ptz = (camera && camera.ptz) || {};
+        return ptz.enabled === true;
+    }
+
+    function cameraHasTour(camera) {
+        const ptz = (camera && camera.ptz) || {};
+        const tour = ptz.tour || {};
+        return cameraHasPtz(camera) && (tour.enabled === true || ptz.tour_enabled === true);
+    }
+
+    function textForVendorDetection(cameraName, camera) {
+        return [
+            cameraName,
+            camera.description,
+            camera.url,
+            camera.rtsp_url,
+            camera.ptz_rtsp_url,
+            camera.local_command,
+            ((camera.image_profiles || {}).vendor || '')
+        ].join(' ').toLowerCase();
+    }
+
+    function inferredLaunchRecordVendor(cameraName, camera, record = {}) {
+        const explicit = String(record.vendor || record.recording_vendor || '').trim().toLowerCase();
+        if (explicit) {
+            return explicit;
+        }
+        const text = textForVendorDetection(cameraName, camera);
+        if (text.includes('reolink') || text.includes('h264preview') || text.includes('rlc-811') || text.includes('rlc811')) {
+            return 'reolink';
+        }
+        if (text.includes('sunba') || text.includes('p636')) {
+            return 'custom';
+        }
+        return 'custom';
+    }
+
+    function defaultLaunchDownloadPath(configData, cameraName) {
+        const workDir = (((configData || {}).global || {}).work_dir || '/srv/fenetre/data').replace(/\/+$/, '');
+        return `${workDir}/launches/{launch_id}/{launch_id}-{camera}.mp4`;
+    }
+
+    function defaultLaunchRecordForCamera(configData, cameraName, camera, record = {}) {
+        const vendor = inferredLaunchRecordVendor(cameraName, camera, record);
+        const defaults = {
+            vendor,
+            download_path: defaultLaunchDownloadPath(configData, cameraName),
+            http_port: 80,
+            channel: 0,
+            stream_type: 'main',
+            manual_record_duration_s: 1200,
+            download_method: 'Download',
+            skip_when_full_viewers: true
+        };
+        return vendor === 'reolink' ? defaults : { vendor: 'custom', download_path: defaults.download_path, skip_when_full_viewers: true };
+    }
+
+    function launchRecordNote(vendor, cameraName, camera) {
+        if (vendor === 'reolink') {
+            return 'Reolink uses SetManualRec for start/stop, then Search plus Download for MP4 retrieval.';
+        }
+        const text = textForVendorDetection(cameraName, camera);
+        if (text.includes('sunba') || text.includes('p636')) {
+            return 'Sunba P636 V2 has no verified public local-recording HTTP API; use custom tested hooks if needed.';
+        }
+        return 'Custom hooks run only when URL or command fields are configured.';
+    }
+
+    function appendLaunchField(container, labelText, input, vendor = '') {
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        if (vendor) {
+            label.dataset.recordVendor = vendor;
+            input.dataset.recordVendor = vendor;
+        }
+        container.appendChild(label);
+        container.appendChild(input);
+        return input;
+    }
+
+    function syncLaunchRecordVendorState(card) {
+        const vendorSelect = card.querySelector('.launch-camera-record-vendor');
+        if (!vendorSelect) {
+            return;
+        }
+        const vendor = vendorSelect.value || 'custom';
+        card.querySelectorAll('[data-record-vendor]').forEach(element => {
+            element.hidden = element.dataset.recordVendor !== vendor;
+        });
+        const note = card.querySelector('.launch-camera-record-note');
+        if (note) {
+            note.textContent = launchRecordNote(vendor, card.dataset.camera || '', card._cameraConfig || {});
+        }
+    }
+
     function renderLaunchCameraPlans(configData, plan = {}) {
         const cameras = (configData && configData.cameras) || {};
         const names = Object.keys(cameras).sort();
@@ -566,12 +662,16 @@ document.addEventListener('DOMContentLoaded', () => {
         names.forEach(cameraName => {
             const camera = cameras[cameraName] || {};
             const ptz = camera.ptz || {};
-            const ptzEnabled = ptz.enabled === true;
+            const ptzEnabled = cameraHasPtz(camera);
+            const tourEnabled = cameraHasTour(camera);
             const cameraPlan = planCameras[cameraName] || {};
             const record = (cameraPlan.record && typeof cameraPlan.record === 'object') ? cameraPlan.record : {};
+            const recordDefaults = defaultLaunchRecordForCamera(configData, cameraName, camera, record);
+            const recordView = { ...recordDefaults, ...record };
             const card = document.createElement('div');
             card.className = 'launch-camera-card';
             card.dataset.camera = cameraName;
+            card._cameraConfig = camera;
 
             const header = document.createElement('div');
             header.className = 'launch-camera-header';
@@ -592,27 +692,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const fields = document.createElement('div');
             fields.className = 'launch-camera-fields';
 
-            const presetLabel = document.createElement('label');
-            presetLabel.textContent = 'PTZ preset';
-            const presetSelect = document.createElement('select');
-            presetSelect.className = 'launch-camera-preset';
-            appendOption(presetSelect, '', ptzEnabled ? 'No PTZ move' : 'PTZ not enabled');
-            (ptz.presets || [])
-                .filter(presetHasUsableName)
-                .forEach(preset => appendOption(
-                    presetSelect,
-                    presetOptionValue(preset),
-                    preset.name || presetOptionValue(preset)
-                ));
-            if (cameraPlan.preset) {
-                const presetValue = String(cameraPlan.preset);
-                if (!Array.from(presetSelect.options).some(option => option.value === presetValue)) {
-                    appendOption(presetSelect, presetValue, presetValue);
+            if (ptzEnabled) {
+                const presetLabel = document.createElement('label');
+                presetLabel.textContent = 'PTZ preset';
+                const presetSelect = document.createElement('select');
+                presetSelect.className = 'launch-camera-preset';
+                appendOption(presetSelect, '', 'No PTZ move');
+                (ptz.presets || [])
+                    .filter(presetHasUsableName)
+                    .forEach(preset => appendOption(
+                        presetSelect,
+                        presetOptionValue(preset),
+                        preset.name || presetOptionValue(preset)
+                    ));
+                if (cameraPlan.preset) {
+                    const presetValue = String(cameraPlan.preset);
+                    if (!Array.from(presetSelect.options).some(option => option.value === presetValue)) {
+                        appendOption(presetSelect, presetValue, presetValue);
+                    }
+                    presetSelect.value = presetValue;
                 }
-                presetSelect.value = presetValue;
+                fields.appendChild(presetLabel);
+                fields.appendChild(presetSelect);
             }
-            fields.appendChild(presetLabel);
-            fields.appendChild(presetSelect);
 
             const imageProfileLabel = document.createElement('label');
             imageProfileLabel.textContent = 'Image profile';
@@ -634,11 +736,15 @@ document.addEventListener('DOMContentLoaded', () => {
             optionsLabel.textContent = 'Launch options';
             const options = document.createElement('div');
             options.className = 'launch-inline-options';
-            [
-                ['launch-camera-pause-tour', 'Pause/resume tour', Boolean(cameraPlan.pause_tour || cameraPlan.resume_tour)],
-                ['launch-camera-record', 'Record on camera', Boolean(record.start_url || record.start_command || record.stop_url || record.stop_command || record.download_url || record.download_command)],
+            const recordConfigured = Boolean(record.vendor || record.start_url || record.start_command || record.stop_url || record.stop_command || record.download_url || record.download_command);
+            const launchOptions = [
+                ['launch-camera-record', 'Record on camera', recordConfigured],
                 ['launch-camera-skip-full-viewers', 'Keep HD stream if watched', record.skip_when_full_viewers !== false],
-            ].forEach(([className, labelText, checkedValue]) => {
+            ];
+            if (tourEnabled) {
+                launchOptions.unshift(['launch-camera-pause-tour', 'Pause/resume tour', Boolean(cameraPlan.pause_tour || cameraPlan.resume_tour)]);
+            }
+            launchOptions.forEach(([className, labelText, checkedValue]) => {
                 const label = document.createElement('label');
                 const input = document.createElement('input');
                 input.type = 'checkbox';
@@ -651,21 +757,66 @@ document.addEventListener('DOMContentLoaded', () => {
             fields.appendChild(optionsLabel);
             fields.appendChild(options);
 
+            const vendorSelect = document.createElement('select');
+            vendorSelect.className = 'launch-camera-record-vendor launch-record-field';
+            appendOption(vendorSelect, 'custom', 'Custom hooks');
+            appendOption(vendorSelect, 'reolink', 'Reolink camera API');
+            vendorSelect.value = recordView.vendor === 'reolink' ? 'reolink' : 'custom';
+            appendLaunchField(fields, 'Recording API', vendorSelect);
+
+            const recordNote = document.createElement('div');
+            recordNote.className = 'launch-camera-record-note';
+            fields.appendChild(document.createElement('span'));
+            fields.appendChild(recordNote);
+
+            const httpPortInput = document.createElement('input');
+            httpPortInput.type = 'number';
+            httpPortInput.min = '1';
+            httpPortInput.max = '65535';
+            httpPortInput.className = 'launch-camera-http-port launch-record-field';
+            httpPortInput.value = recordView.http_port ?? 80;
+            appendLaunchField(fields, 'HTTP port', httpPortInput, 'reolink');
+
+            const channelInput = document.createElement('input');
+            channelInput.type = 'number';
+            channelInput.min = '0';
+            channelInput.className = 'launch-camera-channel launch-record-field';
+            channelInput.value = recordView.channel ?? 0;
+            appendLaunchField(fields, 'Channel', channelInput, 'reolink');
+
+            const streamTypeSelect = document.createElement('select');
+            streamTypeSelect.className = 'launch-camera-stream-type launch-record-field';
+            appendOption(streamTypeSelect, 'main', 'Main stream');
+            appendOption(streamTypeSelect, 'sub', 'Sub stream');
+            streamTypeSelect.value = recordView.stream_type === 'sub' ? 'sub' : 'main';
+            appendLaunchField(fields, 'Recording stream', streamTypeSelect, 'reolink');
+
+            const durationInput = document.createElement('input');
+            durationInput.type = 'number';
+            durationInput.min = '1';
+            durationInput.className = 'launch-camera-manual-duration launch-record-field';
+            durationInput.value = recordView.manual_record_duration_s ?? 1200;
+            appendLaunchField(fields, 'Manual duration seconds', durationInput, 'reolink');
+
+            const downloadMethodSelect = document.createElement('select');
+            downloadMethodSelect.className = 'launch-camera-download-method launch-record-field';
+            appendOption(downloadMethodSelect, 'Download', 'Download');
+            appendOption(downloadMethodSelect, 'Playback', 'Playback');
+            downloadMethodSelect.value = recordView.download_method === 'Playback' ? 'Playback' : 'Download';
+            appendLaunchField(fields, 'Download method', downloadMethodSelect, 'reolink');
+
             [
-                ['Record start URL', 'launch-camera-start-url', record.start_url || ''],
-                ['Record stop URL', 'launch-camera-stop-url', record.stop_url || ''],
-                ['Download URL', 'launch-camera-download-url', record.download_url || ''],
-                ['Download path', 'launch-camera-download-path', record.download_path || ''],
-            ].forEach(([labelText, className, value]) => {
-                const label = document.createElement('label');
-                label.textContent = labelText;
+                ['Record start URL', 'launch-camera-start-url', record.start_url || '', 'custom'],
+                ['Record stop URL', 'launch-camera-stop-url', record.stop_url || '', 'custom'],
+                ['Download URL', 'launch-camera-download-url', record.download_url || '', 'custom'],
+                ['Download path', 'launch-camera-download-path', recordView.download_path || '', ''],
+            ].forEach(([labelText, className, value, vendor]) => {
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.autocomplete = 'off';
                 input.className = `${className} launch-record-field`;
                 input.value = value;
-                fields.appendChild(label);
-                fields.appendChild(input);
+                appendLaunchField(fields, labelText, input, vendor);
             });
 
             const delayLabel = document.createElement('label');
@@ -680,9 +831,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             card.appendChild(fields);
             card.querySelectorAll('input, select').forEach(input => {
-                input.addEventListener('change', () => setLaunchCameraCardEnabled(card));
+                input.addEventListener('change', () => {
+                    syncLaunchRecordVendorState(card);
+                    setLaunchCameraCardEnabled(card);
+                });
             });
             launchCameraPlans.appendChild(card);
+            syncLaunchRecordVendorState(card);
             setLaunchCameraCardEnabled(card);
         });
     }
@@ -720,7 +875,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const cameraName = card.dataset.camera;
             const cameraPlan = {};
-            const preset = card.querySelector('.launch-camera-preset').value.trim();
+            const presetInput = card.querySelector('.launch-camera-preset');
+            const preset = presetInput ? presetInput.value.trim() : '';
             const imageProfile = card.querySelector('.launch-camera-image-profile').value.trim();
             if (preset) {
                 cameraPlan.preset = preset;
@@ -728,19 +884,31 @@ document.addEventListener('DOMContentLoaded', () => {
             if (imageProfile) {
                 cameraPlan.image_profile = imageProfile;
             }
-            if (card.querySelector('.launch-camera-pause-tour').checked) {
+            const pauseTourInput = card.querySelector('.launch-camera-pause-tour');
+            if (pauseTourInput && pauseTourInput.checked) {
                 cameraPlan.pause_tour = true;
                 cameraPlan.resume_tour = true;
             }
             if (card.querySelector('.launch-camera-record').checked) {
+                const vendor = (card.querySelector('.launch-camera-record-vendor') || {}).value || 'custom';
                 const record = {
-                    start_url: card.querySelector('.launch-camera-start-url').value.trim(),
-                    stop_url: card.querySelector('.launch-camera-stop-url').value.trim(),
-                    download_url: card.querySelector('.launch-camera-download-url').value.trim(),
                     download_path: card.querySelector('.launch-camera-download-path').value.trim(),
                     download_delay_seconds: intInputValue(card.querySelector('.launch-camera-download-delay'), 60),
                     skip_when_full_viewers: card.querySelector('.launch-camera-skip-full-viewers').checked
                 };
+                if (vendor === 'custom') {
+                    record.start_url = card.querySelector('.launch-camera-start-url').value.trim();
+                    record.stop_url = card.querySelector('.launch-camera-stop-url').value.trim();
+                    record.download_url = card.querySelector('.launch-camera-download-url').value.trim();
+                }
+                if (vendor === 'reolink') {
+                    record.vendor = 'reolink';
+                    record.http_port = intInputValue(card.querySelector('.launch-camera-http-port'), 80);
+                    record.channel = intInputValue(card.querySelector('.launch-camera-channel'), 0);
+                    record.stream_type = (card.querySelector('.launch-camera-stream-type') || {}).value || 'main';
+                    record.manual_record_duration_s = intInputValue(card.querySelector('.launch-camera-manual-duration'), 1200);
+                    record.download_method = (card.querySelector('.launch-camera-download-method') || {}).value || 'Download';
+                }
                 Object.keys(record).forEach(key => {
                     if (record[key] === '' || record[key] === null || record[key] === undefined) {
                         delete record[key];

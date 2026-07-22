@@ -3,9 +3,10 @@ import os
 import re
 import shlex
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -61,6 +62,22 @@ def _sanitize_url_for_logs(url: str) -> str:
     )
 
 
+def _redact(value: Any) -> Any:
+    if isinstance(value, str):
+        return _sanitize_url_for_logs(value)
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            if str(key).lower() in SENSITIVE_QUERY_KEYS:
+                redacted[key] = "***"
+            else:
+                redacted[key] = _redact(item)
+        return redacted
+    return value
+
+
 def launch_workflow_config(config: Dict[str, Any]) -> Dict[str, Any]:
     global_config = config.get("global") or {}
     workflow = global_config.get("launch_workflow") or global_config.get(
@@ -100,6 +117,13 @@ def _parse_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _nested(raw: Dict[str, Any], *keys: str) -> Any:
@@ -251,6 +275,121 @@ def _plan_by_id(workflow: Dict[str, Any], plan_id: str) -> Dict[str, Any]:
     return {}
 
 
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _urls_from_text(value: Any) -> list[str]:
+    if not value:
+        return []
+    text = str(value)
+    matches = re.findall(r"(?:https?|rtsp)://[^\s'\"<>]+", text)
+    return [match.rstrip("),]") for match in matches]
+
+
+def _candidate_camera_urls(camera_config: Dict[str, Any]) -> list[str]:
+    candidates = []
+    for key in ("url", "rtsp_url", "ptz_rtsp_url"):
+        candidates.extend(_urls_from_text(camera_config.get(key)))
+    candidates.extend(_urls_from_text(camera_config.get("local_command")))
+    return candidates
+
+
+def _query_value(parsed, *keys: str) -> str:
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key in keys:
+        if query.get(key):
+            return query[key]
+    return ""
+
+
+def _camera_network_context(camera_config: Dict[str, Any]) -> Dict[str, Any]:
+    ptz_config = camera_config.get("ptz") or {}
+    if not isinstance(ptz_config, dict):
+        ptz_config = {}
+    image_profiles = camera_config.get("image_profiles") or {}
+    if not isinstance(image_profiles, dict):
+        image_profiles = {}
+    http_auth = camera_config.get("http_auth") or {}
+    if not isinstance(http_auth, dict):
+        http_auth = {}
+
+    parsed_urls = []
+    for url in _candidate_camera_urls(camera_config):
+        try:
+            parsed_urls.append(urlsplit(url))
+        except Exception:
+            continue
+    http_url = next(
+        (url for url in parsed_urls if url.scheme in {"http", "https"}), None
+    )
+    any_url = http_url or (parsed_urls[0] if parsed_urls else None)
+
+    host = _first_text(
+        image_profiles.get("host"),
+        ptz_config.get("http_host"),
+        ptz_config.get("host"),
+        ptz_config.get("ip"),
+        http_url.hostname if http_url else "",
+        any_url.hostname if any_url else "",
+    )
+    scheme = _first_text(
+        image_profiles.get("scheme"),
+        camera_config.get("http_scheme"),
+        http_url.scheme if http_url else "",
+        "http",
+    )
+    http_port = _parse_int(
+        _first_text(
+            image_profiles.get("http_port"),
+            camera_config.get("http_port"),
+            http_url.port if http_url else "",
+        ),
+        443 if scheme == "https" else 80,
+    )
+    channel = _parse_int(
+        _first_text(
+            image_profiles.get("channel"),
+            camera_config.get("channel"),
+            ptz_config.get("channel"),
+            _query_value(http_url, "channel", "chn") if http_url else "",
+        ),
+        0,
+    )
+    username = _first_text(
+        image_profiles.get("username"),
+        ptz_config.get("username"),
+        http_auth.get("username"),
+        _query_value(http_url, "user", "username") if http_url else "",
+        http_url.username if http_url else "",
+        any_url.username if any_url else "",
+    )
+    password = _first_text(
+        image_profiles.get("password"),
+        ptz_config.get("password"),
+        http_auth.get("password"),
+        _query_value(http_url, "password", "passwd", "pwd") if http_url else "",
+        http_url.password if http_url else "",
+        any_url.password if any_url else "",
+    )
+    return {
+        "host": host,
+        "ip": host,
+        "scheme": scheme,
+        "http_port": http_port,
+        "port": http_port,
+        "channel": channel,
+        "username": username,
+        "password": password,
+    }
+
+
 def _phase_for_event(
     event: Dict[str, Any],
     now: datetime,
@@ -319,7 +458,8 @@ def preview_launch_workflow(
                             camera_plan.get("pause_tour"), False
                         ),
                         "record": bool(
-                            record.get("start_url")
+                            _record_vendor(record)
+                            or record.get("start_url")
                             or record.get("start_command")
                             or record.get("stop_url")
                             or record.get("stop_command")
@@ -362,15 +502,8 @@ def _action_context(
     camera_config: Dict[str, Any],
     active_full_viewers: int = 0,
 ) -> Dict[str, Any]:
-    ptz_config = camera_config.get("ptz") or {}
-    image_profiles = camera_config.get("image_profiles") or {}
-    host = (
-        image_profiles.get("host")
-        or ptz_config.get("host")
-        or ptz_config.get("ip")
-        or ""
-    )
-    return {
+    network = _camera_network_context(camera_config)
+    context = {
         "camera": camera_name,
         "plan": plan_id,
         "launch_id": event.get("id", ""),
@@ -379,12 +512,63 @@ def _action_context(
         "provider": event.get("provider", ""),
         "location": event.get("location", ""),
         "pad": event.get("pad", ""),
-        "host": host,
-        "ip": host,
-        "username": ptz_config.get("username") or image_profiles.get("username") or "",
-        "password": ptz_config.get("password") or image_profiles.get("password") or "",
         "active_full_viewers": active_full_viewers,
     }
+    context.update(network)
+    return context
+
+
+def _timezone_for_config(config: Dict[str, Any]):
+    timezone_name = str((config.get("global") or {}).get("timezone") or "UTC")
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+def _record_window(
+    config: Dict[str, Any],
+    workflow: Dict[str, Any],
+    plan: Dict[str, Any],
+    event: Dict[str, Any],
+) -> Dict[str, datetime]:
+    launch_time = _parse_datetime(event.get("launch_time_utc"))
+    if not launch_time:
+        raise LaunchWorkflowError("launch event has no usable launch_time_utc.")
+    pre_seconds = int(
+        plan.get("pre_seconds") or workflow.get("default_pre_seconds") or 60
+    )
+    post_seconds = int(
+        plan.get("post_seconds") or workflow.get("default_post_seconds") or 600
+    )
+    start_utc = launch_time - timedelta(seconds=pre_seconds)
+    stop_utc = launch_time + timedelta(seconds=post_seconds)
+    local_tz = _timezone_for_config(config)
+    return {
+        "start_utc": start_utc,
+        "stop_utc": stop_utc,
+        "start_local": start_utc.astimezone(local_tz),
+        "stop_local": stop_utc.astimezone(local_tz),
+    }
+
+
+def _add_record_window_context(
+    context: Dict[str, Any],
+    config: Dict[str, Any],
+    workflow: Dict[str, Any],
+    plan: Dict[str, Any],
+    event: Dict[str, Any],
+) -> Dict[str, Any]:
+    window = _record_window(config, workflow, plan, event)
+    context.update(
+        {
+            "record_start_utc": window["start_utc"].isoformat(),
+            "record_stop_utc": window["stop_utc"].isoformat(),
+            "record_start_local": window["start_local"].isoformat(),
+            "record_stop_local": window["stop_local"].isoformat(),
+        }
+    )
+    return context
 
 
 def _render_template(value: Any, context: Dict[str, Any]) -> Any:
@@ -432,11 +616,20 @@ def _camera_plan_actions(
         add("goto_preset", launch_ts - pre_seconds)
     record = camera_plan.get("record") or {}
     if isinstance(record, dict):
-        if record.get("start_url") or record.get("start_command"):
+        vendor = _record_vendor(record)
+        if (
+            vendor == "reolink"
+            or record.get("start_url")
+            or record.get("start_command")
+        ):
             add("record_start", launch_ts - pre_seconds, "start")
-        if record.get("stop_url") or record.get("stop_command"):
+        if vendor == "reolink" or record.get("stop_url") or record.get("stop_command"):
             add("record_stop", launch_ts + post_seconds, "stop")
-        if record.get("download_url") or record.get("download_command"):
+        if (
+            vendor == "reolink"
+            or record.get("download_url")
+            or record.get("download_command")
+        ):
             add(
                 "download_recording",
                 launch_ts
@@ -598,6 +791,318 @@ def _execute_hook(
     raise LaunchWorkflowError(f"{action['kind']} hook has no command or url.")
 
 
+def _record_vendor(record: Dict[str, Any]) -> str:
+    return (
+        str(record.get("vendor") or record.get("recording_vendor") or "")
+        .strip()
+        .lower()
+    )
+
+
+def _reolink_api_url(context: Dict[str, Any], record: Dict[str, Any]) -> str:
+    host = str(record.get("host") or context.get("host") or "").strip()
+    if not host:
+        raise LaunchWorkflowError("Reolink recording requires a camera host.")
+    scheme = str(record.get("scheme") or context.get("scheme") or "http").strip()
+    port = _parse_int(record.get("http_port") or context.get("http_port"), 80)
+    default_port = 443 if scheme == "https" else 80
+    port_part = "" if port == default_port else f":{port}"
+    return f"{scheme}://{host}{port_part}/cgi-bin/api.cgi"
+
+
+def _reolink_request_params(
+    context: Dict[str, Any], record: Dict[str, Any], command: str
+) -> Dict[str, Any]:
+    username = str(record.get("username") or context.get("username") or "").strip()
+    password = str(record.get("password") or context.get("password") or "")
+    params: Dict[str, Any] = {"cmd": command}
+    if username:
+        params["user"] = username
+        params["password"] = password
+    elif record.get("token"):
+        params["token"] = record.get("token")
+    return params
+
+
+def _reolink_result_url(
+    context: Dict[str, Any], record: Dict[str, Any], command: str
+) -> str:
+    url = _reolink_api_url(context, record)
+    params = _reolink_request_params(context, record, command)
+    return _sanitize_url_for_logs(f"{url}?{urlencode(params)}")
+
+
+def _reolink_check_json(command: str, payload: Any) -> Any:
+    if not isinstance(payload, list) or not payload:
+        raise LaunchWorkflowError(f"Reolink {command} returned unexpected data.")
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        if item.get("code", 0) != 0:
+            raise LaunchWorkflowError(
+                f"Reolink {command} returned API error code {item.get('code')}: {item}"
+            )
+        value = item.get("value")
+        if isinstance(value, dict):
+            rsp_code = value.get("rspCode")
+            if rsp_code not in (None, 200):
+                raise LaunchWorkflowError(
+                    f"Reolink {command} returned response code {rsp_code}: {item}"
+                )
+    return payload
+
+
+def _reolink_post_json(
+    context: Dict[str, Any],
+    record: Dict[str, Any],
+    command: str,
+    body: list[Dict[str, Any]],
+    dry_run: bool,
+) -> Dict[str, Any]:
+    result = {
+        "ok": True,
+        "vendor": "reolink",
+        "command": command,
+        "method": "POST",
+        "url": _reolink_result_url(context, record, command),
+        "json": _redact(body),
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return result
+    response = requests.request(
+        "POST",
+        _reolink_api_url(context, record),
+        params=_reolink_request_params(context, record, command),
+        json=body,
+        timeout=float(record.get("timeout_s") or 10),
+    )
+    response.raise_for_status()
+    result["response"] = _redact(_reolink_check_json(command, response.json()))
+    result["status_code"] = response.status_code
+    return result
+
+
+def _reolink_time(value: datetime) -> Dict[str, int]:
+    return {
+        "year": value.year,
+        "mon": value.month,
+        "day": value.day,
+        "hour": value.hour,
+        "min": value.minute,
+        "sec": value.second,
+    }
+
+
+def _reolink_search_files(
+    context: Dict[str, Any],
+    record: Dict[str, Any],
+    window: Dict[str, datetime],
+    dry_run: bool,
+) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
+    channel = _parse_int(record.get("channel") or context.get("channel"), 0)
+    stream_type = str(record.get("stream_type") or record.get("stream") or "main")
+    body = [
+        {
+            "cmd": "Search",
+            "action": 0,
+            "param": {
+                "Search": {
+                    "channel": channel,
+                    "onlyStatus": 0,
+                    "streamType": stream_type,
+                    "StartTime": _reolink_time(window["start_local"]),
+                    "EndTime": _reolink_time(window["stop_local"]),
+                }
+            },
+        }
+    ]
+    result = {
+        "ok": True,
+        "vendor": "reolink",
+        "command": "Search",
+        "method": "POST",
+        "url": _reolink_result_url(context, record, "Search"),
+        "json": body,
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return result, []
+    response = requests.request(
+        "POST",
+        _reolink_api_url(context, record),
+        params=_reolink_request_params(context, record, "Search"),
+        json=body,
+        timeout=float(record.get("timeout_s") or 20),
+    )
+    response.raise_for_status()
+    payload = _reolink_check_json("Search", response.json())
+    result["status_code"] = response.status_code
+    files = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        files.extend(
+            ((item.get("value") or {}).get("SearchResult") or {}).get("File") or []
+        )
+    result["files"] = [
+        {
+            "name": str(file.get("name") or ""),
+            "size": file.get("size"),
+            "type": file.get("type"),
+        }
+        for file in files
+        if isinstance(file, dict)
+    ]
+    return result, [
+        file for file in files if isinstance(file, dict) and file.get("name")
+    ]
+
+
+def _default_launch_download_path(
+    config: Dict[str, Any], event: Dict[str, Any], camera_name: str
+) -> str:
+    work_dir = str((config.get("global") or {}).get("work_dir") or "/tmp")
+    launch_id = _slug(str(event.get("id") or event.get("name") or "launch"))
+    camera_id = _slug(camera_name)
+    return os.path.join(work_dir, "launches", launch_id, f"{launch_id}-{camera_id}.mp4")
+
+
+def _download_path_for_index(download_path: str, index: int, total: int) -> str:
+    if total <= 1:
+        return download_path
+    root, ext = os.path.splitext(download_path)
+    return f"{root}-{index:02d}{ext or '.mp4'}"
+
+
+def _reolink_download_files(
+    context: Dict[str, Any],
+    record: Dict[str, Any],
+    files: list[Dict[str, Any]],
+    download_path: str,
+) -> list[Dict[str, Any]]:
+    command = str(record.get("download_method") or "Download").strip() or "Download"
+    if command not in {"Download", "Playback"}:
+        raise LaunchWorkflowError(
+            "Reolink download_method must be either Download or Playback."
+        )
+    downloaded = []
+    for index, file in enumerate(files, start=1):
+        source = str(file.get("name") or "")
+        if not source:
+            continue
+        output_path = _download_path_for_index(download_path, index, len(files))
+        directory = os.path.dirname(output_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        params = _reolink_request_params(context, record, command)
+        params.update({"source": source, "output": os.path.basename(output_path)})
+        response = requests.request(
+            "GET",
+            _reolink_api_url(context, record),
+            params=params,
+            timeout=float(
+                record.get("download_timeout_s") or record.get("timeout_s") or 120
+            ),
+        )
+        response.raise_for_status()
+        with open(output_path, "wb") as output_file:
+            output_file.write(response.content)
+        downloaded.append(
+            {
+                "source": source,
+                "download_path": output_path,
+                "bytes": len(response.content),
+                "url": _sanitize_url_for_logs(
+                    f"{_reolink_api_url(context, record)}?{urlencode(params)}"
+                ),
+            }
+        )
+    return downloaded
+
+
+def _execute_reolink_record_action(
+    config: Dict[str, Any],
+    action: Dict[str, Any],
+    record: Dict[str, Any],
+    context: Dict[str, Any],
+    window: Dict[str, datetime],
+    dry_run: bool,
+) -> Dict[str, Any]:
+    channel = _parse_int(record.get("channel") or context.get("channel"), 0)
+    kind = action["kind"]
+    if kind == "record_start":
+        duration = _parse_int(
+            record.get("manual_record_duration_s"),
+            max(
+                600,
+                int((window["stop_utc"] - window["start_utc"]).total_seconds()) + 300,
+            ),
+        )
+        return _reolink_post_json(
+            context,
+            record,
+            "SetManualRec",
+            [
+                {
+                    "cmd": "SetManualRec",
+                    "action": 0,
+                    "param": {
+                        "Rec": {"channel": channel, "enable": 1, "duration": duration}
+                    },
+                }
+            ],
+            dry_run,
+        )
+    if kind == "record_stop":
+        return _reolink_post_json(
+            context,
+            record,
+            "SetManualRec",
+            [
+                {
+                    "cmd": "SetManualRec",
+                    "action": 0,
+                    "param": {"Rec": {"channel": channel, "enable": 0}},
+                }
+            ],
+            dry_run,
+        )
+    if kind == "download_recording":
+        if (
+            record.get("skip_when_full_viewers")
+            and context.get("active_full_viewers", 0) > 0
+        ):
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "active full-stream viewers are present",
+                "active_full_viewers": context.get("active_full_viewers", 0),
+            }
+        download_path = _render_template(
+            record.get("download_path")
+            or _default_launch_download_path(config, action["event"], action["camera"]),
+            context,
+        )
+        search_result, files = _reolink_search_files(context, record, window, dry_run)
+        result = {
+            "ok": True,
+            "vendor": "reolink",
+            "dry_run": dry_run,
+            "download_path": download_path,
+            "search": search_result,
+        }
+        if dry_run:
+            return result
+        if not files:
+            raise LaunchWorkflowError("Reolink Search returned no recordings.")
+        result["downloads"] = _reolink_download_files(
+            context, record, files, str(download_path)
+        )
+        return result
+    raise LaunchWorkflowError(f"Unsupported Reolink launch action '{kind}'.")
+
+
 def execute_launch_action(
     config: Dict[str, Any],
     action: Dict[str, Any],
@@ -624,6 +1129,9 @@ def execute_launch_action(
         camera_name,
         camera_config,
         active_full_viewers=active_full_viewers,
+    )
+    context = _add_record_window_context(
+        context, config, workflow, plan, action["event"]
     )
 
     kind = action["kind"]
@@ -688,7 +1196,20 @@ def execute_launch_action(
         )
     if kind in {"record_start", "record_stop", "download_recording"}:
         record = camera_plan.get("record") or {}
+        if not isinstance(record, dict):
+            record = {}
         config_key = action.get("config_key") or ""
+        if _record_vendor(record) == "reolink" and not (
+            record.get(f"{config_key}_command") or record.get(f"{config_key}_url")
+        ):
+            return _execute_reolink_record_action(
+                config,
+                action,
+                record,
+                context,
+                _record_window(config, workflow, plan, action["event"]),
+                dry_run=bool(dry_run),
+            )
         hook_config = {}
         if record.get(f"{config_key}_command"):
             hook_config["command"] = record.get(f"{config_key}_command")

@@ -170,9 +170,16 @@ h1 {
 }
 
 .launch-camera-fields input,
-.launch-camera-fields select {
+.launch-camera-fields select,
+.launch-camera-fields textarea {
     width: 100%;
     box-sizing: border-box;
+}
+
+.launch-camera-record-note {
+    color: #555;
+    font-size: 0.9rem;
+    line-height: 1.35;
 }
 
 .launch-inline-options {

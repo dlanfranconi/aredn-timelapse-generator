@@ -6,9 +6,23 @@ from unittest.mock import patch
 
 from fenetre.launch_workflow import (
     due_launch_actions,
+    execute_launch_action,
     preview_launch_workflow,
     run_due_launch_actions,
 )
+
+
+class FakeResponse:
+    def __init__(self, json_data=None, content=b"", status_code=200):
+        self._json_data = json_data
+        self.content = content
+        self.status_code = status_code
+
+    def json(self):
+        return self._json_data
+
+    def raise_for_status(self):
+        return None
 
 
 def sample_config(state_file=None):
@@ -194,3 +208,109 @@ class LaunchWorkflowTestCase(unittest.TestCase):
 
         self.assertTrue(result["actions"][0]["result"]["skipped"])
         mock_request.assert_not_called()
+
+    def test_reolink_vendor_record_schedules_start_stop_and_download(self):
+        config = sample_config()
+        camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+            "cameras"
+        ]["cam1"]
+        camera_plan.clear()
+        camera_plan["record"] = {"vendor": "reolink"}
+
+        actions = due_launch_actions(
+            config, now=datetime(2026, 7, 21, 12, 3, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(
+            [action["kind"] for action in actions],
+            ["record_start", "record_stop", "download_recording"],
+        )
+
+    @patch("fenetre.launch_workflow.requests.request")
+    def test_reolink_manual_record_start_posts_set_manual_rec(self, mock_request):
+        mock_request.return_value = FakeResponse(
+            [{"cmd": "SetManualRec", "code": 0, "value": {"rspCode": 200}}]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config(state_file=os.path.join(temp_dir, "state.json"))
+            camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+                "cameras"
+            ]["cam1"]
+            camera_plan.clear()
+            camera_plan["record"] = {"vendor": "reolink", "http_port": 80}
+
+            result = run_due_launch_actions(
+                config,
+                now=datetime(2026, 7, 21, 11, 59, 30, tzinfo=timezone.utc),
+                dry_run=False,
+            )
+
+        self.assertEqual(result["actions"][0]["result"]["command"], "SetManualRec")
+        method, url = mock_request.call_args.args[:2]
+        self.assertEqual(method, "POST")
+        self.assertEqual(url, "http://camera.local/cgi-bin/api.cgi")
+        self.assertEqual(
+            mock_request.call_args.kwargs["params"],
+            {"cmd": "SetManualRec", "user": "admin", "password": "secret"},
+        )
+        self.assertEqual(
+            mock_request.call_args.kwargs["json"][0]["param"]["Rec"]["enable"], 1
+        )
+
+    @patch("fenetre.launch_workflow.requests.request")
+    def test_reolink_download_searches_and_saves_matching_recording(self, mock_request):
+        search_response = FakeResponse(
+            [
+                {
+                    "cmd": "Search",
+                    "code": 0,
+                    "value": {
+                        "SearchResult": {
+                            "File": [
+                                {
+                                    "name": "Mp4Record/2026-07-21/RecM01_20260721_115900_120200_demo.mp4",
+                                    "size": 3,
+                                    "type": "main",
+                                }
+                            ]
+                        }
+                    },
+                }
+            ]
+        )
+        download_response = FakeResponse(content=b"abc")
+        mock_request.side_effect = [search_response, download_response]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            download_path = os.path.join(temp_dir, "launch-1-cam1.mp4")
+            config = sample_config()
+            camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+                "cameras"
+            ]["cam1"]
+            camera_plan.clear()
+            camera_plan["record"] = {
+                "vendor": "reolink",
+                "download_path": download_path,
+            }
+            action = {
+                "key": "launch-1:vandenberg:cam1:download_recording",
+                "kind": "download_recording",
+                "event": {
+                    "id": "launch-1",
+                    "name": "Falcon 9 Mission",
+                    "launch_time_utc": "2026-07-21T12:00:00+00:00",
+                },
+                "plan": "vandenberg",
+                "camera": "cam1",
+                "config_key": "download",
+                "due_at": "2026-07-21T12:02:00+00:00",
+            }
+
+            result = execute_launch_action(config, action, dry_run=False)
+
+            with open(download_path, "rb") as downloaded_file:
+                content = downloaded_file.read()
+
+        self.assertEqual(content, b"abc")
+        self.assertEqual(result["downloads"][0]["download_path"], download_path)
+        self.assertEqual(mock_request.call_args_list[0].args[0], "POST")
+        self.assertEqual(mock_request.call_args_list[1].args[0], "GET")

@@ -77,10 +77,13 @@ global:
             preset: launch-pad
             image_profile: launch
             record:
-              start_url: http://{host}/api/record/start?event={launch_id}
-              stop_url: http://{host}/api/record/stop?event={launch_id}
-              download_url: http://{host}/api/record/download?event={launch_id}
-              download_path: /srv/fenetre/data/launches/{launch_id}-{camera}.mp4
+              vendor: reolink
+              http_port: 80
+              channel: 0
+              stream_type: main
+              manual_record_duration_s: 1200
+              download_method: Download
+              download_path: /srv/fenetre/data/launches/{launch_id}/{launch_id}-{camera}.mp4
               download_delay_seconds: 60
               skip_when_full_viewers: true
 
@@ -124,11 +127,11 @@ timelapse:
 
 cameras:
   Ridge-PTZ:
-    description: Example snapshot + RTSP + ONVIF PTZ camera.
+    description: Example Reolink-style snapshot + RTSP + ONVIF PTZ camera.
     visibility: public
     public: true
 
-    url: http://192.0.2.50/images/snapshot.jpg
+    url: http://192.0.2.50/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=admin&password=CHANGE_ME
     http_auth:
       username: admin
       password: CHANGE_ME
@@ -166,8 +169,10 @@ cameras:
 
     image_profiles:
       enabled: false
+      vendor: reolink
       host: 192.0.2.50
       http_port: 80
+      channel: 0
       username: admin
       password: CHANGE_ME
       profiles:

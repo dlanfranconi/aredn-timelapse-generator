@@ -343,7 +343,7 @@ For legacy cameras that crash on ONVIF or RTSP sessions, keep the camera as snap
 
 ## Image Profiles
 
-Image profiles are optional HTTP/API hooks for camera tuning. They can be used for day, sunset, night, or launch-specific image settings.
+Image profiles are optional HTTP/API hooks for camera image tuning. They are not RTSP stream profiles. Use them for day, sunset, night, or launch-specific camera settings such as exposure, brightness, contrast, IR/white light, WDR, or other vendor image controls.
 
 ```yaml
 cameras:
@@ -453,6 +453,8 @@ When `dry_run: false`, completed action keys are persisted to `state_file` so re
 
 ### Launch Camera Example
 
+Launch cameras can be PTZ or non-PTZ. Non-PTZ cameras can still record or apply image profiles, but Fenetre only shows preset and tour options for cameras with `ptz.enabled: true`.
+
 ```yaml
 global:
   launch_workflow:
@@ -491,11 +493,59 @@ Hook URL and command templates can use:
 
 ```text
 {camera} {plan} {launch_id} {launch_name} {launch_time_utc}
-{provider} {location} {pad} {host} {ip} {username} {password}
+{record_start_utc} {record_stop_utc} {record_start_local} {record_stop_local}
+{provider} {location} {pad} {host} {ip} {http_port} {port} {channel}
+{username} {password}
 {active_full_viewers}
 ```
 
-`skip_when_full_viewers: true` skips recording/download hooks when an authenticated user is actively watching the camera's full HD stream. This is intended for cameras where a local camera recording API or stream switch could disturb a live viewer.
+`skip_when_full_viewers: true` skips custom recording/download hooks when an authenticated user is actively watching the camera's full HD stream. For the built-in Reolink recorder it skips the download action only, so a live viewer does not block the camera from recording the launch locally.
+
+### Reolink Launch Recording
+
+For Reolink cameras such as the RLC-811A, choose `Recording API: Reolink camera API` in the Launch Automation admin panel, or set `record.vendor: reolink` in YAML. Fenetre infers host, channel, and credentials from the camera URL, RTSP URL, `http_auth`, `ptz`, or `image_profiles` where possible.
+
+```yaml
+cameras:
+  RLC811A-Launch:
+    url: http://192.0.2.60/cgi-bin/api.cgi?cmd=Snap&channel=0&rs=fenetre&user=admin&password=CHANGE_ME
+    http_auth:
+      username: admin
+      password: CHANGE_ME
+    rtsp_url: rtsp://admin:CHANGE_ME@192.0.2.60:554/h264Preview_01_main
+    go2rtc_enabled: true
+
+global:
+  launch_workflow:
+    plans:
+      vandenberg-spacex:
+        cameras:
+          RLC811A-Launch:
+            image_profile: launch
+            record:
+              vendor: reolink
+              http_port: 80
+              channel: 0
+              stream_type: main
+              manual_record_duration_s: 1200
+              download_method: Download
+              download_path: /srv/fenetre/data/launches/{launch_id}/{launch_id}-{camera}.mp4
+              download_delay_seconds: 60
+              skip_when_full_viewers: true
+```
+
+Built-in Reolink recording uses direct HTTP API calls:
+
+- Start recording: `SetManualRec` with `{"Rec":{"channel":0,"enable":1,"duration":1200}}`
+- Stop recording: `SetManualRec` with `{"Rec":{"channel":0,"enable":0}}`
+- Find files: `Search` for the launch record window and selected `stream_type`
+- Download files: `Download` or `Playback` using the file names returned by `Search`
+
+Reolink's official HTTP API documentation covers `Search`, `Download`, and `Playback`; `SetManualRec` is implemented by the maintained `reolink_aio` integration and is capability-dependent. If a camera/NVR returns a Reolink API error for `SetManualRec`, leave the recorder in custom-hook mode or use an external RTSP recorder.
+
+Fenetre uses the camera-local time window derived from `global.timezone` for Reolink `Search`. Keep `global.timezone` aligned with the camera's local timezone.
+
+For Sunba P636 V2, no verified public local HTTP API for start/stop/download of on-camera recordings has been found. Keep `record.vendor` as custom hooks and only enter URLs/commands that you have tested against that camera or its management software.
 
 ### Launch Dashboards
 
