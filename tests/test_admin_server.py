@@ -430,6 +430,35 @@ class ConfigServerTestCase(unittest.TestCase):
         )
 
     @patch("fenetre.admin_server.requests.put")
+    def test_add_snapshot_camera_preserves_rtsp_live_view_url(self, mock_go2rtc_put):
+        mock_go2rtc_put.return_value.status_code = 200
+        mock_go2rtc_put.return_value.raise_for_status.return_value = None
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "snapshot-live-cam",
+                    "capture_source": "snapshot",
+                    "url": "http://camera/snapshot.jpg",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "go2rtc_enabled": True,
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        camera = updated_data_yaml["cameras"]["snapshot-live-cam"]
+        self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
+        self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
+        self.assertNotIn("local_command", camera)
+        self.assertTrue(updated_data_yaml["global"]["go2rtc"]["enabled"])
+        mock_go2rtc_put.assert_called_once()
+
+    @patch("fenetre.admin_server.requests.put")
     @patch("fenetre.admin_server._fetch_local_command_bytes")
     def test_add_camera_can_disable_go2rtc_live_view(self, mock_fetch, mock_go2rtc_put):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
@@ -621,15 +650,20 @@ class ConfigServerTestCase(unittest.TestCase):
 
     @patch("fenetre.admin_server._fetch_local_command_bytes")
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
-    def test_snapshot_test_checks_ptz_rtsp_url(self, mock_snapshot, mock_stream):
+    def test_snapshot_test_checks_live_rtsp_urls(self, mock_snapshot, mock_stream):
         mock_snapshot.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
-        mock_stream.return_value = (b"streamjpeg", "image/jpeg", (640, 360))
+        mock_stream.side_effect = [
+            (b"fullstreamjpeg", "image/jpeg", (1920, 1080)),
+            (b"streamjpeg", "image/jpeg", (640, 360)),
+        ]
 
         response = self.app.post(
             "/api/camera/test_snapshot",
             data=json.dumps(
                 {
                     "url": "http://camera/images/snapshot.jpg",
+                    "capture_source": "snapshot",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
                     "ptz_rtsp_url": "rtsp://admin:secret@camera:554/12",
                 }
             ),
@@ -639,11 +673,19 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json["stream_tests"],
-            [{"name": "PTZ live RTSP", "width": 640, "height": 360, "bytes": 10}],
+            [
+                {
+                    "name": "RTSP live view",
+                    "width": 1920,
+                    "height": 1080,
+                    "bytes": 14,
+                },
+                {"name": "PTZ live RTSP", "width": 640, "height": 360, "bytes": 10},
+            ],
         )
-        self.assertIn(
-            "rtsp://admin:secret@camera:554/12", mock_stream.call_args.args[0]
-        )
+        stream_commands = [call.args[0] for call in mock_stream.call_args_list]
+        self.assertIn("rtsp://admin:secret@camera:554/11", stream_commands[0])
+        self.assertIn("rtsp://admin:secret@camera:554/12", stream_commands[1])
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_allows_blank_description(self, mock_fetch):

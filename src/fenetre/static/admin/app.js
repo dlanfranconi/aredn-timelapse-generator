@@ -153,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzCapabilityPan = document.getElementById('newCameraPtzCapabilityPan');
     const newCameraPtzCapabilityTilt = document.getElementById('newCameraPtzCapabilityTilt');
     const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
+    const newCameraGo2rtcEnabled = document.getElementById('newCameraGo2rtcEnabled');
     const newCameraPtzTourEnabled = document.getElementById('newCameraPtzTourEnabled');
     const newCameraPtzTourAutoResume = document.getElementById('newCameraPtzTourAutoResume');
     const newCameraPtzPresetRows = document.getElementById('newCameraPtzPresetRows');
@@ -307,6 +308,10 @@ document.addEventListener('DOMContentLoaded', () => {
     newCameraSnapshotTemplate.addEventListener('change', () => applySelectedSnapshotTemplate({ force: true }));
     newCameraRtspTemplate.addEventListener('change', () => applySelectedRtspTemplate({ force: true }));
     newCameraCaptureSource.addEventListener('change', () => {
+        syncCaptureStreamFields();
+        resetNewCameraTest();
+    });
+    newCameraGo2rtcEnabled.addEventListener('change', () => {
         syncCaptureStreamFields();
         resetNewCameraTest();
     });
@@ -1341,21 +1346,22 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncCaptureStreamFields() {
         const captureSource = newCameraCaptureSource.value || 'snapshot';
         const ptzEnabled = checked('newCameraPtzEnabled');
-        const showRtspCapture = captureSource === 'rtsp' || ptzEnabled;
-        const showPtzRtsp = ptzEnabled;
+        const liveViewEnabled = checked('newCameraGo2rtcEnabled');
+        const showRtspUrl = captureSource === 'rtsp' || liveViewEnabled || ptzEnabled;
+        const showPtzRtsp = ptzEnabled && liveViewEnabled;
         const rtspLabel = document.querySelector('label[for="newCameraRtspUrl"]');
         const ptzRtspLabel = document.querySelector('label[for="newCameraPtzRtspUrl"]');
         if (rtspLabel) {
             rtspLabel.textContent = captureSource === 'rtsp'
                 ? 'RTSP capture/full live URL'
-                : 'Full live RTSP URL';
+                : 'RTSP live URL';
         }
         if (ptzRtspLabel) {
-            ptzRtspLabel.textContent = 'PTZ live RTSP URL (optional substream)';
+            ptzRtspLabel.textContent = 'Low-res PTZ aiming RTSP URL (optional substream)';
         }
-        newCameraRtspRow.hidden = !showRtspCapture;
+        newCameraRtspRow.hidden = !showRtspUrl;
         newCameraPtzRtspRow.hidden = !showPtzRtsp;
-        newCameraRtspUrl.disabled = !showRtspCapture;
+        newCameraRtspUrl.disabled = !showRtspUrl;
         newCameraPtzRtspUrl.disabled = !showPtzRtsp;
     }
 
@@ -1999,6 +2005,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const visibility = newCameraVisibility.value || 'public';
 
         const captureSource = newCameraCaptureSource.value || 'snapshot';
+        const useRtspUrl = captureSource === 'rtsp'
+            || checked('newCameraGo2rtcEnabled')
+            || checked('newCameraPtzEnabled');
+        const usePtzRtspUrl = checked('newCameraPtzEnabled')
+            && checked('newCameraGo2rtcEnabled');
         const payload = {
             name: newCameraName.value.trim(),
             display_name: newCameraDisplayName.value.trim() || newCameraName.value.trim(),
@@ -2011,8 +2022,8 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot_username: captureSource === 'snapshot' ? newCameraSnapshotUsername.value.trim() : '',
             snapshot_password: captureSource === 'snapshot' ? newCameraSnapshotPassword.value : '',
             snapshot_auth_type: newCameraSnapshotAuthType.value || 'basic',
-            rtsp_url: captureSource === 'rtsp' || checked('newCameraPtzEnabled') ? newCameraRtspUrl.value.trim() : '',
-            ptz_rtsp_url: checked('newCameraPtzEnabled') ? newCameraPtzRtspUrl.value.trim() : '',
+            rtsp_url: useRtspUrl ? newCameraRtspUrl.value.trim() : '',
+            ptz_rtsp_url: usePtzRtspUrl ? newCameraPtzRtspUrl.value.trim() : '',
             timeout_s: intValue('newCameraTimeout', 15),
             capture_failure_interval_s: intValue('newCameraFailureRetry', 60),
             public: visibility === 'public',

@@ -1427,6 +1427,9 @@ def test_snapshot_url():
         rtsp_url = (payload.get("rtsp_url") or "").strip()
         ptz_rtsp_url = (payload.get("ptz_rtsp_url") or "").strip()
         local_command = (payload.get("local_command") or "").strip()
+        capture_source = payload.get("capture_source") or (
+            "rtsp" if local_command and not url else "snapshot"
+        )
         timeout_s = int(payload.get("timeout_s") or 15)
         cache_bust = bool(payload.get("cache_bust", True))
         camera_config = {}
@@ -1436,7 +1439,7 @@ def test_snapshot_url():
                 "username": payload.get("snapshot_username") or "",
                 "password": payload.get("snapshot_password") or "",
             }
-        if local_command or rtsp_url:
+        if capture_source == "rtsp" and (local_command or rtsp_url):
             image_bytes, content_type, size = _fetch_local_command_bytes(
                 local_command or rtsp_snapshot_command(rtsp_url),
                 timeout_s=timeout_s,
@@ -1451,14 +1454,18 @@ def test_snapshot_url():
         else:
             return jsonify({"error": "Snapshot URL is required."}), 400
         stream_tests = []
-        if ptz_rtsp_url:
+        live_stream_tests = []
+        if capture_source != "rtsp" and rtsp_url:
+            live_stream_tests.append(("RTSP live view", rtsp_url))
+        if ptz_rtsp_url and ptz_rtsp_url != rtsp_url:
+            live_stream_tests.append(("PTZ live RTSP", ptz_rtsp_url))
+        for stream_name, stream_url in live_stream_tests:
             stream_bytes, _, stream_size = _fetch_local_command_bytes(
-                rtsp_snapshot_command(ptz_rtsp_url),
-                timeout_s=timeout_s,
+                rtsp_snapshot_command(stream_url), timeout_s=timeout_s
             )
             stream_tests.append(
                 {
-                    "name": "PTZ live RTSP",
+                    "name": stream_name,
                     "width": stream_size[0],
                     "height": stream_size[1],
                     "bytes": len(stream_bytes),
