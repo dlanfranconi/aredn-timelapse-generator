@@ -153,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzCapabilityPan = document.getElementById('newCameraPtzCapabilityPan');
     const newCameraPtzCapabilityTilt = document.getElementById('newCameraPtzCapabilityTilt');
     const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
+    const newCameraPtzCapabilityFocus = document.getElementById('newCameraPtzCapabilityFocus');
     const newCameraGo2rtcEnabled = document.getElementById('newCameraGo2rtcEnabled');
     const newCameraPtzTourEnabled = document.getElementById('newCameraPtzTourEnabled');
     const newCameraPtzTourAutoResume = document.getElementById('newCameraPtzTourAutoResume');
@@ -1297,6 +1298,15 @@ document.addEventListener('DOMContentLoaded', () => {
         idInput.setAttribute('aria-label', 'Preset ID');
         idInput.value = preset.id || preset.token || '';
 
+        const enabledLabel = document.createElement('label');
+        enabledLabel.className = 'preset-enabled';
+        const enabledInput = document.createElement('input');
+        enabledInput.type = 'checkbox';
+        enabledInput.className = 'preset-enabled-input';
+        enabledInput.checked = preset.enabled !== false;
+        enabledLabel.appendChild(enabledInput);
+        enabledLabel.appendChild(document.createTextNode('Show'));
+
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
         removeButton.textContent = 'Remove';
@@ -1305,18 +1315,26 @@ document.addEventListener('DOMContentLoaded', () => {
         row.appendChild(nameInput);
         row.appendChild(tokenInput);
         row.appendChild(idInput);
+        row.appendChild(enabledLabel);
         row.appendChild(removeButton);
         newCameraPtzPresetRows.appendChild(row);
     }
 
     function renderPtzPresetEditor(presets = []) {
         newCameraPtzPresetRows.innerHTML = '';
-        presets
+        const presetList = Array.isArray(presets)
+            ? presets
+            : Object.entries(presets || {}).map(([presetId, preset]) => ({
+                id: presetId,
+                ...(preset && typeof preset === 'object' ? preset : {})
+            }));
+        presetList
             .filter(preset => preset && typeof preset === 'object')
             .map(preset => ({
                 id: String(preset.id || preset.token || '').trim(),
                 name: String(preset.name || '').trim(),
-                token: String(preset.token || preset.id || '').trim()
+                token: String(preset.token || preset.id || '').trim(),
+                enabled: preset.enabled !== false
             }))
             .filter(presetHasUsableName)
             .forEach(appendPtzPresetRow);
@@ -1328,10 +1346,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const name = row.querySelector('.preset-name').value.trim();
                 const token = row.querySelector('.preset-token').value.trim();
                 const id = row.querySelector('.preset-id').value.trim();
+                const enabledInput = row.querySelector('.preset-enabled-input');
                 const preset = {
                     id: id || token || name,
                     name,
-                    token: token || id || name
+                    token: token || id || name,
+                    enabled: !enabledInput || enabledInput.checked
                 };
                 return presetHasUsableName(preset) ? preset : null;
             })
@@ -1420,6 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzCapabilityPan', true);
         setCheckboxValue('newCameraPtzCapabilityTilt', true);
         setCheckboxValue('newCameraPtzCapabilityZoom', true);
+        setCheckboxValue('newCameraPtzCapabilityFocus', false);
         setCheckboxValue('newCameraPtzTourEnabled', false);
         setInputValue('newCameraPtzTourAutoResume', 1800);
         setInputValue('newCameraPtzHost', '');
@@ -1522,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraPtzCapabilityPan', capabilities.pan ?? ptz.supports_pan ?? !zoomOnly);
         setCheckboxValue('newCameraPtzCapabilityTilt', capabilities.tilt ?? ptz.supports_tilt ?? !zoomOnly);
         setCheckboxValue('newCameraPtzCapabilityZoom', capabilities.zoom ?? ptz.supports_zoom ?? true);
+        setCheckboxValue('newCameraPtzCapabilityFocus', capabilities.focus ?? ptz.supports_focus ?? false);
         const tour = ptz.tour || {};
         setCheckboxValue('newCameraPtzTourEnabled', tour.enabled === true || ptz.tour_enabled === true);
         setInputValue('newCameraPtzTourAutoResume', tour.auto_resume_s ?? 1800);
@@ -2077,7 +2099,8 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.ptz_capabilities = {
                 pan: newCameraPtzCapabilityPan.checked,
                 tilt: newCameraPtzCapabilityTilt.checked,
-                zoom: newCameraPtzCapabilityZoom.checked
+                zoom: newCameraPtzCapabilityZoom.checked,
+                focus: newCameraPtzCapabilityFocus.checked
             };
             payload.ptz_tour_enabled = newCameraPtzTourEnabled.checked;
             payload.ptz_tour_auto_resume_s = intValue('newCameraPtzTourAutoResume', 1800);
@@ -2194,7 +2217,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const presets = (result.presets || []).map(preset => ({
                 id: preset.id,
                 name: preset.name,
-                token: preset.token || preset.id
+                token: preset.token || preset.id,
+                enabled: true
             }));
             renderPtzPresetEditor(presets);
             setStatus(

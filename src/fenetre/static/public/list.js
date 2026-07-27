@@ -658,24 +658,38 @@ function createCameraListItem(camera) {
                 <select class="select-ptz-preset" aria-label="PTZ preset"></select>
                 <button class="btn-ptz-preset" type="button">Go</button>
                 <div class="ptz-manual" hidden>
-                    <label class="ptz-speed-control">Speed
-                        <input class="input-ptz-speed" type="range" min="0.05" max="1" step="0.05" value="0.35">
-                    </label>
-                    <label class="ptz-duration-control">Nudge
-                        <select class="select-ptz-duration" aria-label="PTZ nudge duration">
-                            <option value="150">Short</option>
-                            <option value="250" selected>Medium</option>
-                            <option value="500">Long</option>
-                            <option value="1000">Very long</option>
-                        </select>
-                    </label>
-                    <button type="button" data-axis="tilt" data-pan="0" data-tilt="1">Up</button>
-                    <button type="button" data-axis="pan" data-pan="-1" data-tilt="0">Left</button>
-                    <button type="button" data-stop="1">Stop</button>
-                    <button type="button" data-axis="pan" data-pan="1" data-tilt="0">Right</button>
-                    <button type="button" data-axis="tilt" data-pan="0" data-tilt="-1">Down</button>
-                    <button type="button" data-axis="zoom" data-zoom="1">Zoom +</button>
-                    <button type="button" data-axis="zoom" data-zoom="-1">Zoom -</button>
+                    <div class="ptz-manual-settings">
+                        <label class="ptz-speed-control">Speed
+                            <input class="input-ptz-speed" type="range" min="0.05" max="1" step="0.05" value="0.35">
+                        </label>
+                        <label class="ptz-duration-control">Nudge
+                            <select class="select-ptz-duration" aria-label="PTZ nudge duration">
+                                <option value="150">Short</option>
+                                <option value="250" selected>Medium</option>
+                                <option value="500">Long</option>
+                                <option value="1000">Very long</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="ptz-control-panel">
+                        <div class="ptz-rose" aria-label="Pan and tilt controls">
+                            <span></span>
+                            <button class="ptz-rose-button" type="button" data-axis="tilt" data-pan="0" data-tilt="1" aria-label="Tilt up">&uarr;</button>
+                            <span></span>
+                            <button class="ptz-rose-button" type="button" data-axis="pan" data-pan="-1" data-tilt="0" aria-label="Pan left">&larr;</button>
+                            <button class="ptz-rose-stop" type="button" data-stop="1">Stop</button>
+                            <button class="ptz-rose-button" type="button" data-axis="pan" data-pan="1" data-tilt="0" aria-label="Pan right">&rarr;</button>
+                            <span></span>
+                            <button class="ptz-rose-button" type="button" data-axis="tilt" data-pan="0" data-tilt="-1" aria-label="Tilt down">&darr;</button>
+                            <span></span>
+                        </div>
+                        <div class="ptz-lens-controls" aria-label="Zoom and focus controls">
+                            <button type="button" data-axis="zoom" data-zoom="1">Zoom +</button>
+                            <button type="button" data-axis="zoom" data-zoom="-1">Zoom -</button>
+                            <button type="button" data-axis="focus" data-focus="1">Focus +</button>
+                            <button type="button" data-axis="focus" data-focus="-1">Focus -</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="ptz-tour" hidden>
                     <button type="button" data-tour="pause">Pause tour</button>
@@ -736,6 +750,7 @@ function configurePtzPresets(camera, listItem) {
     const supportsPan = capabilities.pan !== false;
     const supportsTilt = capabilities.tilt !== false;
     const supportsZoom = capabilities.zoom !== false;
+    const supportsFocus = capabilities.focus === true;
     const livePreviewUrl = go2rtc.enabled ? mutedGo2rtcPlayerUrl(go2rtc.preview_url || go2rtc.player_url) : '';
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
     const fullLivePlayerUrl = go2rtc.enabled
@@ -790,14 +805,24 @@ function configurePtzPresets(camera, listItem) {
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
     tourControls.hidden = !canUseTour;
+    const roseControls = manual.querySelector('.ptz-rose');
+    const lensControls = manual.querySelector('.ptz-lens-controls');
     manual.querySelectorAll('[data-axis]').forEach(manualButton => {
         const axis = manualButton.dataset.axis;
         manualButton.hidden = (axis === 'pan' && !supportsPan)
             || (axis === 'tilt' && !supportsTilt)
-            || (axis === 'zoom' && !supportsZoom);
+            || (axis === 'zoom' && !supportsZoom)
+            || (axis === 'focus' && !supportsFocus);
     });
+    if (roseControls) {
+        roseControls.hidden = !(supportsPan || supportsTilt);
+    }
+    if (lensControls) {
+        lensControls.hidden = !Array.from(lensControls.querySelectorAll('button'))
+            .some(lensButton => !lensButton.hidden);
+    }
     manual.querySelectorAll('[data-stop]').forEach(manualButton => {
-        manualButton.hidden = ptz.stop_disabled === true;
+        manualButton.hidden = ptz.stop_disabled === true || !(supportsPan || supportsTilt);
     });
     liveView.hidden = !canShowLivePreview;
     liveView.classList.toggle('ptz-live-view-unavailable', canShowLivePreview && !livePreviewUrl);
@@ -940,23 +965,31 @@ function configurePtzPresets(camera, listItem) {
             status.textContent = 'Moving...';
             try {
                 const isStop = manualButton.dataset.stop === '1';
-                const response = await fetch(isStop ? '/api/ptz/stop' : '/api/ptz/move', {
+                const isFocus = manualButton.dataset.axis === 'focus';
+                const endpoint = isStop ? '/api/ptz/stop' : (isFocus ? '/api/ptz/focus' : '/api/ptz/move');
+                status.textContent = isFocus ? 'Focusing...' : status.textContent;
+                const payload = {
+                    camera: id,
+                    speed: Number(speedInput.value || 0.35),
+                    move_duration_ms: Number(durationSelect.value || 250)
+                };
+                if (isFocus) {
+                    payload.focus = Number(manualButton.dataset.focus || 0);
+                } else {
+                    payload.pan = Number(manualButton.dataset.pan || 0);
+                    payload.tilt = Number(manualButton.dataset.tilt || 0);
+                    payload.zoom = Number(manualButton.dataset.zoom || 0);
+                }
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                    body: JSON.stringify({
-                        camera: id,
-                        pan: Number(manualButton.dataset.pan || 0),
-                        tilt: Number(manualButton.dataset.tilt || 0),
-                        zoom: Number(manualButton.dataset.zoom || 0),
-                        speed: Number(speedInput.value || 0.35),
-                        move_duration_ms: Number(durationSelect.value || 250)
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const result = await response.json();
                 if (!response.ok) {
                     throw new Error(result.error || `PTZ request failed: ${response.status}`);
                 }
-                status.textContent = isStop ? 'Stopped' : 'Nudged';
+                status.textContent = isStop ? 'Stopped' : (isFocus ? 'Focused' : 'Nudged');
             } catch (error) {
                 status.textContent = error.message;
             } finally {

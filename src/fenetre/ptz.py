@@ -2,7 +2,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -60,7 +60,9 @@ def _preset_display_name(preset: Dict[str, Any], preset_id: str, token: str) -> 
     return name
 
 
-def normalize_presets(ptz_config: Dict[str, Any]) -> List[Dict[str, str]]:
+def normalize_presets(
+    ptz_config: Dict[str, Any], include_disabled: bool = False
+) -> List[Dict[str, Any]]:
     presets = []
     raw_presets = ptz_config.get("presets") or []
     if isinstance(raw_presets, dict):
@@ -77,7 +79,17 @@ def normalize_presets(ptz_config: Dict[str, Any]) -> List[Dict[str, str]]:
         name = _preset_display_name(preset, preset_id, token)
         if not preset_id or not name or not token:
             continue
-        presets.append({"id": preset_id, "name": name, "token": token})
+        enabled = _bool_config(preset.get("enabled"), True)
+        if not enabled and not include_disabled:
+            continue
+        normalized_preset: Dict[str, Any] = {
+            "id": preset_id,
+            "name": name,
+            "token": token,
+        }
+        if "enabled" in preset or include_disabled:
+            normalized_preset["enabled"] = enabled
+        presets.append(normalized_preset)
     return presets
 
 
@@ -231,6 +243,7 @@ def _ptz_capabilities(ptz_config: Dict[str, Any]) -> Dict[str, bool]:
         "pan": capability("pan", not zoom_only),
         "tilt": capability("tilt", not zoom_only),
         "zoom": capability("zoom", True),
+        "focus": capability("focus", False),
     }
 
 
@@ -382,6 +395,77 @@ def _onvif_services_and_profile_token(ptz_config: Dict[str, Any]):
     return ptz_service, profile_token
 
 
+def _profile_video_source_token(profile: Any) -> Optional[str]:
+    video_config = getattr(profile, "VideoSourceConfiguration", None)
+    if isinstance(video_config, dict):
+        return (
+            video_config.get("SourceToken")
+            or video_config.get("source_token")
+            or video_config.get("token")
+        )
+    return (
+        getattr(video_config, "SourceToken", None)
+        or getattr(video_config, "source_token", None)
+        or getattr(video_config, "token", None)
+    )
+
+
+def _onvif_imaging_service_and_source_token(ptz_config: Dict[str, Any]):
+    host = ptz_config.get("host") or ptz_config.get("ip")
+    port = int(ptz_config.get("port") or 80)
+    camera = _onvif_camera(ptz_config)
+    try:
+        media_service = camera.create_media_service()
+        imaging_service = camera.create_imaging_service()
+    except Exception as exc:
+        raise PTZError(
+            f"Could not create ONVIF media/imaging services at {host}:{port}. "
+            "This camera/account may not expose ONVIF focus controls. "
+            f"Original error: {exc}"
+        ) from exc
+
+    source_token = (
+        ptz_config.get("video_source_token")
+        or ptz_config.get("source_token")
+        or ptz_config.get("focus_source_token")
+    )
+    if source_token:
+        return imaging_service, str(source_token)
+
+    configured_profile_token = ptz_config.get("profile_token")
+    try:
+        profiles = _retry_onvif_setup(media_service.GetProfiles)
+    except Exception as exc:
+        raise PTZError(
+            f"Could not read ONVIF media profiles from {host}:{port}. "
+            "Configure video_source_token if this camera needs focus controls "
+            "but profile discovery is unreliable. "
+            f"Original error: {exc}"
+        ) from exc
+    if not profiles:
+        raise PTZError("No ONVIF media profiles were returned.")
+
+    selected_profile = None
+    if configured_profile_token:
+        selected_profile = next(
+            (
+                profile
+                for profile in profiles
+                if str(getattr(profile, "token", "")) == str(configured_profile_token)
+            ),
+            None,
+        )
+    if selected_profile is None:
+        selected_profile = profiles[0]
+    source_token = _profile_video_source_token(selected_profile)
+    if not source_token:
+        raise PTZError(
+            "The selected ONVIF media profile does not include a video source token. "
+            "Configure video_source_token for this camera to use focus controls."
+        )
+    return imaging_service, str(source_token)
+
+
 def _send_continuous_move(
     ptz_config: Dict[str, Any], ptz_service, profile_token: str, pan=0, tilt=0, zoom=0
 ):
@@ -428,6 +512,26 @@ def _send_stop(ptz_config: Dict[str, Any], ptz_service, profile_token: str):
     request.PanTilt = True
     request.Zoom = True
     _call_ptz_operation(ptz_config, "stop", lambda: ptz_service.Stop(request))
+
+
+def _send_focus_move(
+    ptz_config: Dict[str, Any], imaging_service, source_token: str, focus=0
+):
+    speed = max(-1, min(1, float(focus)))
+    request = imaging_service.create_type("Move")
+    request.VideoSourceToken = source_token
+    request.Focus = {"Continuous": {"Speed": speed}}
+    _call_ptz_operation(
+        ptz_config, "focus move", lambda: imaging_service.Move(request)
+    )
+
+
+def _send_focus_stop(ptz_config: Dict[str, Any], imaging_service, source_token: str):
+    request = imaging_service.create_type("Stop")
+    request.VideoSourceToken = source_token
+    _call_ptz_operation(
+        ptz_config, "focus stop", lambda: imaging_service.Stop(request)
+    )
 
 
 def _tour_token(tour_config: Dict[str, Any]) -> str:
@@ -648,6 +752,38 @@ def nudge_move(
     result = {"ok": True, "camera": camera_name, "session": session}
     result["move_duration_s"] = move_duration_s
     return result
+
+
+def focus_move(
+    camera_name: str,
+    camera_config: Dict[str, Any],
+    focus: float = 0,
+    move_duration_s: float = 0.25,
+    owner: str = "public",
+    duration_s: int = 60,
+) -> Dict[str, Any]:
+    move_duration_s = max(0.05, min(2.0, float(move_duration_s or 0.25)))
+    ptz_config = camera_config.get("ptz") or {}
+    if not ptz_configured(ptz_config):
+        raise PTZError("PTZ is not fully configured for this camera.")
+    if not _ptz_capabilities(ptz_config).get("focus", False):
+        raise PTZError("Focus control is not enabled for this camera.")
+    session = acquire_session(camera_name, owner, duration_s)
+    with _endpoint_lock(ptz_config):
+        imaging_service, source_token = _onvif_imaging_service_and_source_token(
+            ptz_config
+        )
+        _send_focus_move(ptz_config, imaging_service, source_token, focus=focus)
+        try:
+            time.sleep(move_duration_s)
+        finally:
+            _send_focus_stop(ptz_config, imaging_service, source_token)
+    return {
+        "ok": True,
+        "camera": camera_name,
+        "session": session,
+        "move_duration_s": move_duration_s,
+    }
 
 
 def stop_move(camera_name: str, camera_config: Dict[str, Any]) -> Dict[str, Any]:

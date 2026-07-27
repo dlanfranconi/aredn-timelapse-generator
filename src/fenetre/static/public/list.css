@@ -490,9 +490,64 @@ body.dark-mode .camera-metadata {
 }
 
 .ptz-manual {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ptz-manual-settings {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+}
+
+.ptz-control-panel {
+    align-items: flex-start;
+    display: flex;
+    gap: 10px;
+}
+
+.ptz-rose {
     display: grid;
-    grid-template-columns: repeat(3, minmax(64px, auto));
     gap: 6px;
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(3, 44px);
+}
+
+.ptz-rose span {
+    display: block;
+}
+
+.ptz-rose-button,
+.ptz-rose-stop,
+.ptz-lens-controls button {
+    min-height: 44px;
+}
+
+.ptz-rose-button,
+.ptz-rose-stop {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    padding: 0;
+    width: 44px;
+}
+
+.ptz-rose-button {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.ptz-rose-stop {
+    font-size: 0.82rem;
+}
+
+.ptz-lens-controls {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
+    min-width: 150px;
 }
 
 .ptz-tour {
@@ -507,7 +562,6 @@ body.dark-mode .camera-metadata {
     display: flex;
     font-size: 0.85em;
     gap: 6px;
-    grid-column: span 3;
 }
 
 .input-ptz-speed {
@@ -687,6 +741,16 @@ body.dark-mode .camera-details .filename {
 .ptz-presets button:disabled {
     opacity: 0.6;
     cursor: wait;
+}
+.ptz-presets .ptz-rose-button,
+.ptz-presets .ptz-rose-stop {
+    margin-right: 0;
+    padding: 0;
+    width: 44px;
+}
+.ptz-presets .ptz-lens-controls button {
+    margin-right: 0;
+    width: 100%;
 }
 .ptz-status {
     color: #555;
@@ -877,7 +941,31 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
     }
 
     .ptz-manual {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .ptz-manual-settings,
+    .ptz-control-panel {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .ptz-rose {
+        align-self: center;
+        grid-template-columns: repeat(3, 52px);
+        grid-template-rows: repeat(3, 52px);
+    }
+
+    .ptz-presets .ptz-rose-button,
+    .ptz-presets .ptz-rose-stop {
+        min-height: 52px;
+        width: 52px;
+    }
+
+    .ptz-lens-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        min-width: 0;
         width: 100%;
     }
 
@@ -889,6 +977,11 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
     .ptz-tour button {
         min-height: 52px;
         padding: 10px 6px;
+    }
+
+    .ptz-presets .ptz-rose-button,
+    .ptz-presets .ptz-rose-stop {
+        padding: 0;
     }
 
     .ptz-speed-control,

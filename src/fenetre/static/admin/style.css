@@ -436,12 +436,24 @@ h1 {
     align-items: center;
     display: grid;
     gap: 6px;
-    grid-template-columns: minmax(140px, 1fr) minmax(88px, 0.7fr) minmax(88px, 0.7fr) auto;
+    grid-template-columns: minmax(150px, 1.2fr) minmax(96px, 0.8fr) minmax(96px, 0.8fr) auto auto;
 }
 
 .preset-row input {
     margin: 0;
     min-width: 0;
+}
+
+.preset-enabled {
+    align-items: center;
+    display: inline-flex;
+    gap: 5px;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.preset-enabled input {
+    margin: 0;
 }
 
 .preset-row button {

@@ -175,11 +175,21 @@ class ConfigServerTestCase(unittest.TestCase):
             "ptz_username": "operator",
             "ptz_password": "secret",
             "ptz_profile_token": "profile-1",
-            "ptz_capabilities": {"pan": True, "tilt": False, "zoom": True},
+            "ptz_capabilities": {
+                "pan": True,
+                "tilt": False,
+                "zoom": True,
+                "focus": True,
+            },
             "ptz_tour_enabled": True,
             "ptz_tour_auto_resume_s": 1800,
             "ptz_presets": [
-                {"id": "launch", "name": "Launch Pad", "token": "preset-1"}
+                {
+                    "id": "launch",
+                    "name": "Launch Pad",
+                    "token": "preset-1",
+                    "enabled": False,
+                }
             ],
             "cache_bust": True,
             "mozjpeg_optimize": True,
@@ -240,11 +250,12 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["ptz"]["profile_token"], "profile-1")
         self.assertEqual(
             camera["ptz"]["capabilities"],
-            {"pan": True, "tilt": False, "zoom": True},
+            {"pan": True, "tilt": False, "zoom": True, "focus": True},
         )
         self.assertTrue(camera["ptz"]["tour"]["enabled"])
         self.assertEqual(camera["ptz"]["tour"]["auto_resume_s"], 1800)
         self.assertEqual(camera["ptz"]["presets"][0]["id"], "launch")
+        self.assertFalse(camera["ptz"]["presets"][0]["enabled"])
         self.assertEqual(camera["snap_interval_s"], 60)
         self.assertEqual(camera["activity_interval_s"], 10)
         self.assertEqual(camera["work_dir_max_size_GB"], 5)

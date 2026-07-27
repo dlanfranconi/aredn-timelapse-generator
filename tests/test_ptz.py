@@ -7,6 +7,7 @@ from fenetre.ptz import (
     PTZLocked,
     acquire_session,
     discover_presets,
+    focus_move,
     goto_preset,
     nudge_move,
     normalize_presets,
@@ -45,6 +46,7 @@ class PTZTestCase(unittest.TestCase):
 
         self.assertTrue(metadata["enabled"])
         self.assertEqual(metadata["presets"], [{"id": "launch", "name": "Launch Pad"}])
+        self.assertFalse(metadata["capabilities"]["focus"])
         self.assertNotIn("host", metadata)
         self.assertNotIn("username", metadata)
         self.assertNotIn("password", metadata)
@@ -70,6 +72,26 @@ class PTZTestCase(unittest.TestCase):
             [
                 {"id": "launch", "name": "launch", "token": "1"},
                 {"id": "3", "name": "Launch Pad", "token": "3"},
+            ],
+        )
+
+    def test_normalize_presets_hides_disabled_presets(self):
+        ptz_config = {
+            "presets": [
+                {"id": "home", "name": "Home", "token": "1", "enabled": False},
+                {"id": "launch", "name": "Launch Pad", "token": "2"},
+            ]
+        }
+
+        self.assertEqual(
+            normalize_presets(ptz_config),
+            [{"id": "launch", "name": "Launch Pad", "token": "2"}],
+        )
+        self.assertEqual(
+            normalize_presets(ptz_config, include_disabled=True),
+            [
+                {"id": "home", "name": "Home", "token": "1", "enabled": False},
+                {"id": "launch", "name": "Launch Pad", "token": "2", "enabled": True},
             ],
         )
 
@@ -373,6 +395,67 @@ class PTZTestCase(unittest.TestCase):
         ptz.RelativeMove.assert_called_once_with(request)
         ptz.Stop.assert_not_called()
         mock_sleep.assert_not_called()
+
+    def test_focus_move_uses_onvif_imaging_service(self):
+        media = MagicMock()
+        profile = MagicMock(token="profile-1")
+        profile.VideoSourceConfiguration = MagicMock(SourceToken="source-1")
+        media.GetProfiles.return_value = [profile]
+        imaging = MagicMock()
+        move_request = MagicMock()
+        stop_request = MagicMock()
+        imaging.create_type.side_effect = [move_request, stop_request]
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_imaging_service.return_value = imaging
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "capabilities": {"focus": True},
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}), patch(
+            "fenetre.ptz.time.sleep"
+        ) as mock_sleep:
+            result = focus_move(
+                "cam1",
+                camera_config,
+                focus=0.75,
+                move_duration_s=0.5,
+                owner="operator",
+            )
+
+        self.assertTrue(result["ok"])
+        media.GetProfiles.assert_called_once_with()
+        imaging.create_type.assert_any_call("Move")
+        imaging.create_type.assert_any_call("Stop")
+        self.assertEqual(move_request.VideoSourceToken, "source-1")
+        self.assertEqual(move_request.Focus, {"Continuous": {"Speed": 0.75}})
+        self.assertEqual(stop_request.VideoSourceToken, "source-1")
+        imaging.Move.assert_called_once_with(move_request)
+        imaging.Stop.assert_called_once_with(stop_request)
+        mock_sleep.assert_called_once_with(0.5)
+
+    def test_focus_move_requires_enabled_capability(self):
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+            }
+        }
+
+        with self.assertRaises(PTZError):
+            focus_move("cam1", camera_config, focus=1)
 
     def test_stop_move_can_be_disabled_for_fragile_cameras(self):
         camera_config = {

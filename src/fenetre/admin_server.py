@@ -854,6 +854,7 @@ def _build_camera_config(
                 "pan": bool(capabilities.get("pan", True)),
                 "tilt": bool(capabilities.get("tilt", True)),
                 "zoom": bool(capabilities.get("zoom", True)),
+                "focus": bool(capabilities.get("focus", False)),
             }
         elif any(
             key in payload
@@ -861,12 +862,14 @@ def _build_camera_config(
                 "ptz_capability_pan",
                 "ptz_capability_tilt",
                 "ptz_capability_zoom",
+                "ptz_capability_focus",
             )
         ):
             ptz_config["capabilities"] = {
                 "pan": bool(payload.get("ptz_capability_pan", True)),
                 "tilt": bool(payload.get("ptz_capability_tilt", True)),
                 "zoom": bool(payload.get("ptz_capability_zoom", True)),
+                "focus": bool(payload.get("ptz_capability_focus", False)),
             }
         existing_tour = ptz_config.get("tour") or {}
         tour_config = dict(existing_tour) if isinstance(existing_tour, dict) else {}

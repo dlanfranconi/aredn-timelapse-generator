@@ -88,6 +88,7 @@ from fenetre.ptz import (
     PTZError,
     PTZLocked,
     discover_presets,
+    focus_move,
     goto_preset,
     normalize_presets,
     nudge_move,
@@ -1981,6 +1982,53 @@ window.location.replace({json.dumps(next_url)});
             logger.error("Unexpected PTZ move error.", exc_info=True)
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_ptz_focus_api(self):
+        try:
+            payload = self._read_json_body()
+            camera_name = (payload.get("camera") or "").strip()
+            if not camera_name:
+                self._send_json(400, {"error": "camera is required"})
+                return
+            logger.info(
+                "PTZ focus request camera=%s focus=%s",
+                camera_name,
+                payload.get("focus"),
+            )
+            camera_config = cameras_config.get(camera_name)
+            if not camera_config:
+                self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+                return
+            ptz_config = camera_config.get("ptz") or {}
+            if not (
+                ptz_config.get("allow_manual_control", False)
+                and self._user_can_control_ptz(camera_name, ptz_config, "manual")
+            ):
+                logger.warning("PTZ focus denied camera=%s", camera_name)
+                self._send_json(403, {"error": "Manual PTZ control is not allowed"})
+                return
+            speed = max(0.05, min(1.0, float(payload.get("speed") or 0.35)))
+            move_duration_ms = max(
+                50, min(2000, int(payload.get("move_duration_ms") or 250))
+            )
+            result = focus_move(
+                camera_name,
+                camera_config,
+                focus=float(payload.get("focus") or 0) * speed,
+                move_duration_s=move_duration_ms / 1000,
+                owner=self._ptz_owner(),
+                duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            self._send_json(200, result)
+        except PTZBackendUnavailable as exc:
+            self._send_json(501, {"error": str(exc)})
+        except PTZLocked as exc:
+            self._send_json(423, {"error": str(exc)})
+        except (PTZError, ValueError, json.JSONDecodeError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            logger.error("Unexpected PTZ focus error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def _handle_ptz_stop_api(self):
         try:
             payload = self._read_json_body()
@@ -2121,6 +2169,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/ptz/move":
             self._handle_ptz_move_api()
+            return
+        if parsed_url.path == "/api/ptz/focus":
+            self._handle_ptz_focus_api()
             return
         if parsed_url.path == "/api/ptz/stop":
             self._handle_ptz_stop_api()
