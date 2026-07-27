@@ -29,7 +29,7 @@ from fenetre.auth import (
 )
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.gopro import GoPro
-from fenetre.go2rtc import build_go2rtc_runtime_config
+from fenetre.go2rtc import build_go2rtc_runtime_config, go2rtc_browser_port
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.image_profiles import ImageProfileError, apply_image_profile
 from fenetre.log_sanitizer import sanitize_text_for_logs
@@ -532,6 +532,10 @@ def _go2rtc_runtime_status(config: dict) -> dict:
         ),
         "api_base": api_base,
         "base_url_configured": bool(str(go2rtc_config.get("base_url") or "").strip()),
+        "same_host_fallback_enabled": not bool(
+            str(go2rtc_config.get("base_url") or "").strip()
+        ),
+        "same_host_port": go2rtc_browser_port(global_config),
         "streams": sorted(streams.keys()),
         "stream_count": len(streams),
         "spawned_pid": go2rtc_spawned_process.pid if spawned_running else None,
@@ -550,11 +554,6 @@ def _go2rtc_runtime_status(config: dict) -> dict:
             "ptz_rtsp_url."
         )
         return status
-    if not status["base_url_configured"]:
-        status["warning"] = (
-            "global.go2rtc.base_url is empty, so browser stream links will not be "
-            "published even if the internal go2rtc API is running."
-        )
     if not api_base:
         status["api_error"] = "go2rtc API listen address is disabled."
         return status
@@ -566,6 +565,7 @@ def _go2rtc_runtime_status(config: dict) -> dict:
         status["api_reachable"] = True
     except requests.RequestException as exc:
         status["api_error"] = sanitize_text_for_logs(str(exc))
+        status["warning"] = "go2rtc API is not reachable from Fenetre."
     return status
 
 

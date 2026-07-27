@@ -99,6 +99,48 @@ function mutedGo2rtcPlayerUrl(rawUrl) {
     return rawUrl;
 }
 
+function sameHostGo2rtcBaseUrl(go2rtc) {
+    const port = Number(go2rtc && go2rtc.same_host_port ? go2rtc.same_host_port : 1984);
+    if (!Number.isFinite(port) || port <= 0) {
+        return '';
+    }
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${window.location.hostname}:${port}`;
+}
+
+function sameHostGo2rtcPlayerUrl(go2rtc, streamName) {
+    if (!streamName) {
+        return '';
+    }
+    const baseUrl = sameHostGo2rtcBaseUrl(go2rtc);
+    if (!baseUrl) {
+        return '';
+    }
+    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
+}
+
+function go2rtcPreviewPlayerUrl(go2rtc) {
+    const configuredUrl = mutedGo2rtcPlayerUrl(go2rtc.preview_url || go2rtc.player_url);
+    if (configuredUrl) {
+        return configuredUrl;
+    }
+    if (go2rtc.base_url_configured === false) {
+        return sameHostGo2rtcPlayerUrl(go2rtc, go2rtc.stream);
+    }
+    return '';
+}
+
+function go2rtcFullPlayerUrl(go2rtc) {
+    const configuredUrl = mutedGo2rtcPlayerUrl(go2rtc.full_player_url || go2rtc.player_url);
+    if (configuredUrl) {
+        return configuredUrl;
+    }
+    if (go2rtc.base_url_configured === false) {
+        return sameHostGo2rtcPlayerUrl(go2rtc, go2rtc.full_stream || go2rtc.stream);
+    }
+    return '';
+}
+
 function fitMapToMarkers() {
     setTimeout(() => {
         map.invalidateSize();
@@ -751,10 +793,10 @@ function configurePtzPresets(camera, listItem) {
     const supportsTilt = capabilities.tilt !== false;
     const supportsZoom = capabilities.zoom !== false;
     const supportsFocus = capabilities.focus === true;
-    const livePreviewUrl = go2rtc.enabled ? mutedGo2rtcPlayerUrl(go2rtc.preview_url || go2rtc.player_url) : '';
+    const livePreviewUrl = go2rtc.enabled ? go2rtcPreviewPlayerUrl(go2rtc) : '';
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
     const fullLivePlayerUrl = go2rtc.enabled
-        ? (go2rtc.full_view_url || mutedGo2rtcPlayerUrl(go2rtc.full_player_url || go2rtc.player_url))
+        ? (go2rtc.full_view_url || go2rtcFullPlayerUrl(go2rtc))
         : '';
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)

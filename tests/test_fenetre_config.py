@@ -730,6 +730,37 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
 
+    def test_cameras_metadata_publishes_same_host_go2rtc_fallback(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "",
+                    "api_listen": ":11984",
+                    "stream_name_prefix": "site_",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        go2rtc = metadata["cameras"][0]["go2rtc"]
+        self.assertTrue(go2rtc["enabled"])
+        self.assertFalse(go2rtc["base_url_configured"])
+        self.assertEqual(go2rtc["same_host_port"], 11984)
+        self.assertEqual(go2rtc["stream"], "site_North_Ridge_Camera")
+        self.assertNotIn("player_url", go2rtc)
+        encoded = yaml.dump(go2rtc)
+        self.assertNotIn("rtsp://", encoded)
+        self.assertNotIn("secret", encoded)
+
     def test_cameras_metadata_omits_disabled_camera_go2rtc(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(

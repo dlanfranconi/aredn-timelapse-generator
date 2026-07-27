@@ -598,7 +598,7 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.json["streams"], ["fenetre_cam1"])
         mock_get.assert_called_once_with("http://127.0.0.1:1984/api/streams", timeout=3)
 
-    def test_go2rtc_status_warns_when_base_url_is_empty(self):
+    def test_go2rtc_status_reports_same_host_fallback_when_base_url_is_empty(self):
         self.test_config_data = {
             "global": {
                 "go2rtc": {
@@ -618,8 +618,10 @@ class ConfigServerTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json["base_url_configured"])
+        self.assertTrue(response.json["same_host_fallback_enabled"])
+        self.assertEqual(response.json["same_host_port"], 1984)
         self.assertFalse(response.json["api_reachable"])
-        self.assertIn("base_url is empty", response.json["warning"])
+        self.assertNotIn("base_url is empty", response.json["warning"])
         self.assertEqual(response.json["api_error"], "connection refused")
 
     def test_apply_camera_image_profile_dry_run(self):

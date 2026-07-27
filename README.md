@@ -240,7 +240,7 @@ Recommended defaults:
 global:
   go2rtc:
     enabled: true
-    base_url: http://HOST:1984
+    base_url: http://HOST:1984  # optional when browsers can use the Fenetre host on port 1984
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
@@ -251,7 +251,7 @@ global:
     live_view_idle_timeout_s: 60
 ```
 
-The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted.
+The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Set `base_url` explicitly when browsers must use a different host, scheme, proxy path, or HTTPS endpoint.
 
 `rtsp_url` and `ptz_rtsp_url` have different jobs:
 
@@ -274,7 +274,7 @@ Inspect the generated config:
 docker exec -it fenetre cat /tmp/fenetre-go2rtc.yaml
 ```
 
-If `http://HOST:1984/stream.html?src=fenetre_CAMERA` works but the Fenetre page does not, check `global.go2rtc.base_url` and confirm the browser can reach that exact host and port.
+If `http://HOST:1984/stream.html?src=fenetre_CAMERA` works but the Fenetre page does not, open `/api/go2rtc/status` as an admin and confirm `runtime_enabled`, `api_reachable`, and either `base_url_configured` or `same_host_fallback_enabled` are true.
 
 ## PTZ
 

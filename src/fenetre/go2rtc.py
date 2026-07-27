@@ -37,6 +37,24 @@ def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> 
     return f"{go2rtc_stream_name(camera_name, global_config)}_full"
 
 
+def _listen_port(listen: Any, default: int = 1984) -> int:
+    listen_text = str(listen or "").strip()
+    if not listen_text:
+        return default
+    if listen_text.isdigit():
+        return int(listen_text)
+    if ":" in listen_text:
+        candidate = listen_text.rsplit(":", 1)[-1]
+        if candidate.isdigit():
+            return int(candidate)
+    return default
+
+
+def go2rtc_browser_port(global_config: Dict[str, Any]) -> int:
+    config = _go2rtc_config(global_config)
+    return _listen_port(config.get("api_listen"), 1984)
+
+
 def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(config.get("player_url_template") or _DEFAULT_PLAYER_URL_TEMPLATE)
     if template in {_LEGACY_PLAYER_URL_TEMPLATE, _OLD_PLAYER_URL_TEMPLATE}:
@@ -96,7 +114,7 @@ def build_go2rtc_metadata(
 ) -> Optional[Dict[str, Any]]:
     config = _go2rtc_config(global_config)
     base_url = str(config.get("base_url") or "").rstrip("/")
-    if not config.get("enabled") or not base_url:
+    if not config.get("enabled"):
         return None
     if camera_config.get("go2rtc_enabled") is False:
         return None
@@ -115,16 +133,25 @@ def build_go2rtc_metadata(
     full_stream_name = stream_name
     if full_source and full_source != alignment_source:
         full_stream_name = go2rtc_full_stream_name(camera_name, global_config)
-    return {
+    metadata = {
         "enabled": True,
         "stream": stream_name,
         "full_stream": full_stream_name,
         "full_view_url": f"live.html?camera={quote(camera_name, safe='')}&stream=full",
-        "player_url": _player_url(config, base_url, stream_name),
-        "full_player_url": _player_url(config, base_url, full_stream_name),
-        "preview_url": _preview_url(config, base_url, stream_name),
+        "base_url_configured": bool(base_url),
         "idle_timeout_s": int(idle_timeout_s),
     }
+    if base_url:
+        metadata.update(
+            {
+                "player_url": _player_url(config, base_url, stream_name),
+                "full_player_url": _player_url(config, base_url, full_stream_name),
+                "preview_url": _preview_url(config, base_url, stream_name),
+            }
+        )
+    else:
+        metadata["same_host_port"] = go2rtc_browser_port(global_config)
+    return metadata
 
 
 def build_go2rtc_runtime_config(

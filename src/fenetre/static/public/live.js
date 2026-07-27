@@ -45,6 +45,26 @@
         return rawUrl;
     }
 
+    function sameHostGo2rtcBaseUrl(go2rtc) {
+        const port = Number(go2rtc && go2rtc.same_host_port ? go2rtc.same_host_port : 1984);
+        if (!Number.isFinite(port) || port <= 0) {
+            return '';
+        }
+        const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+        return `${protocol}//${window.location.hostname}:${port}`;
+    }
+
+    function sameHostGo2rtcPlayerUrl(go2rtc, streamName) {
+        if (!streamName) {
+            return '';
+        }
+        const baseUrl = sameHostGo2rtcBaseUrl(go2rtc);
+        if (!baseUrl) {
+            return '';
+        }
+        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
+    }
+
     function cameraId(camera) {
         return camera.id || camera.title;
     }
@@ -112,7 +132,13 @@
         const rawPlayerUrl = streamKind === 'preview'
             ? (go2rtc.preview_url || go2rtc.player_url)
             : (go2rtc.full_player_url || go2rtc.player_url);
-        const playerUrl = mutedGo2rtcPlayerUrl(rawPlayerUrl);
+        const fallbackStream = streamKind === 'preview'
+            ? go2rtc.stream
+            : (go2rtc.full_stream || go2rtc.stream);
+        const playerUrl = mutedGo2rtcPlayerUrl(rawPlayerUrl)
+            || (go2rtc.base_url_configured === false
+                ? sameHostGo2rtcPlayerUrl(go2rtc, fallbackStream)
+                : '');
         if (!playerUrl) {
             showMessage('Live view URL is not available.');
             return;
