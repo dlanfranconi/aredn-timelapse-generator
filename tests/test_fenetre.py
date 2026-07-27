@@ -29,7 +29,7 @@ from fenetre.fenetre import (
 )
 import fenetre.fenetre as fenetre_module
 from fenetre.auth import authenticate_config_user_record, hash_password
-from fenetre.camera_utils import sanitize_url_for_logs
+from fenetre.camera_utils import sanitize_text_for_logs, sanitize_url_for_logs
 from fenetre.picamera import Picamera2Capture
 
 
@@ -809,6 +809,24 @@ class TestFenetre(unittest.TestCase):
         self.assertIn("token=REDACTED", redacted)
         self.assertNotIn("secret", redacted)
         self.assertNotIn("p%40ss", redacted)
+        self.assertNotIn("abc123", redacted)
+
+    def test_sanitize_text_for_logs_redacts_embedded_urls_and_pairs(self):
+        text = (
+            "ffmpeg -i 'rtsp://admin:secret@example.local/stream' "
+            "failed after http://camera.local/snap?user=admin&password=pw "
+            "token=abc123"
+        )
+
+        redacted = sanitize_text_for_logs(text)
+
+        self.assertIn("rtsp://REDACTED@example.local/stream", redacted)
+        self.assertIn("user=REDACTED", redacted)
+        self.assertIn("password=REDACTED", redacted)
+        self.assertIn("token=REDACTED", redacted)
+        self.assertNotIn("secret", redacted)
+        self.assertNotIn("admin@example", redacted)
+        self.assertNotIn("pw", redacted)
         self.assertNotIn("abc123", redacted)
 
     def test_picamera2_capture_applies_base_and_mode_controls(self):

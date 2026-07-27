@@ -32,6 +32,7 @@ from fenetre.gopro import GoPro
 from fenetre.go2rtc import build_go2rtc_runtime_config
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.image_profiles import ImageProfileError, apply_image_profile
+from fenetre.log_sanitizer import sanitize_text_for_logs
 from fenetre.launch_workflow import preview_launch_workflow, run_due_launch_actions
 from fenetre.ptz import discover_presets, set_lock
 from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
@@ -463,6 +464,7 @@ def _sync_go2rtc_runtime(
     result = {
         "enabled": bool(runtime_config),
         "config_path": output_path,
+        "api_base": _local_go2rtc_api_base(runtime_config or previous_runtime_config),
         "streams": sorted(streams.keys()),
         "removed_streams": removed_streams,
         "api_synced": False,
@@ -487,19 +489,84 @@ def _sync_go2rtc_runtime(
         result["api_synced"] = True
     except requests.RequestException as exc:
         if not runtime_config:
-            result["warning"] = f"go2rtc API sync failed: {exc}"
+            result["warning"] = sanitize_text_for_logs(f"go2rtc API sync failed: {exc}")
             return result
         start_warning = _start_go2rtc_if_needed(output_path)
         if start_warning:
-            result["warning"] = f"go2rtc API sync failed: {exc}; {start_warning}"
+            result["warning"] = sanitize_text_for_logs(
+                f"go2rtc API sync failed: {exc}; {start_warning}"
+            )
             return result
         try:
             _sync_go2rtc_api(api_base, streams, removed_streams)
             result["api_synced"] = True
             result["started"] = True
         except requests.RequestException as retry_exc:
-            result["warning"] = f"go2rtc API sync failed: {retry_exc}"
+            result["warning"] = sanitize_text_for_logs(
+                f"go2rtc API sync failed: {retry_exc}"
+            )
     return result
+
+
+def _go2rtc_runtime_status(config: dict) -> dict:
+    global_config = config.get("global") or {}
+    go2rtc_config = (
+        global_config.get("go2rtc") if isinstance(global_config, dict) else {}
+    ) or {}
+    if not isinstance(go2rtc_config, dict):
+        go2rtc_config = {}
+
+    runtime_config = build_go2rtc_runtime_config(config)
+    api_base = _local_go2rtc_api_base(runtime_config)
+    streams = (runtime_config or {}).get("streams") or {}
+    spawned_running = bool(
+        go2rtc_spawned_process and go2rtc_spawned_process.poll() is None
+    )
+    status = {
+        "configured_enabled": bool(go2rtc_config.get("enabled")),
+        "runtime_enabled": bool(runtime_config),
+        "autostart_enabled": _go2rtc_mode_allows_autostart(),
+        "binary_path": shutil.which("go2rtc"),
+        "config_path": os.environ.get(
+            "FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml"
+        ),
+        "api_base": api_base,
+        "base_url_configured": bool(str(go2rtc_config.get("base_url") or "").strip()),
+        "streams": sorted(streams.keys()),
+        "stream_count": len(streams),
+        "spawned_pid": go2rtc_spawned_process.pid if spawned_running else None,
+        "spawned_running": spawned_running,
+        "api_reachable": False,
+        "api_status_code": None,
+        "api_error": None,
+        "warning": None,
+    }
+    if not go2rtc_config.get("enabled"):
+        status["warning"] = "global.go2rtc.enabled is false."
+        return status
+    if not runtime_config:
+        status["warning"] = (
+            "go2rtc is enabled, but no camera has an enabled rtsp_url or "
+            "ptz_rtsp_url."
+        )
+        return status
+    if not status["base_url_configured"]:
+        status["warning"] = (
+            "global.go2rtc.base_url is empty, so browser stream links will not be "
+            "published even if the internal go2rtc API is running."
+        )
+    if not api_base:
+        status["api_error"] = "go2rtc API listen address is disabled."
+        return status
+
+    try:
+        response = requests.get(f"{api_base}/api/streams", timeout=3)
+        status["api_status_code"] = response.status_code
+        response.raise_for_status()
+        status["api_reachable"] = True
+    except requests.RequestException as exc:
+        status["api_error"] = sanitize_text_for_logs(str(exc))
+    return status
 
 
 def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
@@ -965,6 +1032,17 @@ def _format_bytes(value: int) -> str:
 @app.route("/metrics")
 def metrics():
     return Response(generate_latest(REGISTRY), mimetype="text/plain")
+
+
+@app.route("/api/go2rtc/status", methods=["GET"])
+def go2rtc_status():
+    try:
+        _, config = _load_effective_config_with_raw()
+        return jsonify(_go2rtc_runtime_status(config)), 200
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error reading go2rtc status: {str(e)}"}), 500
 
 
 @app.route("/config", methods=["GET"])

@@ -2,9 +2,11 @@ import logging
 import os
 import difflib
 import re
-from typing import Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional
 
 import yaml
+
+from fenetre.log_sanitizer import sanitize_text_for_logs
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,69 @@ class ConfigError(Exception):
     pass
 
 
+_REDACTED = "REDACTED"
+_SENSITIVE_CONFIG_KEYS = {
+    "api_key",
+    "auth",
+    "authorization",
+    "client_secret",
+    "credential",
+    "credentials",
+    "key",
+    "pass",
+    "password",
+    "password_hash",
+    "passwd",
+    "private_key",
+    "pwd",
+    "secret",
+    "session",
+    "token",
+}
+
+
+def _is_sensitive_config_key(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key).strip().lower()).strip("_")
+    return normalized in _SENSITIVE_CONFIG_KEYS or normalized.endswith(
+        ("_password", "_password_hash", "_secret", "_token", "_api_key")
+    )
+
+
+def _redacted_scalar(value: Any) -> Any:
+    if value is None or value == "":
+        return value
+    return _REDACTED
+
+
+def _redact_config_for_logs(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                _redacted_scalar(item)
+                if _is_sensitive_config_key(key)
+                else _redact_config_for_logs(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_config_for_logs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_config_for_logs(item) for item in value)
+    if isinstance(value, str):
+        return sanitize_text_for_logs(value)
+    return value
+
+
 def _log_config_diff(section_name: str, before: Dict, after: Dict):
     """Logs the difference between two configuration dictionaries using YAML."""
-    before_str = yaml.dump(before, sort_keys=True, default_flow_style=False, indent=2)
-    after_str = yaml.dump(after, sort_keys=True, default_flow_style=False, indent=2)
+    safe_before = _redact_config_for_logs(before)
+    safe_after = _redact_config_for_logs(after)
+    before_str = yaml.dump(
+        safe_before, sort_keys=True, default_flow_style=False, indent=2
+    )
+    after_str = yaml.dump(
+        safe_after, sort_keys=True, default_flow_style=False, indent=2
+    )
 
     if before_str != after_str:
         diff = difflib.unified_diff(

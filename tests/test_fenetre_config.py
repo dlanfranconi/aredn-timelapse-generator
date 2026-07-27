@@ -99,6 +99,65 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(cameras_conf["cam1"]["url"], "http://cam1")
         self.assertTrue(admin_server_conf["enabled"])
 
+    def test_config_diff_logs_redact_camera_credentials(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "mqtt": {
+                    "enabled": False,
+                    "username": "mqtt-user",
+                    "password": "mqtt-secret",
+                },
+            },
+            "cameras": {
+                "cam1": {
+                    "url": (
+                        "http://camera.local/cgi-bin/api.cgi?"
+                        "cmd=Snap&user=admin&password=snap-secret&token=url-token"
+                    ),
+                    "local_command": (
+                        "ffmpeg -i 'rtsp://admin:rtsp-secret@camera.local/stream' "
+                        "-frames:v 1 -f image2pipe -"
+                    ),
+                    "http_auth": {
+                        "type": "basic",
+                        "username": "admin",
+                        "password": "auth-secret",
+                    },
+                    "ptz": {
+                        "enabled": True,
+                        "host": "camera.local",
+                        "username": "admin",
+                        "password": "ptz-secret",
+                    },
+                    "rtsp_url": "rtsp://admin:main-secret@camera.local/main",
+                    "ptz_rtsp_url": "rtsp://admin:sub-secret@camera.local/sub",
+                }
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        with self.assertLogs("fenetre.config", level="WARNING") as logs:
+            config_load(config_path)
+        logged = "\n".join(logs.output)
+
+        for secret in (
+            "mqtt-secret",
+            "snap-secret",
+            "url-token",
+            "rtsp-secret",
+            "auth-secret",
+            "ptz-secret",
+            "main-secret",
+            "sub-secret",
+        ):
+            self.assertNotIn(secret, logged)
+        self.assertIn("password=REDACTED", logged)
+        self.assertIn("token=REDACTED", logged)
+        self.assertIn("rtsp://REDACTED@camera.local", logged)
+        self.assertIn("password: REDACTED", logged)
+
     def test_config_load_public_site_flag(self):
         test_data = {
             "global": {

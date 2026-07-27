@@ -1,47 +1,13 @@
 import logging
 from typing import Dict, Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from PIL import Image, ImageStat
+from fenetre.log_sanitizer import sanitize_text_for_logs, sanitize_url_for_logs
+
 from .postprocess import get_exif_dict
 
 logger = logging.getLogger(__name__)
-
-SENSITIVE_URL_QUERY_KEYS = {
-    "auth",
-    "key",
-    "pass",
-    "password",
-    "pwd",
-    "session",
-    "token",
-    "user",
-    "username",
-}
-
-
-def sanitize_url_for_logs(url: str) -> str:
-    """Redact credentials and tokens from camera URLs before logging."""
-    try:
-        parts = urlsplit(str(url))
-        netloc = parts.netloc
-        if "@" in netloc:
-            netloc = f"REDACTED@{netloc.rsplit('@', 1)[1]}"
-
-        query = urlencode(
-            [
-                (
-                    key,
-                    "REDACTED" if key.lower() in SENSITIVE_URL_QUERY_KEYS else value,
-                )
-                for key, value in parse_qsl(parts.query, keep_blank_values=True)
-            ],
-            doseq=True,
-        )
-        return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
-    except Exception:
-        return "<redacted-url>"
 
 
 def format_shutter_speed(exposure_time: Optional[float]) -> Optional[str]:

@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import requests
 import yaml
 
 from fenetre.auth import (
@@ -534,6 +535,81 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(
             mock_delete.call_args.kwargs["params"], {"src": "fenetre_cam1"}
         )
+
+    @patch("fenetre.admin_server._start_go2rtc_if_needed")
+    @patch("fenetre.admin_server.requests.put")
+    def test_sync_go2rtc_warning_redacts_stream_credentials(self, mock_put, mock_start):
+        mock_put.side_effect = requests.RequestException(
+            "PUT failed for http://127.0.0.1:1984/api/streams?"
+            "src=rtsp://admin:secret@camera.local/11&password=hidden"
+        )
+        mock_start.return_value = "go2rtc binary was not found in PATH."
+        config = {
+            "global": {"go2rtc": {"enabled": True, "api_listen": ":1984"}},
+            "cameras": {"cam1": {"rtsp_url": "rtsp://admin:secret@camera.local/11"}},
+        }
+
+        result = _sync_go2rtc_runtime(config)
+
+        self.assertFalse(result["api_synced"])
+        self.assertIn("go2rtc API sync failed", result["warning"])
+        self.assertIn("src=REDACTED", result["warning"])
+        self.assertIn("password=REDACTED", result["warning"])
+        self.assertNotIn("secret", result["warning"])
+        self.assertNotIn("admin%3Asecret", result["warning"])
+        self.assertNotIn("hidden", result["warning"])
+
+    @patch("fenetre.admin_server.requests.get")
+    def test_go2rtc_status_reports_internal_api_health(self, mock_get):
+        response_mock = mock_get.return_value
+        response_mock.status_code = 200
+        response_mock.raise_for_status.return_value = None
+        self.test_config_data = {
+            "global": {
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://camera-host:1984",
+                    "api_listen": ":1984",
+                }
+            },
+            "cameras": {"cam1": {"rtsp_url": "rtsp://admin:secret@camera.local/11"}},
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.get("/api/go2rtc/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["configured_enabled"])
+        self.assertTrue(response.json["runtime_enabled"])
+        self.assertTrue(response.json["api_reachable"])
+        self.assertEqual(response.json["api_base"], "http://127.0.0.1:1984")
+        self.assertEqual(response.json["streams"], ["fenetre_cam1"])
+        mock_get.assert_called_once_with("http://127.0.0.1:1984/api/streams", timeout=3)
+
+    def test_go2rtc_status_warns_when_base_url_is_empty(self):
+        self.test_config_data = {
+            "global": {
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "",
+                    "api_listen": ":1984",
+                }
+            },
+            "cameras": {"cam1": {"rtsp_url": "rtsp://admin:secret@camera.local/11"}},
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        with patch("fenetre.admin_server.requests.get") as mock_get:
+            mock_get.side_effect = requests.RequestException("connection refused")
+            response = self.app.get("/api/go2rtc/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json["base_url_configured"])
+        self.assertFalse(response.json["api_reachable"])
+        self.assertIn("base_url is empty", response.json["warning"])
+        self.assertEqual(response.json["api_error"], "connection refused")
 
     def test_apply_camera_image_profile_dry_run(self):
         self.test_config_data["cameras"]["cam1"]["image_profiles"] = {
