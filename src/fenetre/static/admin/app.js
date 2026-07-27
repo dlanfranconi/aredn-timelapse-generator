@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sitePublicInput = document.getElementById('sitePublicInput');
     const saveSiteNameBtn = document.getElementById('saveSiteNameBtn');
     const newCameraName = document.getElementById('newCameraName');
+    const newCameraDisplayName = document.getElementById('newCameraDisplayName');
     const newCameraDescription = document.getElementById('newCameraDescription');
     const newCameraVendor = document.getElementById('newCameraVendor');
     const newCameraSnapshotTemplate = document.getElementById('newCameraSnapshotTemplate');
@@ -160,6 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadNewCameraPtzPresetsBtn = document.getElementById('loadNewCameraPtzPresetsBtn');
     const testNewCameraBtn = document.getElementById('testNewCameraBtn');
     const confirmNewCameraBtn = document.getElementById('confirmNewCameraBtn');
+    const newCameraModalStatus = document.getElementById('newCameraModalStatus');
     const newCameraTestResult = document.getElementById('newCameraTestResult');
     const configFormContainer = document.getElementById('configFormContainer');
     const statusMessage = document.getElementById('statusMessage');
@@ -333,6 +335,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function hideModal(modal) {
         modal.hidden = true;
+    }
+
+    function setCameraModalStatus(message = '', type = 'info') {
+        if (!newCameraModalStatus) {
+            return;
+        }
+        newCameraModalStatus.textContent = message;
+        newCameraModalStatus.className = message ? `modal-status ${type}` : 'modal-status';
     }
 
     function escapeHtml(value) {
@@ -1074,9 +1084,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         names.forEach(cameraName => {
+            const camera = cameras[cameraName] || {};
+            const displayName = camera.display_name || cameraName;
             const option = document.createElement('option');
             option.value = cameraName;
-            option.textContent = cameraName;
+            option.textContent = displayName === cameraName ? cameraName : `${displayName} (${cameraName})`;
             editCameraSelect.appendChild(option);
         });
         editCameraSelect.value = names.includes(previousValue) ? previousValue : names[0];
@@ -1208,7 +1220,9 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmNewCameraBtn.textContent = 'Add Camera to Config';
         newCameraName.disabled = false;
         setInputValue('newCameraName', '');
+        setInputValue('newCameraDisplayName', '');
         setInputValue('newCameraDescription', '');
+        setCameraModalStatus('');
         setSelectValue('newCameraVendor', 'generic');
         setSelectValue('newCameraCaptureSource', 'snapshot');
         setInputValue('newCameraUrl', '');
@@ -1303,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', () => {
         newCameraName.disabled = true;
 
         setInputValue('newCameraName', cameraName);
+        setInputValue('newCameraDisplayName', camera.display_name || cameraName);
         setInputValue('newCameraDescription', camera.description || '');
         setSelectValue('newCameraCaptureSource', camera.local_command ? 'rtsp' : 'snapshot');
         setInputValue('newCameraUrl', camera.url || '');
@@ -1751,6 +1766,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const captureSource = newCameraCaptureSource.value || 'snapshot';
         const payload = {
             name: newCameraName.value.trim(),
+            display_name: newCameraDisplayName.value.trim() || newCameraName.value.trim(),
             description: newCameraDescription.value.trim(),
             capture_source: captureSource,
             url: captureSource === 'snapshot' ? newCameraUrl.value.trim() : '',
@@ -1843,7 +1859,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cameraTestKey(payload) {
         return [
-            payload.name,
             payload.capture_source,
             payload.url,
             payload.snapshot_username,
@@ -1960,10 +1975,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     || payload.capture_source !== (editingOriginalCamera.local_command ? 'rtsp' : 'snapshot')
                 );
             if (!newCameraLastTest || newCameraLastTest.key !== cameraTestKey(payload)) {
-                throw new Error('Test the current camera ID and capture source before saving it.');
+                throw new Error('Test the current capture source before saving it.');
             }
             const isEdit = cameraFormMode === 'edit' && editingCameraName;
-            setStatus(`${isEdit ? 'Updating' : 'Adding'} camera '${payload.name}'...`, 'info');
+            const actionLabel = `${isEdit ? 'Updating' : 'Adding'} camera '${payload.display_name || payload.name}'...`;
+            setCameraModalStatus(actionLabel, 'info');
+            setStatus(actionLabel, 'info');
             payload.require_test = !isEdit || captureChanged;
             const response = await fetch(isEdit ? `/api/camera/${encodeURIComponent(editingCameraName)}` : '/api/camera/add', {
                 method: isEdit ? 'PUT' : 'POST',
@@ -1986,10 +2003,25 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             await fetchAndDisplayConfig();
             await loadStorageSummary();
-            hideModal(addCameraModal);
-            confirmNewCameraBtn.disabled = true;
+            const savedName = result.camera_name || payload.name;
+            if (!isEdit) {
+                cameraFormMode = 'edit';
+                editingCameraName = savedName;
+                newCameraName.disabled = true;
+                cameraModalTitle.textContent = `Edit ${savedName}`;
+                confirmNewCameraBtn.textContent = 'Save Camera Changes';
+            } else {
+                editingCameraName = savedName;
+            }
+            editingOriginalCamera = ((loadedConfigData && loadedConfigData.cameras) || {})[savedName] || editingOriginalCamera;
+            setCameraModalStatus(
+                (result.message || `Camera '${payload.display_name || savedName}' saved.`) + configWriteDetails(result),
+                'success'
+            );
+            confirmNewCameraBtn.disabled = false;
         } catch (error) {
-            setStatus(`Error adding camera: ${error.message}`, 'error');
+            setCameraModalStatus(`Camera save failed: ${error.message}`, 'error');
+            setStatus(`Error saving camera: ${error.message}`, 'error');
         }
     }
 

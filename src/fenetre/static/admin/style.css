@@ -556,6 +556,33 @@ h1 {
     margin-bottom: 0;
 }
 
+.modal-status {
+    border-radius: 4px;
+    display: none;
+    font-size: 0.95rem;
+    line-height: 1.35;
+    margin-top: 12px;
+    padding: 10px 12px;
+}
+
+.modal-status.info {
+    background: #eef5ff;
+    color: #174a7c;
+    display: block;
+}
+
+.modal-status.success {
+    background: #e8f7ed;
+    color: #14652f;
+    display: block;
+}
+
+.modal-status.error {
+    background: #fdecec;
+    color: #8a1f1f;
+    display: block;
+}
+
 .user-manager {
     display: grid;
     grid-template-columns: minmax(180px, 280px) minmax(320px, 1fr);

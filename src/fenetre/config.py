@@ -1153,6 +1153,10 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             cam_out["description"] = _str(
                 cam.get("description"), f"cameras.{name}.description", errors
             )
+        if cam.get("display_name") is not None:
+            cam_out["display_name"] = _str(
+                cam.get("display_name"), f"cameras.{name}.display_name", errors
+            )
         if cam.get("disabled") is not None:
             cam_out["disabled"] = _bool(
                 cam.get("disabled"), f"cameras.{name}.disabled", errors

@@ -454,6 +454,7 @@ class FenetreConfigTestCase(unittest.TestCase):
             {
                 "public-cam": {
                     "url": "http://public",
+                    "display_name": "Public Cam",
                     "description": "Ridgeline view",
                     "public": True,
                     "ptz": {
@@ -481,7 +482,8 @@ class FenetreConfigTestCase(unittest.TestCase):
             json_path,
         )
 
-        self.assertEqual([cam["title"] for cam in metadata["cameras"]], ["public-cam"])
+        self.assertEqual([cam["id"] for cam in metadata["cameras"]], ["public-cam"])
+        self.assertEqual([cam["title"] for cam in metadata["cameras"]], ["Public Cam"])
         public_cam = metadata["cameras"][0]
         self.assertEqual(public_cam["description"], "Ridgeline view")
         self.assertTrue(public_cam["public"])

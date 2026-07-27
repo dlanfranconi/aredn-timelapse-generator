@@ -45,6 +45,10 @@
         return rawUrl;
     }
 
+    function cameraId(camera) {
+        return camera.id || camera.title;
+    }
+
     async function heartbeat(active = true) {
         const payload = {
             camera: cameraName,
@@ -99,14 +103,14 @@
         }
         const metadata = await response.json();
         const cameras = Array.isArray(metadata.cameras) ? metadata.cameras : [];
-        const camera = cameras.find(item => item.title === cameraName);
+        const camera = cameras.find(item => cameraId(item) === cameraName);
         if (!camera || !camera.go2rtc || !camera.go2rtc.enabled) {
             showMessage('Live view is not configured for this camera.');
             return;
         }
         const go2rtc = camera.go2rtc;
         const rawPlayerUrl = streamKind === 'preview'
-            ? (go2rtc.player_url || go2rtc.preview_url)
+            ? (go2rtc.preview_url || go2rtc.player_url)
             : (go2rtc.full_player_url || go2rtc.player_url);
         const playerUrl = mutedGo2rtcPlayerUrl(rawPlayerUrl);
         if (!playerUrl) {

@@ -462,7 +462,15 @@ function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
 
 function createPopupContent(camera) {
     const description = camera.description ? `<br><span>${escapeHtml(camera.description)}</span>` : '';
-    return `<b>${escapeHtml(camera.title)}</b>${description}`;
+    return `<b>${escapeHtml(cameraDisplayName(camera))}</b>${description}`;
+}
+
+function cameraId(camera) {
+    return camera.id || camera.title;
+}
+
+function cameraDisplayName(camera) {
+    return camera.title || camera.id || '';
 }
 
 function updateCameraMap(cameras) {
@@ -477,7 +485,7 @@ function updateCameraMap(cameras) {
             createPopupContent(camera)
         );
         if (layer) {
-            cameraMarkers[camera.title] = layer;
+            cameraMarkers[cameraId(camera)] = layer;
         }
     });
     if (mapVisible) {
@@ -554,7 +562,9 @@ function applyTimelapseLink(link, timelapse, title) {
 
 function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
     const frequentTimelapseExtension = cameraData.global.frequent_timelapse_file_extension || 'mp4';
-    const photoDir = `/photos/${camera.title}`;
+    const id = cameraId(camera);
+    const displayName = cameraDisplayName(camera);
+    const photoDir = `/photos/${id}`;
     const startOfDay = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
     const minutesElapsed = (new Date() - startOfDay) / 60000;
     const cacheBuster = Math.floor(minutesElapsed / 20);
@@ -563,7 +573,7 @@ function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
     if (frequentTimelapseExtension === 'm3u8') {
         link.href = buildTimelapsePlayerUrl(
             url,
-            `${camera.title} ${dateString} Frequent Timelapse`
+            `${displayName} ${dateString} Frequent Timelapse`
         );
     } else {
         link.href = url;
@@ -602,26 +612,30 @@ function populateTimelapseArchive(select, timelapses, todayStr) {
 }
 
 async function updateTimelapseArchiveSelect(camera, select, todayStr) {
+    const id = cameraId(camera);
     try {
-        const timelapseData = await fetchCameraTimelapses(camera.title);
+        const timelapseData = await fetchCameraTimelapses(id);
         const timelapses = timelapseData.timelapses || [];
         populateTimelapseArchive(select, timelapses, todayStr);
     } catch (error) {
         select.style.display = 'none';
-        console.error(`Failed to load timelapse archive for ${camera.title}:`, error);
+        console.error(`Failed to load timelapse archive for ${id}:`, error);
     }
 }
 
 function createCameraListItem(camera) {
+    const id = cameraId(camera);
+    const displayName = cameraDisplayName(camera);
+    const escapedDisplayName = escapeHtml(displayName);
     const listItem = document.createElement('li');
     listItem.className = 'camera-item';
-    listItem.dataset.title = camera.title;
+    listItem.dataset.cameraId = id;
 
     listItem.innerHTML = `
         <div class="camera-header">
-            <img src="" alt="${camera.title} thumbnail">
+            <img src="" alt="${escapedDisplayName} thumbnail">
             <div class="camera-info">
-                <div class="camera-name">${camera.title}</div>
+                <div class="camera-name">${escapedDisplayName}</div>
                 <div class="camera-description"></div>
                 <div class="last-picture-time">Loading...</div>
                 <div class="camera-metadata"></div>
@@ -630,7 +644,7 @@ function createCameraListItem(camera) {
         </div>
         <div class="camera-details">
             <a class="fullscreen-image-link" href="#" target="_blank">
-                <img src="" alt="Full image for ${camera.title}">
+                <img src="" alt="Full image for ${escapedDisplayName}">
             </a>
             <a class="filename" href="#" download></a>
             <div class="links">
@@ -684,7 +698,7 @@ function createCameraListItem(camera) {
         const details = listItem.querySelector('.camera-details');
         details.classList.toggle('active');
         if (mapVisible) {
-            focusCameraLayer(cameraMarkers[camera.title]);
+            focusCameraLayer(cameraMarkers[id]);
         }
     });
 
@@ -692,6 +706,7 @@ function createCameraListItem(camera) {
 }
 
 function configurePtzPresets(camera, listItem) {
+    const id = cameraId(camera);
     const ptz = camera.ptz || {};
     const presets = Array.isArray(ptz.presets) ? ptz.presets : [];
     const cachedPresets = Array.isArray(listItem._ptzDiscoveredPresets)
@@ -714,7 +729,7 @@ function configurePtzPresets(camera, listItem) {
     const userAccess = authUser && (authUser.ptz_access || 'presets');
     const userCameras = authUser && Array.isArray(authUser.ptz_cameras) ? authUser.ptz_cameras : [];
     const userAllowedCamera = authUser && (
-        ['superadmin', 'superuser'].includes(authUser.role) || userCameras.includes(camera.title)
+        ['superadmin', 'superuser'].includes(authUser.role) || userCameras.includes(id)
     );
     const go2rtc = camera.go2rtc || {};
     const capabilities = ptz.capabilities || {};
@@ -741,6 +756,7 @@ function configurePtzPresets(camera, listItem) {
         && userAllowedCamera
         && ['manual', 'admin'].includes(userAccess);
     const canUseTour = canUseManual && ptz.tour && ptz.tour.enabled;
+    const canUseLivePreview = (canUseManual || canUsePresets) && Boolean(livePreviewUrl);
     if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
         if (liveIdleTimer) {
@@ -750,6 +766,7 @@ function configurePtzPresets(camera, listItem) {
         liveImage.removeAttribute('src');
         liveFrame.src = 'about:blank';
         liveFrame.hidden = true;
+        liveFrame.classList.remove('loaded');
         livePreview.classList.remove('loaded');
         livePreview.hidden = false;
         return;
@@ -781,8 +798,8 @@ function configurePtzPresets(camera, listItem) {
     manual.querySelectorAll('[data-stop]').forEach(manualButton => {
         manualButton.hidden = ptz.stop_disabled === true;
     });
-    liveView.hidden = !(canUseManual && livePreviewUrl);
-    if (canUseManual && livePreviewUrl) {
+    liveView.hidden = !canUseLivePreview;
+    if (canUseLivePreview) {
         liveLink.href = fullLivePlayerUrl;
     } else {
         if (liveIdleTimer) {
@@ -792,6 +809,7 @@ function configurePtzPresets(camera, listItem) {
         liveImage.removeAttribute('src');
         liveFrame.src = 'about:blank';
         liveFrame.hidden = true;
+        liveFrame.classList.remove('loaded');
         livePreview.classList.remove('loaded');
         livePreview.hidden = false;
     }
@@ -799,6 +817,7 @@ function configurePtzPresets(camera, listItem) {
         liveImage.removeAttribute('src');
         liveFrame.src = 'about:blank';
         liveFrame.hidden = true;
+        liveFrame.classList.remove('loaded');
         livePreview.hidden = false;
         livePreview.classList.remove('loaded');
         livePlaceholder.textContent = 'Tap to start alignment view';
@@ -817,19 +836,19 @@ function configurePtzPresets(camera, listItem) {
         }
     };
     const loadLiveView = () => {
-        if (canUseManual && livePreviewUrl && previewUsesImage && liveImage.src !== livePreviewUrl) {
+        if (canUseLivePreview && previewUsesImage && liveImage.src !== livePreviewUrl) {
             livePlaceholder.textContent = 'Loading alignment view...';
             liveImage.src = livePreviewUrl;
             status.textContent = 'Alignment view loaded';
         }
-        if (canUseManual && livePreviewUrl && !previewUsesImage && liveFrame.src !== livePreviewUrl) {
+        if (canUseLivePreview && !previewUsesImage && liveFrame.src !== livePreviewUrl) {
             livePreview.hidden = true;
             liveFrame.hidden = false;
             liveFrame.src = livePreviewUrl;
             liveFrame.classList.add('loaded');
             status.textContent = 'Alignment view loaded';
         }
-        if (canUseManual && livePreviewUrl) {
+        if (canUseLivePreview) {
             scheduleLiveViewUnload();
         }
     };
@@ -853,7 +872,7 @@ function configurePtzPresets(camera, listItem) {
         select.innerHTML = '<option value="">Loading presets...</option>';
         select.disabled = true;
         button.disabled = true;
-        fetch(`/api/ptz/presets?camera=${encodeURIComponent(camera.title)}`, {
+        fetch(`/api/ptz/presets?camera=${encodeURIComponent(id)}`, {
             headers: authHeaders()
         })
             .then(async response => {
@@ -887,7 +906,7 @@ function configurePtzPresets(camera, listItem) {
             const response = await fetch('/api/ptz/preset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                body: JSON.stringify({ camera: camera.title, preset: select.value })
+                body: JSON.stringify({ camera: id, preset: select.value })
             });
             const result = await response.json();
             if (!response.ok) {
@@ -913,7 +932,7 @@ function configurePtzPresets(camera, listItem) {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
                     body: JSON.stringify({
-                        camera: camera.title,
+                        camera: id,
                         pan: Number(manualButton.dataset.pan || 0),
                         tilt: Number(manualButton.dataset.tilt || 0),
                         zoom: Number(manualButton.dataset.zoom || 0),
@@ -942,7 +961,7 @@ function configurePtzPresets(camera, listItem) {
                 const response = await fetch('/api/ptz/tour', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                    body: JSON.stringify({ camera: camera.title, action })
+                    body: JSON.stringify({ camera: id, action })
                 });
                 const result = await response.json();
                 if (!response.ok) {
@@ -963,7 +982,10 @@ function configurePtzPresets(camera, listItem) {
 }
 
 function updateCamera(camera, cameraData) {
-    let listItem = document.querySelector(`li[data-title="${camera.title}"]`);
+    const id = cameraId(camera);
+    const displayName = cameraDisplayName(camera);
+    let listItem = Array.from(cameraListElement.querySelectorAll('li[data-camera-id]'))
+        .find(item => item.dataset.cameraId === id);
 
     if (!listItem) {
         listItem = createCameraListItem(camera);
@@ -971,6 +993,7 @@ function updateCamera(camera, cameraData) {
     }
 
     const thumbImg = listItem.querySelector('.camera-header img');
+    const cameraNameElement = listItem.querySelector('.camera-name');
     const cameraDescription = listItem.querySelector('.camera-description');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
     const cameraMetadata = listItem.querySelector('.camera-metadata');
@@ -985,8 +1008,12 @@ function updateCamera(camera, cameraData) {
     const linkHistory = listItem.querySelector('.link-history');
     const today = new Date();
     const todayStr = formatDate(today);
-    const photo_dir = `/photos/${camera.title}`;
+    const photo_dir = `/photos/${id}`;
     const timelapseEnabled = camera.timelapse_enabled !== false;
+
+    cameraNameElement.textContent = displayName;
+    thumbImg.alt = `${displayName} thumbnail`;
+    detailsImg.alt = `Full image for ${displayName}`;
 
     if (camera.description) {
         cameraDescription.textContent = camera.description;
@@ -1001,7 +1028,7 @@ function updateCamera(camera, cameraData) {
         if (!selectedOption || !selectedOption.value) {
             return;
         }
-        const title = `${camera.title} ${selectedOption.dataset.date} Timelapse`;
+        const title = `${displayName} ${selectedOption.dataset.date} Timelapse`;
         const destination = selectedOption.dataset.format === 'm3u8'
             ? buildTimelapsePlayerUrl(selectedOption.value, title)
             : selectedOption.value;
@@ -1046,7 +1073,7 @@ function updateCamera(camera, cameraData) {
                 cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
             }
 
-            const fullscreenUrl = `fullscreen.html?camera=${encodeURIComponent(camera.title)}`;
+            const fullscreenUrl = camera.fullscreen_url || `fullscreen.html?camera=${encodeURIComponent(id)}`;
             linkFullscreen.href = fullscreenUrl;
             fullscreenImageLink.href = fullscreenUrl;
             linkToday.href = `${photo_dir}/${todayStr}/`;
@@ -1055,7 +1082,7 @@ function updateCamera(camera, cameraData) {
         .catch(error => {
             lastPictureTime.textContent = 'Error loading metadata';
             status.className = 'status offline';
-            console.error(`Failed to load metadata for ${camera.title}:`, error);
+            console.error(`Failed to load metadata for ${id}:`, error);
         });
 }
 
@@ -1090,9 +1117,9 @@ function updateAllCameras() {
             updateHeaderLinks(uiConfig);
 
             const cameras = data.cameras || [];
-            const visibleCameraNames = new Set(cameras.map(camera => camera.title));
-            cameraListElement.querySelectorAll('li[data-title]').forEach(item => {
-                if (!visibleCameraNames.has(item.dataset.title)) {
+            const visibleCameraIds = new Set(cameras.map(camera => cameraId(camera)));
+            cameraListElement.querySelectorAll('li[data-camera-id]').forEach(item => {
+                if (!visibleCameraIds.has(item.dataset.cameraId)) {
                     item.remove();
                 }
             });

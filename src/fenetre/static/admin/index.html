@@ -137,6 +137,9 @@
                 <label for="newCameraName">Camera ID</label>
                 <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
 
+                <label for="newCameraDisplayName">Display name</label>
+                <input id="newCameraDisplayName" type="text" autocomplete="off" placeholder="North Ridge">
+
                 <label for="newCameraDescription">Description</label>
                 <textarea id="newCameraDescription" rows="2" placeholder="Optional text shown under the camera name"></textarea>
 
@@ -335,6 +338,7 @@
                 <button id="testNewCameraBtn" type="button">Test Capture and Streams</button>
                 <button id="confirmNewCameraBtn" type="button" disabled>Add Camera to Config</button>
             </div>
+            <div id="newCameraModalStatus" class="modal-status" aria-live="polite"></div>
             <div id="newCameraTestResult" class="camera-test-result"></div>
         </section>
             </div>

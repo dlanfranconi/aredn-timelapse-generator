@@ -121,13 +121,15 @@
                 .then(data => {
                     const cameras = data.cameras;
                     const globalSettings = data.global;
-                    const camera = cameras.find(c => c.title === cameraName);
+                    const camera = cameras.find(c => (c.id || c.title) === cameraName);
                     if (!camera) {
                         titleElement.textContent = `Camera "${cameraName}" not found.`;
                         return;
                     }
 
-                    titleElement.textContent = camera.title;
+                    const cameraId = camera.id || camera.title;
+                    const displayName = camera.title || cameraId;
+                    titleElement.textContent = displayName;
 
                     fetch(camera.dynamic_metadata)
                         .then(response => response.json())
@@ -140,11 +142,11 @@
                             const filename = lastPictureUrl.substring(lastPictureUrl.lastIndexOf('/') + 1);
 
                             imageElement.src = fullImageUrl;
-                            imageElement.alt = `Full size image for ${camera.title}`;
+                            imageElement.alt = `Full size image for ${displayName}`;
                             filenameElement.textContent = filename;
 
                             const imageLink = document.getElementById('image-link');
-                            imageLink.href = `fullscreen.html?camera=${encodeURIComponent(camera.title)}`;
+                            imageLink.href = camera.fullscreen_url || `fullscreen.html?camera=${encodeURIComponent(cameraId)}`;
 
                             const today = new Date();
                             const yesterday = new Date(today);
@@ -153,13 +155,13 @@
                             const yesterdayStr = formatDate(yesterday);
                             const timelapseExtension = globalSettings.timelapse_file_extension || 'webm';
 
-                            const photo_dir = `photos/${camera.title}`;
+                            const photo_dir = `photos/${cameraId}`;
                             linkToday.href = `${photo_dir}/${todayStr}/`;
                             linkToday.textContent = `Today's Pictures (${todayStr})`;
                             linkTimelapse.href = `${photo_dir}/${yesterdayStr}/${yesterdayStr}.${globalSettings.timelapse_file_extension}`;
                             linkTimelapse.textContent = `Yesterday's Timelapse (${yesterdayStr})`;
                             linkHistory.href = `${photo_dir}/daylight.html`;
-                            linkHistory.textContent = `All Time History for ${camera.title}`;
+                            linkHistory.textContent = `All Time History for ${displayName}`;
                         });
                 });
         }

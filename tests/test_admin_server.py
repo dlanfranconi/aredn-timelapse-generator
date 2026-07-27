@@ -135,6 +135,7 @@ class ConfigServerTestCase(unittest.TestCase):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
         payload = {
             "name": "ridge-cam",
+            "display_name": "Ridge Cam",
             "description": "Ridge view across the valley",
             "url": "http://camera/snapshot.jpg",
             "timeout_s": 12,
@@ -195,6 +196,7 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         camera = updated_data_yaml["cameras"]["ridge-cam"]
         self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
+        self.assertEqual(camera["display_name"], "Ridge Cam")
         self.assertEqual(camera["description"], "Ridge view across the valley")
         self.assertFalse(camera["public"])
         self.assertEqual(camera["visibility"], "authenticated")
@@ -659,6 +661,7 @@ class ConfigServerTestCase(unittest.TestCase):
             data=json.dumps(
                 {
                     "name": "cam1",
+                    "display_name": "Camera One",
                     "description": "",
                     "url": "http://new-camera/snapshot.jpg",
                     "timeout_s": 20,
@@ -683,6 +686,7 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         camera = updated_data_yaml["cameras"]["cam1"]
         self.assertEqual(camera["url"], "http://new-camera/snapshot.jpg")
+        self.assertEqual(camera["display_name"], "Camera One")
         self.assertNotIn("description", camera)
         self.assertEqual(camera["custom_key"], "keep-me")
         self.assertEqual(camera["ptz"]["password"], "existing-secret")

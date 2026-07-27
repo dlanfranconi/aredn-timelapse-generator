@@ -596,6 +596,7 @@ GUIDED_CAMERA_KEYS = {
     "cache_bust",
     "gather_metrics",
     "mozjpeg_optimize",
+    "display_name",
     "description",
     "disabled",
     "public",
@@ -723,6 +724,9 @@ def _build_camera_config(
             camera_local_command({"local_command": command, "rtsp_url": rtsp_url})
             or command
         )
+    display_name = (payload.get("display_name") or "").strip()
+    if display_name:
+        camera["display_name"] = display_name
     description = (payload.get("description") or "").strip()
     if description:
         camera["description"] = description

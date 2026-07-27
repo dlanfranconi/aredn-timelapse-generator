@@ -106,10 +106,11 @@ def build_cameras_metadata(
     if include_removed:
         old_camera_list = _load_existing_cameras(json_filepath)
         for camera_metadata in old_camera_list:
-            if camera_metadata.get("title") not in cameras_configs:
+            camera_key = camera_metadata.get("id") or camera_metadata.get("title")
+            if camera_key not in cameras_configs:
                 logger.warning(
                     "Camera %s is not configured anymore. Delete it from %s manually if you want to.",
-                    camera_metadata.get("title"),
+                    camera_key,
                     json_filepath,
                 )
                 updated_cameras_metadata["cameras"].append(camera_metadata)
@@ -120,9 +121,11 @@ def build_cameras_metadata(
             continue
         if visibility == "authenticated" and not include_private:
             continue
+        display_name = str(cam_conf.get("display_name") or cam)
 
         metadata = {
-            "title": cam,
+            "id": cam,
+            "title": display_name,
             "url": f"list.html?camera={cam}",
             "fullscreen_url": f"fullscreen.html?camera={cam}",
             "timelapse_enabled": _camera_timelapse_enabled(cam_conf),
