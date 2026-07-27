@@ -665,6 +665,113 @@ async function updateTimelapseArchiveSelect(camera, select, todayStr) {
     }
 }
 
+function applyCameraMetadata(camera, listItem, metadata) {
+    const id = cameraId(camera);
+    const thumbImg = listItem.querySelector('.camera-header img');
+    const lastPictureTime = listItem.querySelector('.last-picture-time');
+    const cameraMetadata = listItem.querySelector('.camera-metadata');
+    const status = listItem.querySelector('.status');
+    const detailsImg = listItem.querySelector('.camera-details img');
+    const fullscreenImageLink = listItem.querySelector('.fullscreen-image-link');
+    const filenameLink = listItem.querySelector('.camera-details .filename');
+    const linkFullscreen = listItem.querySelector('.link-fullscreen');
+    const linkToday = listItem.querySelector('.link-today');
+    const linkHistory = listItem.querySelector('.link-history');
+    const todayStr = formatDate(new Date());
+    const photoDir = `/photos/${id}`;
+    const lastPictureUrl = metadata.last_picture_url;
+    if (!lastPictureUrl) {
+        lastPictureTime.textContent = 'No picture available';
+        status.className = 'status offline';
+        return '';
+    }
+
+    const basePath = camera.dynamic_metadata.substring(0, camera.dynamic_metadata.lastIndexOf('/'));
+    const fullImageUrl = `/${basePath}/${lastPictureUrl}`;
+    const filename = lastPictureUrl.substring(lastPictureUrl.lastIndexOf('/') + 1);
+
+    thumbImg.src = fullImageUrl;
+    detailsImg.src = fullImageUrl;
+    listItem.dataset.lastPictureUrl = fullImageUrl;
+    filenameLink.textContent = `Download: ${filename}`;
+    filenameLink.href = fullImageUrl;
+
+    const imageDate = parseTimestampFromFilename(filename);
+    if (imageDate) {
+        lastPictureTime.textContent = `Last picture: ${imageDate.toLocaleString()}`;
+        status.className = `status ${(new Date() - imageDate) < 180000 ? 'online' : 'offline'}`;
+    }
+
+    if (metadata.iso || metadata.shutter_speed) {
+        cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
+    } else {
+        cameraMetadata.textContent = '';
+    }
+
+    const fullscreenUrl = camera.fullscreen_url || `fullscreen.html?camera=${encodeURIComponent(id)}`;
+    linkFullscreen.href = fullscreenUrl;
+    fullscreenImageLink.href = fullscreenUrl;
+    linkToday.href = `${photoDir}/${todayStr}/`;
+    linkHistory.href = `${photoDir}/daylight.html`;
+    return fullImageUrl;
+}
+
+async function refreshCameraMetadata(camera, listItem, options = {}) {
+    if (!camera.dynamic_metadata) {
+        return false;
+    }
+    const response = await fetch(camera.dynamic_metadata, {
+        cache: 'no-store',
+        headers: authHeaders()
+    });
+    if (!response.ok) {
+        throw new Error('Network response was not ok.');
+    }
+    const metadata = await response.json();
+    const basePath = camera.dynamic_metadata.substring(0, camera.dynamic_metadata.lastIndexOf('/'));
+    const lastPictureUrl = metadata.last_picture_url;
+    const fullImageUrl = lastPictureUrl ? `/${basePath}/${lastPictureUrl}` : '';
+    if (options.waitForChange && options.previousImageUrl && fullImageUrl === options.previousImageUrl) {
+        return false;
+    }
+    return Boolean(applyCameraMetadata(camera, listItem, metadata));
+}
+
+function pollCameraSnapshotRefresh(camera, listItem, previousImageUrl) {
+    const ptzStatus = listItem.querySelector('.ptz-status');
+    let attempts = 0;
+    const maxAttempts = 20;
+    const delayMs = 1500;
+
+    const poll = () => {
+        attempts += 1;
+        refreshCameraMetadata(camera, listItem, {
+            waitForChange: true,
+            previousImageUrl
+        })
+            .then(updated => {
+                if (updated) {
+                    ptzStatus.textContent = 'Snapshot refreshed';
+                    return;
+                }
+                if (attempts >= maxAttempts) {
+                    ptzStatus.textContent = 'Preset moved; waiting for next snapshot';
+                    return;
+                }
+                setTimeout(poll, delayMs);
+            })
+            .catch(error => {
+                if (attempts >= maxAttempts) {
+                    ptzStatus.textContent = `Snapshot refresh failed: ${error.message}`;
+                    return;
+                }
+                setTimeout(poll, delayMs);
+            });
+    };
+
+    setTimeout(poll, delayMs);
+}
+
 function createCameraListItem(camera) {
     const id = cameraId(camera);
     const displayName = cameraDisplayName(camera);
@@ -979,6 +1086,7 @@ function configurePtzPresets(camera, listItem) {
         if (!select.value) {
             return;
         }
+        const previousImageUrl = listItem.dataset.lastPictureUrl || '';
         button.disabled = true;
         status.textContent = 'Moving...';
         try {
@@ -994,6 +1102,10 @@ function configurePtzPresets(camera, listItem) {
             status.textContent = result.session && result.session.seconds_remaining
                 ? `${result.session.seconds_remaining}s`
                 : 'Done';
+            if (result.capture && result.capture.requested) {
+                status.textContent = 'Capturing new snapshot...';
+                pollCameraSnapshotRefresh(camera, listItem, previousImageUrl);
+            }
         } catch (error) {
             status.textContent = error.message;
         } finally {
@@ -1083,19 +1195,12 @@ function updateCamera(camera, cameraData) {
     const cameraNameElement = listItem.querySelector('.camera-name');
     const cameraDescription = listItem.querySelector('.camera-description');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
-    const cameraMetadata = listItem.querySelector('.camera-metadata');
     const status = listItem.querySelector('.status');
     const detailsImg = listItem.querySelector('.camera-details img');
-    const fullscreenImageLink = listItem.querySelector('.fullscreen-image-link');
-    const filenameLink = listItem.querySelector('.camera-details .filename');
-    const linkFullscreen = listItem.querySelector('.link-fullscreen');
-    const linkToday = listItem.querySelector('.link-today');
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
     const timelapseArchiveSelect = listItem.querySelector('.select-timelapse-archive');
-    const linkHistory = listItem.querySelector('.link-history');
     const today = new Date();
     const todayStr = formatDate(today);
-    const photo_dir = `/photos/${id}`;
     const timelapseEnabled = camera.timelapse_enabled !== false;
 
     cameraNameElement.textContent = displayName;
@@ -1131,41 +1236,7 @@ function updateCamera(camera, cameraData) {
         updateTimelapseArchiveSelect(camera, timelapseArchiveSelect, todayStr);
     }
 
-    fetch(camera.dynamic_metadata, { headers: authHeaders() })
-        .then(response => response.ok ? response.json() : Promise.reject('Network response was not ok.'))
-        .then(async metadata => {
-            const lastPictureUrl = metadata.last_picture_url;
-            if (!lastPictureUrl) {
-                lastPictureTime.textContent = 'No picture available';
-                status.className = 'status offline';
-                return;
-            }
-
-            const basePath = camera.dynamic_metadata.substring(0, camera.dynamic_metadata.lastIndexOf('/'));
-            const fullImageUrl = `/${basePath}/${lastPictureUrl}`;
-            const filename = lastPictureUrl.substring(lastPictureUrl.lastIndexOf('/') + 1);
-
-            thumbImg.src = fullImageUrl;
-            detailsImg.src = fullImageUrl;
-            filenameLink.textContent = `Download: ${filename}`;
-            filenameLink.href = fullImageUrl;
-
-            const imageDate = parseTimestampFromFilename(filename);
-            if (imageDate) {
-                lastPictureTime.textContent = `Last picture: ${imageDate.toLocaleString()}`;
-                status.className = `status ${(new Date() - imageDate) < 180000 ? 'online' : 'offline'}`;
-            }
-
-            if (metadata.iso || metadata.shutter_speed) {
-                cameraMetadata.textContent = `ISO ${metadata.iso || '?'} | ${metadata.shutter_speed || '?'}`;
-            }
-
-            const fullscreenUrl = camera.fullscreen_url || `fullscreen.html?camera=${encodeURIComponent(id)}`;
-            linkFullscreen.href = fullscreenUrl;
-            fullscreenImageLink.href = fullscreenUrl;
-            linkToday.href = `${photo_dir}/${todayStr}/`;
-            linkHistory.href = `${photo_dir}/daylight.html`;
-        })
+    refreshCameraMetadata(camera, listItem)
         .catch(error => {
             lastPictureTime.textContent = 'Error loading metadata';
             status.className = 'status offline';

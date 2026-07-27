@@ -284,6 +284,60 @@ class TestFenetre(unittest.TestCase):
 
         self.assertEqual(responses, [(401, {})])
 
+    def test_request_camera_capture_wakes_next_capture_interval(self):
+        fenetre_module.camera_capture_request_events.clear()
+        fenetre_module.exit_event.clear()
+
+        result = fenetre_module.request_camera_capture("cam1", "test")
+
+        self.assertTrue(result["requested"])
+        self.assertTrue(fenetre_module.wait_for_next_capture_interval("cam1", 5))
+        self.assertFalse(fenetre_module.camera_capture_request_event("cam1").is_set())
+
+    def test_ptz_preset_api_requests_post_move_capture(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._read_json_body = lambda: {"camera": "cam1", "preset": "home"}
+        handler._send_json = lambda status, payload: responses.append(
+            (status, payload)
+        )
+        handler._user_can_control_ptz = lambda camera, ptz, level: True
+        handler._ptz_owner = lambda: "operator"
+        old_cameras_config = getattr(fenetre_module, "cameras_config", {})
+        try:
+            fenetre_module.cameras_config = {
+                "cam1": {"ptz": {"session_duration_s": 30}}
+            }
+            with patch.object(
+                fenetre_module,
+                "goto_preset",
+                return_value={"ok": True, "camera": "cam1", "preset": "home"},
+            ) as mock_goto, patch.object(
+                fenetre_module,
+                "request_camera_capture",
+                return_value={
+                    "requested": True,
+                    "reason": "ptz preset home",
+                    "delay_s": 2.0,
+                },
+            ) as mock_capture:
+                handler._handle_ptz_preset_api()
+        finally:
+            fenetre_module.cameras_config = old_cameras_config
+
+        self.assertEqual(responses[0][0], 200)
+        self.assertEqual(responses[0][1]["capture"]["requested"], True)
+        mock_goto.assert_called_once_with(
+            "cam1",
+            {"ptz": {"session_duration_s": 30}},
+            "home",
+            owner="operator",
+            duration_s=30,
+        )
+        mock_capture.assert_called_once_with(
+            "cam1", "ptz preset home", delay_s=2.0
+        )
+
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()
 

@@ -173,6 +173,8 @@ ptz_tour_resume_timers = {}
 ptz_tour_resume_lock = threading.Lock()
 live_view_sessions = {}
 live_view_sessions_lock = threading.Lock()
+camera_capture_request_events = {}
+camera_capture_request_events_lock = threading.Lock()
 daylight_q = deque()
 archive_q = deque()
 frequent_timelapse_q = deque()
@@ -356,6 +358,52 @@ def interruptible_sleep(
 
         if sleep_duration > 0:
             time.sleep(sleep_duration)
+
+
+def camera_capture_request_event(camera_name: str) -> threading.Event:
+    with camera_capture_request_events_lock:
+        return camera_capture_request_events.setdefault(camera_name, threading.Event())
+
+
+def request_camera_capture(
+    camera_name: str, reason: str = "", delay_s: float = 0
+) -> Dict[str, Any]:
+    event = camera_capture_request_event(camera_name)
+    delay_s = max(0.0, min(60.0, float(delay_s or 0)))
+    if delay_s > 0:
+        timer = threading.Timer(delay_s, event.set)
+        timer.daemon = True
+        timer.start()
+    else:
+        event.set()
+    logger.info(
+        "%s: Capture requested%s%s.",
+        camera_name,
+        f" ({reason})" if reason else "",
+        f" after {delay_s:.1f}s" if delay_s else "",
+    )
+    return {"requested": True, "reason": reason, "delay_s": delay_s}
+
+
+def wait_for_next_capture_interval(camera_name: str, duration: float) -> bool:
+    """Wait until the normal interval ends or an immediate capture is requested."""
+    if duration <= 0:
+        return False
+    capture_event = camera_capture_request_event(camera_name)
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        if exit_event.is_set():
+            return False
+        if capture_event.is_set():
+            capture_event.clear()
+            return True
+        remaining_time = end_time - time.time()
+        if remaining_time <= 0:
+            break
+        if capture_event.wait(min(1.0, remaining_time)):
+            capture_event.clear()
+            return True
+    return False
 
 
 def update_camera_mode_metric(camera_name: str, mode: str) -> None:
@@ -724,6 +772,7 @@ def is_sunrise_or_sunset(
 def snap(camera_name, camera_config: Dict):
     picamera2_capture = None
     picamera2_initial_exposure_state = None
+    camera_capture_request_event(camera_name)
 
     def load_picamera2_exposure_state() -> Optional[Dict]:
         metadata_path = os.path.join(
@@ -970,7 +1019,8 @@ def snap(camera_name, camera_config: Dict):
             current_sleep_interval
         )
         logger.info(f"{camera_name}: Sleeping {current_sleep_interval}s")
-        interruptible_sleep(current_sleep_interval, exit_event)
+        if wait_for_next_capture_interval(camera_name, current_sleep_interval):
+            logger.info("%s: Waking early for requested capture.", camera_name)
 
         if exit_event.is_set():
             return
@@ -1841,6 +1891,11 @@ window.location.replace({json.dumps(next_url)});
                 preset_id,
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
+            )
+            result["capture"] = request_camera_capture(
+                camera_name,
+                f"ptz preset {preset_id}",
+                delay_s=float(ptz_config.get("post_preset_capture_delay_s") or 2.0),
             )
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
