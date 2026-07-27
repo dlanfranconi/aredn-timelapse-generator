@@ -51,13 +51,20 @@
         <section class="quick-settings camera-editor">
             <div class="section-header">
                 <h2>Cameras</h2>
-                <button id="editCameraBtn" type="button" disabled>Edit Selected Camera</button>
+                <div class="section-actions">
+                    <button id="sortCameraOrderBtn" type="button" disabled>Sort A-Z</button>
+                    <button id="saveCameraOrderBtn" type="button" disabled>Save order</button>
+                    <button id="editCameraBtn" type="button" disabled>Edit Selected Camera</button>
+                </div>
             </div>
             <div class="form-grid compact-form-grid">
                 <label for="editCameraSelect">Camera</label>
                 <select id="editCameraSelect">
                     <option value="">Load config to select a camera</option>
                 </select>
+            </div>
+            <div id="cameraOrderList" class="camera-order-list" aria-live="polite">
+                Load config to reorder cameras.
             </div>
         </section>
 
@@ -132,79 +139,79 @@
                     <h2 id="cameraModalTitle">Add Camera</h2>
                     <button id="closeAddCameraModalBtn" type="button">Close</button>
                 </div>
-        <section class="quick-settings camera-add-panel">
-            <div class="form-grid">
-                <label for="newCameraName">Camera ID</label>
-                <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
+                <section class="quick-settings camera-add-panel">
+                    <div class="form-grid camera-modal-grid">
+                        <label for="newCameraName">Camera ID</label>
+                        <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
 
-                <label for="newCameraDisplayName">Display name</label>
-                <input id="newCameraDisplayName" type="text" autocomplete="off" placeholder="North Ridge">
+                        <label for="newCameraDisplayName">Display name</label>
+                        <input id="newCameraDisplayName" type="text" autocomplete="off" placeholder="North Ridge">
 
-                <label for="newCameraDescription">Description</label>
-                <textarea id="newCameraDescription" rows="2" placeholder="Optional text shown under the camera name"></textarea>
+                        <label for="newCameraDescription">Description</label>
+                        <textarea id="newCameraDescription" rows="2" placeholder="Optional text shown under the camera name"></textarea>
 
-                <label for="newCameraVendor">Template</label>
-                <select id="newCameraVendor">
-                    <option value="generic">Generic</option>
-                    <option value="reolink">Reolink</option>
-                    <option value="sunba">Sunba</option>
-                    <option value="hikvision">Hikvision</option>
-                    <option value="ubiquiti">Ubiquiti</option>
-                    <option value="dahua">Dahua</option>
-                    <option value="amcrest">Amcrest</option>
-                    <option value="axis">Axis</option>
-                    <option value="tplink">TP-Link</option>
-                </select>
+                        <label for="newCameraVendor">Template</label>
+                        <select id="newCameraVendor">
+                            <option value="generic">Generic</option>
+                            <option value="reolink">Reolink</option>
+                            <option value="sunba">Sunba</option>
+                            <option value="hikvision">Hikvision</option>
+                            <option value="ubiquiti">Ubiquiti</option>
+                            <option value="dahua">Dahua</option>
+                            <option value="amcrest">Amcrest</option>
+                            <option value="axis">Axis</option>
+                            <option value="tplink">TP-Link</option>
+                        </select>
 
-                <label for="newCameraSnapshotTemplate">Snapshot template</label>
-                <select id="newCameraSnapshotTemplate"></select>
+                        <label for="newCameraSnapshotTemplate">Snapshot template</label>
+                        <select id="newCameraSnapshotTemplate"></select>
 
-                <label for="newCameraRtspTemplate">RTSP template</label>
-                <select id="newCameraRtspTemplate"></select>
+                        <label for="newCameraRtspTemplate">RTSP template</label>
+                        <select id="newCameraRtspTemplate"></select>
 
-                <label for="newCameraCaptureSource">Capture source</label>
-                <select id="newCameraCaptureSource">
-                    <option value="snapshot">HTTP/HTTPS snapshot</option>
-                    <option value="rtsp">RTSP frame capture</option>
-                </select>
+                        <label for="newCameraCaptureSource">Capture source</label>
+                        <select id="newCameraCaptureSource">
+                            <option value="snapshot">HTTP/HTTPS snapshot</option>
+                            <option value="rtsp">RTSP frame capture</option>
+                        </select>
 
-                <label for="newCameraUrl">Snapshot URL</label>
-                <div class="inline-field">
-                    <input id="newCameraUrl" type="password" autocomplete="off" placeholder="http://camera/snapshot.jpg">
-                    <button id="toggleNewCameraUrlBtn" type="button">Show</button>
-                </div>
+                        <label for="newCameraUrl">Snapshot URL</label>
+                        <div class="inline-field">
+                            <input id="newCameraUrl" type="password" autocomplete="off" placeholder="http://camera/snapshot.jpg">
+                            <button id="toggleNewCameraUrlBtn" type="button">Show</button>
+                        </div>
 
-                <label for="newCameraSnapshotUsername">Snapshot username</label>
-                <input id="newCameraSnapshotUsername" type="text" autocomplete="off" placeholder="Optional">
+                        <label for="newCameraSnapshotUsername">Snapshot username</label>
+                        <input id="newCameraSnapshotUsername" type="text" autocomplete="off" placeholder="Optional">
 
-                <label for="newCameraSnapshotPassword">Snapshot password</label>
-                <div class="inline-field">
-                    <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
-                    <button id="toggleNewCameraSnapshotPasswordBtn" type="button">Show</button>
-                </div>
+                        <label for="newCameraSnapshotPassword">Snapshot password</label>
+                        <div class="inline-field">
+                            <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
+                            <button id="toggleNewCameraSnapshotPasswordBtn" type="button">Show</button>
+                        </div>
 
-                <label for="newCameraSnapshotAuthType">Snapshot auth</label>
-                <select id="newCameraSnapshotAuthType">
-                    <option value="basic">Basic</option>
-                    <option value="digest">Digest</option>
-                </select>
+                        <label for="newCameraSnapshotAuthType">Snapshot auth</label>
+                        <select id="newCameraSnapshotAuthType">
+                            <option value="basic">Basic</option>
+                            <option value="digest">Digest</option>
+                        </select>
 
-                <div id="newCameraRtspRow" class="stream-field-row">
-                    <label for="newCameraRtspUrl">RTSP capture URL</label>
-                    <div class="inline-field">
-                        <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
-                        <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                        <div id="newCameraRtspRow" class="stream-field-row">
+                            <label for="newCameraRtspUrl">RTSP capture URL</label>
+                            <div class="inline-field">
+                                <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+                                <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                            </div>
+                        </div>
+
+                        <div id="newCameraPtzRtspRow" class="stream-field-row" hidden>
+                            <label for="newCameraPtzRtspUrl">PTZ live RTSP URL (optional substream)</label>
+                            <div class="inline-field">
+                                <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/substream">
+                                <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
+                            </div>
+                        </div>
                     </div>
-                </div>
-
-                <div id="newCameraPtzRtspRow" class="stream-field-row" hidden>
-                    <label for="newCameraPtzRtspUrl">PTZ live RTSP URL (optional substream)</label>
-                    <div class="inline-field">
-                        <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/substream">
-                        <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
-                    </div>
-                </div>
-            </div>
 
             <div class="option-groups">
                 <fieldset class="option-group enabled">
@@ -334,13 +341,13 @@
                 </fieldset>
             </div>
 
-            <div class="add-camera-actions">
-                <button id="testNewCameraBtn" type="button">Test Capture and Streams</button>
-                <button id="confirmNewCameraBtn" type="button" disabled>Add Camera to Config</button>
-            </div>
-            <div id="newCameraModalStatus" class="modal-status" aria-live="polite"></div>
-            <div id="newCameraTestResult" class="camera-test-result"></div>
-        </section>
+                    <div class="add-camera-actions">
+                        <button id="testNewCameraBtn" type="button">Test Capture and Streams</button>
+                        <button id="confirmNewCameraBtn" type="button" disabled>Add Camera to Config</button>
+                    </div>
+                    <div id="newCameraModalStatus" class="modal-status" aria-live="polite"></div>
+                    <div id="newCameraTestResult" class="camera-test-result"></div>
+                </section>
             </div>
         </div>
 

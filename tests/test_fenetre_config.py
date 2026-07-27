@@ -527,9 +527,47 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             [cam["title"] for cam in private_metadata["cameras"]],
-            ["public-cam", "auth-cam"],
+            ["auth-cam", "public-cam"],
         )
-        self.assertEqual(private_metadata["cameras"][1]["visibility"], "authenticated")
+        self.assertEqual(private_metadata["cameras"][0]["visibility"], "authenticated")
+
+    def test_cameras_metadata_sorts_by_display_name_by_default(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "z-cam": {"url": "http://z", "display_name": "Zulu"},
+                "a-cam": {"url": "http://a", "display_name": "Alpha"},
+                "m-cam": {"url": "http://m"},
+            },
+            {"ui": {}},
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+            include_removed=False,
+        )
+
+        self.assertEqual(
+            [cam["id"] for cam in metadata["cameras"]],
+            ["a-cam", "m-cam", "z-cam"],
+        )
+
+    def test_cameras_metadata_honors_camera_order(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "z-cam": {"url": "http://z", "display_name": "Zulu"},
+                "a-cam": {"url": "http://a", "display_name": "Alpha"},
+                "m-cam": {"url": "http://m"},
+            },
+            {"ui": {"camera_order": ["z-cam"]}},
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+            include_removed=False,
+        )
+
+        self.assertEqual(
+            [cam["id"] for cam in metadata["cameras"]],
+            ["z-cam", "a-cam", "m-cam"],
+        )
 
     def test_written_public_cameras_metadata_omits_go2rtc_urls(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")

@@ -597,6 +597,9 @@ GUIDED_CAMERA_KEYS = {
     "gather_metrics",
     "mozjpeg_optimize",
     "display_name",
+    "template_vendor",
+    "snapshot_template",
+    "rtsp_template",
     "description",
     "disabled",
     "public",
@@ -727,6 +730,14 @@ def _build_camera_config(
     display_name = (payload.get("display_name") or "").strip()
     if display_name:
         camera["display_name"] = display_name
+    for payload_key, camera_key in (
+        ("template_vendor", "template_vendor"),
+        ("snapshot_template", "snapshot_template"),
+        ("rtsp_template", "rtsp_template"),
+    ):
+        value = (payload.get(payload_key) or "").strip()
+        if value:
+            camera[camera_key] = value
     description = (payload.get("description") or "").strip()
     if description:
         camera["description"] = description
@@ -1319,6 +1330,60 @@ def update_deployment_name():
         )
     except Exception as e:
         return jsonify({"error": f"Failed to update GUI name: {str(e)}"}), 500
+
+
+@app.route("/api/global/camera_order", methods=["PUT"])
+def update_camera_order():
+    try:
+        payload = request.get_json(force=True) or {}
+        order = payload.get("camera_order") or []
+        if not isinstance(order, list):
+            return jsonify({"error": "camera_order must be a list."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        cameras = config.get("cameras") or {}
+        if not isinstance(cameras, dict):
+            return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
+        camera_names = set(cameras.keys())
+        cleaned_order = []
+        for item in order:
+            camera_name = str(item)
+            if camera_name in camera_names and camera_name not in cleaned_order:
+                cleaned_order.append(camera_name)
+
+        global_config = config.setdefault("global", {})
+        if not isinstance(global_config, dict):
+            return jsonify({"error": "Config key 'global' must be a mapping."}), 400
+        ui_config = global_config.setdefault("ui", {})
+        if not isinstance(ui_config, dict):
+            return jsonify({"error": "Config key 'global.ui' must be a mapping."}), 400
+        ui_config["camera_order"] = cleaned_order
+
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        publish_result = _publish_public_artifacts(config)
+        message = "Camera order updated. Public UI files and cameras.json were updated."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "camera_order": cleaned_order,
+                    **publish_result,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to update camera order: {str(e)}"}), 500
 
 
 @app.route("/")

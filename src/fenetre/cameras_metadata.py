@@ -88,6 +88,32 @@ def camera_visibility(cam_conf: Dict[str, Any]) -> str:
     return "public"
 
 
+def _camera_display_name(name: str, cam_conf: Dict[str, Any]) -> str:
+    return str(cam_conf.get("display_name") or name)
+
+
+def _ordered_camera_items(
+    cameras_configs: Dict[str, Dict[str, Any]], global_config: Dict[str, Any]
+):
+    ui_config = (global_config or {}).get("ui") or {}
+    configured_order = ui_config.get("camera_order") or []
+    order_index = {}
+    if isinstance(configured_order, list):
+        for item in configured_order:
+            name = str(item)
+            if name in cameras_configs and name not in order_index:
+                order_index[name] = len(order_index)
+
+    def sort_key(item):
+        name, cam_conf = item
+        if name in order_index:
+            return (0, order_index[name], "", "")
+        display_name = _camera_display_name(name, cam_conf).casefold()
+        return (1, 0, display_name, name.casefold())
+
+    return sorted(cameras_configs.items(), key=sort_key)
+
+
 def build_cameras_metadata(
     cameras_configs: Dict[str, Dict[str, Any]],
     global_config: Dict[str, Any],
@@ -115,13 +141,13 @@ def build_cameras_metadata(
                 )
                 updated_cameras_metadata["cameras"].append(camera_metadata)
 
-    for cam, cam_conf in cameras_configs.items():
+    for cam, cam_conf in _ordered_camera_items(cameras_configs, global_config or {}):
         visibility = camera_visibility(cam_conf)
         if visibility == "hidden" and not include_hidden:
             continue
         if visibility == "authenticated" and not include_private:
             continue
-        display_name = str(cam_conf.get("display_name") or cam)
+        display_name = _camera_display_name(cam, cam_conf)
 
         metadata = {
             "id": cam,

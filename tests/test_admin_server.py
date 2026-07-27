@@ -123,6 +123,27 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         self.assertFalse(updated_data_yaml["global"]["ui"]["public_site"])
 
+    def test_update_camera_order_patches_global_ui(self):
+        self.test_config_data["cameras"] = {
+            "z-cam": {"url": "http://z"},
+            "a-cam": {"url": "http://a"},
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/api/global/camera_order",
+            data=json.dumps({"camera_order": ["a-cam", "missing", "z-cam", "a-cam"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["global"]["ui"]["camera_order"], ["a-cam", "z-cam"]
+        )
+
     def test_admin_logout_returns_no_store_redirect_page(self):
         response = self.app.get("/logout")
 
@@ -136,6 +157,9 @@ class ConfigServerTestCase(unittest.TestCase):
         payload = {
             "name": "ridge-cam",
             "display_name": "Ridge Cam",
+            "template_vendor": "sunba",
+            "snapshot_template": "sunba-images",
+            "rtsp_template": "sunba-12",
             "description": "Ridge view across the valley",
             "url": "http://camera/snapshot.jpg",
             "timeout_s": 12,
@@ -197,6 +221,9 @@ class ConfigServerTestCase(unittest.TestCase):
         camera = updated_data_yaml["cameras"]["ridge-cam"]
         self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
         self.assertEqual(camera["display_name"], "Ridge Cam")
+        self.assertEqual(camera["template_vendor"], "sunba")
+        self.assertEqual(camera["snapshot_template"], "sunba-images")
+        self.assertEqual(camera["rtsp_template"], "sunba-12")
         self.assertEqual(camera["description"], "Ridge view across the valley")
         self.assertFalse(camera["public"])
         self.assertEqual(camera["visibility"], "authenticated")
@@ -662,6 +689,9 @@ class ConfigServerTestCase(unittest.TestCase):
                 {
                     "name": "cam1",
                     "display_name": "Camera One",
+                    "template_vendor": "reolink",
+                    "snapshot_template": "reolink-api",
+                    "rtsp_template": "reolink-main",
                     "description": "",
                     "url": "http://new-camera/snapshot.jpg",
                     "timeout_s": 20,
@@ -687,6 +717,9 @@ class ConfigServerTestCase(unittest.TestCase):
         camera = updated_data_yaml["cameras"]["cam1"]
         self.assertEqual(camera["url"], "http://new-camera/snapshot.jpg")
         self.assertEqual(camera["display_name"], "Camera One")
+        self.assertEqual(camera["template_vendor"], "reolink")
+        self.assertEqual(camera["snapshot_template"], "reolink-api")
+        self.assertEqual(camera["rtsp_template"], "reolink-main")
         self.assertNotIn("description", camera)
         self.assertEqual(camera["custom_key"], "keep-me")
         self.assertEqual(camera["ptz"]["password"], "existing-secret")

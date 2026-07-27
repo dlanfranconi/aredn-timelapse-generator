@@ -281,6 +281,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "show_github_icon",
             "show_map_by_default",
             "public_site",
+            "camera_order",
             "linked_deployments",
             "map_privacy_radius_m",
             "map_privacy_jitter_m",
@@ -328,6 +329,26 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default=True,
     )
+    camera_order_cfg = ui_cfg.get("camera_order")
+    if camera_order_cfg is None:
+        camera_order_out = []
+    elif isinstance(camera_order_cfg, list):
+        camera_order_out = []
+        for idx, camera_name in enumerate(camera_order_cfg):
+            value = _str(
+                camera_name,
+                f"global.ui.camera_order[{idx}]",
+                errors,
+                default="",
+            )
+            if value:
+                camera_order_out.append(value)
+    else:
+        errors.append(
+            f"global.ui.camera_order: expected list, got {type(camera_order_cfg).__name__}"
+        )
+        camera_order_out = []
+    ui_out["camera_order"] = camera_order_out
     ui_out["map_privacy_radius_m"] = _float(
         ui_cfg.get("map_privacy_radius_m"),
         "global.ui.map_privacy_radius_m",
@@ -1157,6 +1178,15 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             cam_out["display_name"] = _str(
                 cam.get("display_name"), f"cameras.{name}.display_name", errors
             )
+        for template_key in (
+            "template_vendor",
+            "snapshot_template",
+            "rtsp_template",
+        ):
+            if cam.get(template_key) is not None:
+                cam_out[template_key] = _str(
+                    cam.get(template_key), f"cameras.{name}.{template_key}", errors
+                )
         if cam.get("disabled") is not None:
             cam_out["disabled"] = _bool(
                 cam.get("disabled"), f"cameras.{name}.disabled", errors

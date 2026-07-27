@@ -347,7 +347,7 @@ h1 {
 .quick-settings button,
 .reveal-field-btn {
     padding: 8px 10px;
-    margin-left: 6px;
+    margin-left: 0;
     border: none;
     border-radius: 4px;
     cursor: pointer;
@@ -363,23 +363,50 @@ h1 {
 .form-grid,
 .option-content {
     display: grid;
-    grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
+    grid-template-columns: minmax(130px, 0.42fr) minmax(0, 1fr);
     gap: 10px 14px;
-    align-items: center;
+    align-items: start;
 }
 
 .compact-form-grid {
     grid-template-columns: minmax(120px, 180px) minmax(240px, 1fr);
 }
 
+.camera-modal-grid {
+    grid-template-columns: minmax(140px, 210px) minmax(0, 1fr);
+}
+
+.form-grid > label,
+.option-content > label,
+.stream-field-row > label {
+    font-weight: 600;
+    line-height: 1.25;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding-top: 8px;
+}
+
+.camera-add-panel input,
+.camera-add-panel select,
+.camera-add-panel textarea {
+    min-width: 0;
+}
+
 .inline-field {
     display: flex;
     gap: 6px;
     align-items: center;
+    min-width: 0;
 }
 
 .inline-field input {
     flex: 1;
+    min-width: 0;
+}
+
+.inline-field button {
+    flex: 0 0 auto;
+    min-height: 36px;
 }
 
 .inline-options {
@@ -397,6 +424,7 @@ h1 {
 .preset-editor {
     display: grid;
     gap: 8px;
+    grid-column: 1 / -1;
 }
 
 .preset-rows {
@@ -408,7 +436,7 @@ h1 {
     align-items: center;
     display: grid;
     gap: 6px;
-    grid-template-columns: minmax(120px, 1fr) minmax(80px, 0.65fr) minmax(80px, 0.65fr) auto;
+    grid-template-columns: minmax(140px, 1fr) minmax(88px, 0.7fr) minmax(88px, 0.7fr) auto;
 }
 
 .preset-row input {
@@ -423,9 +451,9 @@ h1 {
 .stream-field-row {
     display: grid;
     grid-column: 1 / -1;
-    grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr);
+    grid-template-columns: minmax(140px, 210px) minmax(0, 1fr);
     gap: 10px 14px;
-    align-items: center;
+    align-items: start;
 }
 
 .stream-field-row[hidden] {
@@ -434,7 +462,7 @@ h1 {
 
 .option-groups {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 12px;
     margin-top: 16px;
 }
@@ -444,11 +472,14 @@ h1 {
     border-radius: 4px;
     padding: 12px;
     background-color: #f7f7f7;
+    min-width: 0;
 }
 
 .option-group legend {
     font-weight: bold;
     padding: 0 4px;
+    line-height: 1.25;
+    white-space: normal;
 }
 
 .option-group:not(.enabled) .option-content {
@@ -510,6 +541,42 @@ h1 {
     font-size: 0.9rem;
 }
 
+.camera-order-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.camera-order-empty {
+    color: #666;
+}
+
+.camera-order-row {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: 8px 10px;
+}
+
+.camera-order-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.camera-order-name small {
+    color: #666;
+    display: block;
+    margin-top: 2px;
+}
+
+.camera-order-row button {
+    min-width: 38px;
+}
+
 .modal[hidden] {
     display: none;
 }
@@ -521,14 +588,14 @@ h1 {
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding: 36px 16px;
+    padding: 28px 16px;
     background: rgba(0, 0, 0, 0.45);
     overflow-y: auto;
 }
 
 .modal-card {
     width: min(760px, 100%);
-    max-height: calc(100vh - 72px);
+    max-height: calc(100dvh - 56px);
     overflow-y: auto;
     background: #fff;
     border-radius: 8px;
@@ -537,7 +604,7 @@ h1 {
 }
 
 .modal-card-wide {
-    width: min(1120px, 100%);
+    width: min(1040px, 100%);
 }
 
 .modal-header {
@@ -633,6 +700,13 @@ h1 {
     gap: 8px;
 }
 
+.camera-add-panel {
+    background: #fff;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+}
+
 .camera-test-result {
     margin-top: 12px;
 }
@@ -698,6 +772,7 @@ h1 {
 @media (max-width: 760px) {
     .form-grid,
     .option-content,
+    .stream-field-row,
     .launch-camera-fields,
     .user-manager,
     .user-form,
@@ -720,6 +795,10 @@ h1 {
 
     .preset-row {
         grid-template-columns: 1fr;
+    }
+
+    .camera-order-row {
+        grid-template-columns: minmax(0, 1fr) auto auto;
     }
 }
 

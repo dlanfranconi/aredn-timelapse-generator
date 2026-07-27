@@ -87,6 +87,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const adminLogoutBtn = document.getElementById('adminLogoutBtn');
     const editCameraBtn = document.getElementById('editCameraBtn');
     const editCameraSelect = document.getElementById('editCameraSelect');
+    const cameraOrderList = document.getElementById('cameraOrderList');
+    const sortCameraOrderBtn = document.getElementById('sortCameraOrderBtn');
+    const saveCameraOrderBtn = document.getElementById('saveCameraOrderBtn');
     const refreshStorageBtn = document.getElementById('refreshStorageBtn');
     const storageSummary = document.getElementById('storageSummary');
     const launchWorkflowEnabled = document.getElementById('launchWorkflowEnabled');
@@ -171,6 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let cameraFormMode = 'add';
     let editingCameraName = null;
     let editingOriginalCamera = null;
+    let currentCameraOrder = [];
     const DEFAULT_LAUNCH_SCHEDULE_URL = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net';
     const DEFAULT_LAUNCH_STATE_FILE = '/srv/fenetre/data/launch_workflow_state.json';
     const CAMERA_TEMPLATE_GROUPS = {
@@ -270,6 +274,15 @@ document.addEventListener('DOMContentLoaded', () => {
     editCameraBtn.addEventListener('click', handleEditCamera);
     editCameraSelect.addEventListener('change', () => {
         editCameraBtn.disabled = !editCameraSelect.value;
+    });
+    sortCameraOrderBtn.addEventListener('click', sortCameraOrderByName);
+    saveCameraOrderBtn.addEventListener('click', saveCameraOrder);
+    cameraOrderList.addEventListener('click', event => {
+        const button = event.target.closest('button[data-order-action]');
+        if (!button) {
+            return;
+        }
+        moveCameraOrder(button.dataset.camera, button.dataset.orderAction);
     });
     closeAddCameraModalBtn.addEventListener('click', () => hideModal(addCameraModal));
     manageUsersBtn.addEventListener('click', openUserManager);
@@ -1070,22 +1083,154 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function cameraDisplayName(cameraName, camera = {}) {
+        return camera.display_name || cameraName;
+    }
+
+    function cameraNamesSortedByDisplayName(names, cameras) {
+        return [...names].sort((left, right) => {
+            const leftName = cameraDisplayName(left, cameras[left] || {}).toLocaleLowerCase();
+            const rightName = cameraDisplayName(right, cameras[right] || {}).toLocaleLowerCase();
+            return leftName.localeCompare(rightName) || left.localeCompare(right);
+        });
+    }
+
+    function orderedCameraNames(configData = loadedConfigData) {
+        const cameras = (configData && configData.cameras) || {};
+        const names = Object.keys(cameras);
+        const configuredOrder = (((configData.global || {}).ui || {}).camera_order || [])
+            .filter(name => names.includes(name));
+        const ordered = [];
+        configuredOrder.forEach(name => {
+            if (!ordered.includes(name)) {
+                ordered.push(name);
+            }
+        });
+        cameraNamesSortedByDisplayName(
+            names.filter(name => !ordered.includes(name)),
+            cameras
+        ).forEach(name => ordered.push(name));
+        return ordered;
+    }
+
+    function renderCameraOrderList(markDirty = false) {
+        const cameras = (loadedConfigData && loadedConfigData.cameras) || {};
+        currentCameraOrder = currentCameraOrder.filter(name => cameras[name]);
+        cameraNamesSortedByDisplayName(
+            Object.keys(cameras).filter(name => !currentCameraOrder.includes(name)),
+            cameras
+        ).forEach(name => currentCameraOrder.push(name));
+        cameraOrderList.innerHTML = '';
+        if (!currentCameraOrder.length) {
+            cameraOrderList.innerHTML = '<div class="camera-order-empty">Load config to reorder cameras.</div>';
+            sortCameraOrderBtn.disabled = true;
+            saveCameraOrderBtn.disabled = true;
+            return;
+        }
+        currentCameraOrder.forEach((cameraName, index) => {
+            const camera = cameras[cameraName] || {};
+            const row = document.createElement('div');
+            row.className = 'camera-order-row';
+            row.dataset.camera = cameraName;
+            const displayName = cameraDisplayName(cameraName, camera);
+            const nameWrap = document.createElement('div');
+            nameWrap.className = 'camera-order-name';
+            const strong = document.createElement('strong');
+            strong.textContent = displayName;
+            nameWrap.appendChild(strong);
+            if (displayName !== cameraName) {
+                const small = document.createElement('small');
+                small.textContent = cameraName;
+                nameWrap.appendChild(small);
+            }
+            const upButton = document.createElement('button');
+            upButton.type = 'button';
+            upButton.dataset.orderAction = 'up';
+            upButton.dataset.camera = cameraName;
+            upButton.disabled = index === 0;
+            upButton.textContent = 'Up';
+            const downButton = document.createElement('button');
+            downButton.type = 'button';
+            downButton.dataset.orderAction = 'down';
+            downButton.dataset.camera = cameraName;
+            downButton.disabled = index === currentCameraOrder.length - 1;
+            downButton.textContent = 'Down';
+            row.append(nameWrap, upButton, downButton);
+            cameraOrderList.appendChild(row);
+        });
+        sortCameraOrderBtn.disabled = false;
+        saveCameraOrderBtn.disabled = !markDirty;
+    }
+
+    function moveCameraOrder(cameraName, action) {
+        const index = currentCameraOrder.indexOf(cameraName);
+        if (index < 0) {
+            return;
+        }
+        const delta = action === 'up' ? -1 : action === 'down' ? 1 : 0;
+        const nextIndex = index + delta;
+        if (nextIndex < 0 || nextIndex >= currentCameraOrder.length) {
+            return;
+        }
+        [currentCameraOrder[index], currentCameraOrder[nextIndex]] = [currentCameraOrder[nextIndex], currentCameraOrder[index]];
+        renderCameraOrderList(true);
+    }
+
+    function sortCameraOrderByName() {
+        const cameras = (loadedConfigData && loadedConfigData.cameras) || {};
+        currentCameraOrder = cameraNamesSortedByDisplayName(Object.keys(cameras), cameras);
+        renderCameraOrderList(true);
+    }
+
+    async function saveCameraOrder() {
+        if (!loadedConfigData) {
+            setStatus('Load the configuration before saving camera order.', 'error');
+            return;
+        }
+        setStatus('Saving camera order...', 'info');
+        try {
+            const response = await fetch('/api/global/camera_order', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera_order: currentCameraOrder })
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || `HTTP error! status: ${response.status}`);
+            }
+            try {
+                const reloadResult = await requestApplicationReload();
+                result.reload = { ok: true, message: reloadResult.message || 'Reload signal sent successfully.' };
+            } catch (reloadError) {
+                result.reload = { ok: false, warning: reloadError.message };
+            }
+            ensureGlobalUi(loadedConfigData);
+            loadedConfigData.global.ui.camera_order = result.camera_order || currentCameraOrder;
+            saveCameraOrderBtn.disabled = true;
+            setStatus((result.message || 'Camera order saved.') + configWriteDetails(result), 'success');
+            await fetchAndDisplayConfig();
+        } catch (error) {
+            setStatus(`Error saving camera order: ${error.message}`, 'error');
+        }
+    }
+
     function populateCameraEditOptions() {
         const cameras = (loadedConfigData && loadedConfigData.cameras) || {};
         const previousValue = editCameraSelect.value;
         editCameraSelect.innerHTML = '';
-        const names = Object.keys(cameras).sort();
+        const names = orderedCameraNames();
         if (!names.length) {
             const option = document.createElement('option');
             option.value = '';
             option.textContent = 'No cameras configured';
             editCameraSelect.appendChild(option);
             editCameraBtn.disabled = true;
+            renderCameraOrderList(false);
             return;
         }
         names.forEach(cameraName => {
             const camera = cameras[cameraName] || {};
-            const displayName = camera.display_name || cameraName;
+            const displayName = cameraDisplayName(cameraName, camera);
             const option = document.createElement('option');
             option.value = cameraName;
             option.textContent = displayName === cameraName ? cameraName : `${displayName} (${cameraName})`;
@@ -1093,6 +1238,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         editCameraSelect.value = names.includes(previousValue) ? previousValue : names[0];
         editCameraBtn.disabled = !editCameraSelect.value;
+        currentCameraOrder = names;
+        renderCameraOrderList(false);
     }
 
     function setInputValue(id, value) {
@@ -1326,6 +1473,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setSelectValue('newCameraSnapshotAuthType', (camera.http_auth && camera.http_auth.type) || 'basic');
         setInputValue('newCameraRtspUrl', camera.rtsp_url || '');
         setInputValue('newCameraPtzRtspUrl', camera.ptz_rtsp_url || '');
+        applyCameraTemplateSelection(camera);
         setInputValue('newCameraTimeout', camera.timeout_s ?? 15);
         setInputValue('newCameraFailureRetry', camera.capture_failure_interval_s ?? 60);
         setSelectValue('newCameraVisibility', visibilityForCamera(camera));
@@ -1679,7 +1827,82 @@ document.addEventListener('DOMContentLoaded', () => {
         return templates.find(template => template.id === select.value) || templates[0] || null;
     }
 
-    function populateTemplateSelect(select, templates) {
+    function knownTemplateVendor(value) {
+        return Object.prototype.hasOwnProperty.call(CAMERA_TEMPLATE_GROUPS, value)
+            ? value
+            : 'generic';
+    }
+
+    function firstUrlInText(value) {
+        const match = String(value || '').match(/(?:rtsp|https?):\/\/[^\s'"]+/i);
+        return match ? match[0] : String(value || '');
+    }
+
+    function comparableTemplateUrl(value) {
+        const candidate = firstUrlInText(value);
+        if (!candidate) {
+            return '';
+        }
+        try {
+            const rendered = candidate
+                .replaceAll('USERNAME', 'user')
+                .replaceAll('PASSWORD', 'pass')
+                .replaceAll('CAMERA_IP', 'camera.local')
+                .replaceAll('HTTP_PORT', '80');
+            const url = new URL(rendered);
+            ['user', 'password', 'u', 'p'].forEach(key => url.searchParams.delete(key));
+            const query = Array.from(url.searchParams.entries())
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([key, value]) => `${key}=${value}`)
+                .join('&');
+            return `${url.protocol}//${url.pathname}${query ? `?${query}` : ''}`.toLowerCase();
+        } catch (error) {
+            return candidate
+                .toLowerCase()
+                .replace(/\/\/[^/@\s]+@/g, '//')
+                .replace(/\/\/[^/:/?#'\s]+(?::\d+)?/g, '//host')
+                .replace(/([?&](?:user|password|u|p)=)[^&'"\s]*/g, '$1');
+        }
+    }
+
+    function templateMatchesValue(templateUrl, value) {
+        const templateComparable = comparableTemplateUrl(templateUrl);
+        const valueComparable = comparableTemplateUrl(value);
+        return Boolean(templateComparable && valueComparable && templateComparable === valueComparable);
+    }
+
+    function inferTemplateId(camera, kind, vendor) {
+        const explicitKey = kind === 'snapshots' ? 'snapshot_template' : 'rtsp_template';
+        const explicit = camera[explicitKey];
+        const group = CAMERA_TEMPLATE_GROUPS[vendor] || CAMERA_TEMPLATE_GROUPS.generic;
+        const templates = group[kind] || [];
+        if (templates.some(template => template.id === explicit)) {
+            return explicit;
+        }
+        const value = kind === 'snapshots'
+            ? camera.url
+            : (camera.rtsp_url || camera.local_command || '');
+        const match = templates.find(template => templateMatchesValue(template.url, value));
+        return (match || templates[0] || {}).id || '';
+    }
+
+    function inferTemplateVendor(camera) {
+        const explicit = knownTemplateVendor(camera.template_vendor || '');
+        if (camera.template_vendor) {
+            return explicit;
+        }
+        for (const vendor of Object.keys(CAMERA_TEMPLATE_GROUPS).filter(item => item !== 'generic')) {
+            const group = CAMERA_TEMPLATE_GROUPS[vendor];
+            const snapshotMatch = (group.snapshots || []).some(template => templateMatchesValue(template.url, camera.url || ''));
+            const rtspMatch = (group.rtsp || []).some(template => templateMatchesValue(template.url, camera.rtsp_url || camera.local_command || ''));
+            if (snapshotMatch || rtspMatch) {
+                return vendor;
+            }
+        }
+        return explicit;
+    }
+
+    function populateTemplateSelect(select, templates, selectedValue = '') {
         select.innerHTML = '';
         templates.forEach(template => {
             const option = document.createElement('option');
@@ -1687,12 +1910,24 @@ document.addEventListener('DOMContentLoaded', () => {
             option.textContent = template.label;
             select.appendChild(option);
         });
+        if (selectedValue && templates.some(template => template.id === selectedValue)) {
+            select.value = selectedValue;
+        }
     }
 
-    function syncTemplateSelects() {
+    function syncTemplateSelects(selectedSnapshot = '', selectedRtsp = '') {
         const group = CAMERA_TEMPLATE_GROUPS[newCameraVendor.value] || CAMERA_TEMPLATE_GROUPS.generic;
-        populateTemplateSelect(newCameraSnapshotTemplate, group.snapshots || []);
-        populateTemplateSelect(newCameraRtspTemplate, group.rtsp || []);
+        populateTemplateSelect(newCameraSnapshotTemplate, group.snapshots || [], selectedSnapshot);
+        populateTemplateSelect(newCameraRtspTemplate, group.rtsp || [], selectedRtsp);
+    }
+
+    function applyCameraTemplateSelection(camera) {
+        const vendor = inferTemplateVendor(camera);
+        newCameraVendor.value = vendor;
+        syncTemplateSelects(
+            inferTemplateId(camera, 'snapshots', vendor),
+            inferTemplateId(camera, 'rtsp', vendor)
+        );
     }
 
     function applySelectedSnapshotTemplate({ force = false } = {}) {
@@ -1767,6 +2002,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = {
             name: newCameraName.value.trim(),
             display_name: newCameraDisplayName.value.trim() || newCameraName.value.trim(),
+            template_vendor: newCameraVendor.value || 'generic',
+            snapshot_template: newCameraSnapshotTemplate.value || '',
+            rtsp_template: newCameraRtspTemplate.value || '',
             description: newCameraDescription.value.trim(),
             capture_source: captureSource,
             url: captureSource === 'snapshot' ? newCameraUrl.value.trim() : '',

@@ -683,11 +683,11 @@ function createCameraListItem(camera) {
                 </div>
                 <div class="ptz-live-view" hidden>
                     <button class="ptz-live-preview" type="button" aria-label="Start PTZ alignment preview">
-                        <span class="ptz-live-placeholder">Tap to start alignment view</span>
+                        <span class="ptz-live-placeholder">Click to start low-resolution aiming stream</span>
                         <img class="ptz-live-image" alt="PTZ alignment preview">
                     </button>
                     <iframe class="ptz-live-frame" title="PTZ alignment preview" loading="lazy" allow="autoplay; fullscreen" hidden></iframe>
-                    <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open full live view</a>
+                    <a class="ptz-live-link" href="#" target="_blank" rel="noopener">Open high-resolution stream</a>
                 </div>
                 <span class="ptz-status"></span>
             </div>
@@ -756,7 +756,8 @@ function configurePtzPresets(camera, listItem) {
         && userAllowedCamera
         && ['manual', 'admin'].includes(userAccess);
     const canUseTour = canUseManual && ptz.tour && ptz.tour.enabled;
-    const canUseLivePreview = (canUseManual || canUsePresets) && Boolean(livePreviewUrl);
+    const canShowLivePreview = canUseManual || canUsePresets;
+    const canUseLivePreview = canShowLivePreview && Boolean(livePreviewUrl);
     if (!canUsePresets && !canUseManual) {
         wrapper.hidden = true;
         if (liveIdleTimer) {
@@ -798,9 +799,14 @@ function configurePtzPresets(camera, listItem) {
     manual.querySelectorAll('[data-stop]').forEach(manualButton => {
         manualButton.hidden = ptz.stop_disabled === true;
     });
-    liveView.hidden = !canUseLivePreview;
+    liveView.hidden = !canShowLivePreview;
+    liveView.classList.toggle('ptz-live-view-unavailable', canShowLivePreview && !livePreviewUrl);
     if (canUseLivePreview) {
-        liveLink.href = fullLivePlayerUrl;
+        liveLink.href = fullLivePlayerUrl || livePreviewUrl;
+        liveLink.hidden = false;
+        if (!liveImage.src && liveFrame.src === 'about:blank') {
+            livePlaceholder.textContent = 'Click to start low-resolution aiming stream';
+        }
     } else {
         if (liveIdleTimer) {
             clearTimeout(liveIdleTimer);
@@ -812,6 +818,8 @@ function configurePtzPresets(camera, listItem) {
         liveFrame.classList.remove('loaded');
         livePreview.classList.remove('loaded');
         livePreview.hidden = false;
+        livePlaceholder.textContent = 'Live preview is not configured. Enable RTSP live view and set an RTSP or PTZ live RTSP URL.';
+        liveLink.hidden = true;
     }
     const unloadLiveView = () => {
         liveImage.removeAttribute('src');
@@ -820,9 +828,9 @@ function configurePtzPresets(camera, listItem) {
         liveFrame.classList.remove('loaded');
         livePreview.hidden = false;
         livePreview.classList.remove('loaded');
-        livePlaceholder.textContent = 'Tap to start alignment view';
+        livePlaceholder.textContent = 'Click to start low-resolution aiming stream';
         liveIdleTimer = null;
-        if (status.textContent === 'Alignment view loaded') {
+        if (status.textContent === 'Aiming stream loaded') {
             status.textContent = '';
         }
     };
@@ -836,17 +844,21 @@ function configurePtzPresets(camera, listItem) {
         }
     };
     const loadLiveView = () => {
+        if (!canUseLivePreview) {
+            status.textContent = 'Live preview is not configured';
+            return;
+        }
         if (canUseLivePreview && previewUsesImage && liveImage.src !== livePreviewUrl) {
-            livePlaceholder.textContent = 'Loading alignment view...';
+            livePlaceholder.textContent = 'Loading low-resolution aiming stream...';
             liveImage.src = livePreviewUrl;
-            status.textContent = 'Alignment view loaded';
+            status.textContent = 'Aiming stream loaded';
         }
         if (canUseLivePreview && !previewUsesImage && liveFrame.src !== livePreviewUrl) {
             livePreview.hidden = true;
             liveFrame.hidden = false;
             liveFrame.src = livePreviewUrl;
             liveFrame.classList.add('loaded');
-            status.textContent = 'Alignment view loaded';
+            status.textContent = 'Aiming stream loaded';
         }
         if (canUseLivePreview) {
             scheduleLiveViewUnload();
@@ -858,8 +870,8 @@ function configurePtzPresets(camera, listItem) {
     };
     liveImage.onerror = () => {
         livePreview.classList.remove('loaded');
-        livePlaceholder.textContent = 'Preview failed. Open full live view.';
-        status.textContent = 'Alignment preview failed';
+        livePlaceholder.textContent = 'Aiming stream failed. Open high-resolution stream.';
+        status.textContent = 'Aiming stream failed';
     };
     livePreview.onclick = loadLiveView;
     liveView.onclick = event => {
