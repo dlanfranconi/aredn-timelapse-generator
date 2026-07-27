@@ -59,6 +59,7 @@ from fenetre.admin_server import (
     metric_sleep_time_seconds,
     metric_timelapses_created_total,
     metric_work_directory_size_bytes,
+    _go2rtc_runtime_status,
     _sync_go2rtc_runtime,
 )
 from fenetre.archive import (
@@ -1664,6 +1665,31 @@ window.location.replace({json.dumps(next_url)});
             },
         )
 
+    def _handle_go2rtc_status_api(self):
+        try:
+            user = self._public_session_user()
+            if not user:
+                self._send_public_auth_required()
+                return
+            if effective_user_role(user) not in {"admin", "superadmin"}:
+                self._send_json(403, {"error": "Admin access required"})
+                return
+            current_cameras_config, current_global_config, _ = (
+                load_public_config_snapshot()
+            )
+            self._send_json(
+                200,
+                _go2rtc_runtime_status(
+                    {
+                        "global": current_global_config or {},
+                        "cameras": current_cameras_config or {},
+                    }
+                ),
+            )
+        except Exception as exc:
+            logger.error("Unexpected go2rtc status error.", exc_info=True)
+            self._send_json(500, {"error": str(exc)})
+
     def _handle_live_view_heartbeat_api(self):
         try:
             user = self._public_session_user()
@@ -2052,6 +2078,9 @@ window.location.replace({json.dumps(next_url)});
             return
         if parsed_url.path == "/api/auth/status":
             self._handle_public_auth_status_api()
+            return
+        if parsed_url.path == "/api/go2rtc/status":
+            self._handle_go2rtc_status_api()
             return
         if parsed_url.path == "/api/auth/basic-login":
             self._handle_public_basic_login_api()

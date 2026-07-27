@@ -224,6 +224,66 @@ class TestFenetre(unittest.TestCase):
         ):
             self.assertTrue(handler._launch_workflow_enabled())
 
+    def test_go2rtc_status_api_allows_admin_on_public_server(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._public_session_user = lambda: {
+            "username": "admin",
+            "role": "admin",
+        }
+        handler._send_json = lambda status, payload: responses.append(
+            (status, payload)
+        )
+        snapshot = (
+            {"cam1": {"rtsp_url": "rtsp://camera/stream"}},
+            {"go2rtc": {"enabled": True}},
+            {},
+        )
+
+        with patch.object(
+            fenetre_module, "load_public_config_snapshot", return_value=snapshot
+        ), patch.object(
+            fenetre_module,
+            "_go2rtc_runtime_status",
+            return_value={"api_reachable": True},
+        ) as mock_status:
+            handler._handle_go2rtc_status_api()
+
+        self.assertEqual(responses, [(200, {"api_reachable": True})])
+        mock_status.assert_called_once_with(
+            {
+                "global": {"go2rtc": {"enabled": True}},
+                "cameras": {"cam1": {"rtsp_url": "rtsp://camera/stream"}},
+            }
+        )
+
+    def test_go2rtc_status_api_requires_admin_on_public_server(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._public_session_user = lambda: {
+            "username": "viewer",
+            "role": "viewer",
+        }
+        handler._send_json = lambda status, payload: responses.append(
+            (status, payload)
+        )
+
+        with patch.object(fenetre_module, "_go2rtc_runtime_status") as mock_status:
+            handler._handle_go2rtc_status_api()
+
+        self.assertEqual(responses, [(403, {"error": "Admin access required"})])
+        mock_status.assert_not_called()
+
+    def test_go2rtc_status_api_requires_login_on_public_server(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._public_session_user = lambda: None
+        handler._send_public_auth_required = lambda: responses.append((401, {}))
+
+        handler._handle_go2rtc_status_api()
+
+        self.assertEqual(responses, [(401, {})])
+
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()
 
