@@ -433,6 +433,10 @@ class ConfigServerTestCase(unittest.TestCase):
     def test_add_snapshot_camera_preserves_rtsp_live_view_url(self, mock_go2rtc_put):
         mock_go2rtc_put.return_value.status_code = 200
         mock_go2rtc_put.return_value.raise_for_status.return_value = None
+        self.test_config_data["global"] = {"go2rtc": {"enabled": False}}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
         response = self.app.post(
             "/api/camera/add",
             data=json.dumps(

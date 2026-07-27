@@ -59,6 +59,7 @@ from fenetre.admin_server import (
     metric_sleep_time_seconds,
     metric_timelapses_created_total,
     metric_work_directory_size_bytes,
+    _sync_go2rtc_runtime,
 )
 from fenetre.archive import (
     archive_daydir,
@@ -2352,6 +2353,31 @@ def update_cameras_metadata(cameras_configs: Dict, work_dir: str):
     )
 
 
+def sync_go2rtc_runtime(previous_config: Optional[Dict] = None):
+    current_config = {
+        "global": global_config or {},
+        "cameras": cameras_config or {},
+    }
+    try:
+        result = _sync_go2rtc_runtime(current_config, previous_config)
+    except Exception as exc:
+        logger.warning("go2rtc runtime sync failed: %s", exc, exc_info=True)
+        return
+
+    if result.get("api_synced"):
+        started = " and started" if result.get("started") else ""
+        logger.info(
+            "go2rtc runtime synced%s with %d stream(s): %s",
+            started,
+            len(result.get("streams") or []),
+            ", ".join(result.get("streams") or []),
+        )
+    elif result.get("enabled"):
+        logger.warning("go2rtc runtime not synced: %s", result.get("warning"))
+    else:
+        logger.info("go2rtc not started; no enabled RTSP live streams configured.")
+
+
 timelapse_thread_global = None
 daylight_thread_global = None
 archive_thread_global = None
@@ -2497,6 +2523,12 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
     global server_config, cameras_config, global_config, admin_server_config, timelapse_config, flask_app_instance
 
     logger.info("Loading and applying configuration...")
+    previous_runtime_config = None
+    if not initial_load:
+        previous_runtime_config = {
+            "global": globals().get("global_config") or {},
+            "cameras": globals().get("cameras_config") or {},
+        }
 
     config_path_to_load = config_file_override if config_file_override else FLAGS.config
     if not config_path_to_load:
@@ -2589,6 +2621,8 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
         logger.error(
             "work_dir not set in global config. Cannot update camera metadata."
         )
+
+    sync_go2rtc_runtime(previous_runtime_config)
 
     manage_camera_threads()
 

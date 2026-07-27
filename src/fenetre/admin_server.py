@@ -514,8 +514,7 @@ def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
     if not isinstance(go2rtc_config, dict):
         global_config["go2rtc"] = {"enabled": True}
         return
-    if "enabled" not in go2rtc_config:
-        go2rtc_config["enabled"] = True
+    go2rtc_config["enabled"] = True
 
 
 def _merge_persistent_users(new_config: dict, existing_config: dict) -> None:

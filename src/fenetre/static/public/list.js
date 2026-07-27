@@ -747,18 +747,18 @@ function configurePtzPresets(camera, listItem) {
     const liveIdleTimeoutMs = liveIdleTimeoutS > 0 ? liveIdleTimeoutS * 1000 : 0;
     let liveIdleTimer = null;
     let presetsLoaded = cachedPresets.length > 0;
-    const canUsePresets = ptz.enabled
-        && ptz.allow_presets
+    const userHasPtzAccess = ptz.enabled
         && userAllowedCamera
         && ['presets', 'manual', 'admin'].includes(userAccess);
+    const canUsePresets = userHasPtzAccess && ptz.allow_presets;
     const canUseManual = ptz.enabled
         && ptz.allow_manual_control
         && userAllowedCamera
         && ['manual', 'admin'].includes(userAccess);
     const canUseTour = canUseManual && ptz.tour && ptz.tour.enabled;
-    const canShowLivePreview = canUseManual || canUsePresets;
+    const canShowLivePreview = userHasPtzAccess;
     const canUseLivePreview = canShowLivePreview && Boolean(livePreviewUrl);
-    if (!canUsePresets && !canUseManual) {
+    if (!canUsePresets && !canUseManual && !canShowLivePreview) {
         wrapper.hidden = true;
         if (liveIdleTimer) {
             clearTimeout(liveIdleTimer);
