@@ -793,7 +793,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(go2rtc["same_host_port"], 11984)
         self.assertEqual(
             go2rtc["preview_urls"]["aredncameras.aredn805.net"],
-            "https://stream.aredn805.net/api/stream.mjpeg?src=site_North_Ridge_Camera",
+            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
         )
         self.assertEqual(
             go2rtc["full_player_urls"]["10.123.159.233"],
@@ -858,7 +858,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             global_conf["go2rtc"]["preview_url_template"],
-            "{base_url}/api/stream.mjpeg?src={stream}",
+            "{base_url}/stream.html?src={stream}&media=video&muted=1",
         )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],

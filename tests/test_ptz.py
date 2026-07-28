@@ -476,7 +476,7 @@ class PTZTestCase(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["skipped"])
 
-    def test_tour_control_uses_onvif_preset_tour_operation(self):
+    def test_tour_pause_uses_onvif_pause_operation(self):
         media = MagicMock()
         media.GetProfiles.return_value = [MagicMock(token="profile-1")]
         ptz = MagicMock()
@@ -514,6 +514,43 @@ class PTZTestCase(unittest.TestCase):
         ptz.create_type.assert_called_once_with("OperatePresetTour")
         self.assertEqual(request.ProfileToken, "profile-1")
         self.assertEqual(request.PresetTourToken, "tour-1")
+        self.assertEqual(request.Operation, "Pause")
+        ptz.OperatePresetTour.assert_called_once_with(request)
+
+    def test_tour_stop_uses_onvif_stop_operation(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        request = MagicMock()
+        ptz.create_type.return_value = request
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "profile_token": "profile-1",
+                "tour": {
+                    "enabled": True,
+                    "preset_tour_token": "tour-1",
+                    "auto_resume_s": 1800,
+                },
+            }
+        }
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            result = set_tour_state("cam1", camera_config, "stop")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tour"], "stop")
+        self.assertEqual(result["tour_status"]["state"], "stopped")
+        self.assertEqual(result["tour_status"]["seconds_until_resume"], 0)
         self.assertEqual(request.Operation, "Stop")
         ptz.OperatePresetTour.assert_called_once_with(request)
 

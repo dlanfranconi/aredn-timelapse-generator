@@ -246,7 +246,7 @@ global:
     base_urls:
       aredncameras.aredn805.net: https://stream.aredn805.net
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
-    preview_url_template: "{base_url}/api/stream.mjpeg?src={stream}"
+    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"
@@ -255,7 +255,7 @@ global:
     live_view_idle_timeout_s: 60
 ```
 
-The default full player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. The low-resolution PTZ aiming preview uses go2rtc's MJPEG endpoint by default so aiming does not open a full player session. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
+The default full player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. The PTZ aiming preview uses the low-resolution go2rtc stream, not the `_full` stream. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
 
 For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate.
 
@@ -343,7 +343,7 @@ ptz:
     auto_resume_s: 1800
 ```
 
-When enabled, authorized manual-PTZ users see Pause Tour and Resume Tour controls. Manual movement, focus movement, and preset moves mark the runtime tour state as paused, and the public controls switch to Resume Tour. `auto_resume_s: 1800` resumes the tour 30 minutes after an explicit tour pause or manual control takeover. Set it to `0` to disable auto-resume.
+When enabled, authorized manual-PTZ users see context-aware Start Tour, Stop Tour, Pause Tour, and Resume Tour controls. Manual movement, focus movement, and preset moves mark the runtime tour state as paused, and the public controls switch to Resume Tour. `auto_resume_s: 1800` resumes the tour 30 minutes after an explicit tour pause or manual control takeover. Set it to `0` to disable auto-resume.
 
 For legacy cameras that crash on ONVIF or RTSP sessions, keep the camera as snapshot-only or RTSP-capture-only and set `ptz.enabled: false` and `go2rtc_enabled: false`. That keeps the deployment clean without adding vendor-specific crash workarounds to the normal path.
 

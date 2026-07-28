@@ -30,9 +30,9 @@ global:
       aredncameras.aredn805.net: https://stream.aredn805.net
     # stream.html is the default compatibility player. Fenetre keeps generated
     # player URLs video-only and muted by default. The PTZ aiming preview uses
-    # go2rtc MJPEG by default to avoid opening another full player session.
+    # the low-resolution go2rtc stream rather than the _full stream.
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
-    preview_url_template: "{base_url}/api/stream.mjpeg?src={stream}"
+    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
     api_listen: ":1984"
     rtsp_listen: ":8554"

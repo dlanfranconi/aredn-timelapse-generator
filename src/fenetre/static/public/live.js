@@ -73,7 +73,7 @@
         if (!baseUrl) {
             return '';
         }
-        return `${baseUrl}/api/stream.mjpeg?src=${encodeURIComponent(streamName)}`;
+        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
     }
 
     function browserHostCandidates() {

@@ -2291,7 +2291,7 @@ window.location.replace({json.dumps(next_url)});
                 self._schedule_ptz_tour_resume(
                     camera_name, int(result.get("auto_resume_s") or 0), owner
                 )
-            elif result.get("tour") == "resume":
+            elif result.get("tour") in {"resume", "start", "stop"}:
                 self._cancel_ptz_tour_resume(camera_name)
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:

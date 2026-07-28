@@ -205,7 +205,7 @@ def mark_tour_state(
     camera_name: str, state: str, owner: str = "", auto_resume_s: int = 0
 ) -> Dict[str, Any]:
     normalized_state = str(state or "").strip().lower()
-    if normalized_state not in {"paused", "running", "unknown"}:
+    if normalized_state not in {"paused", "running", "stopped", "unknown"}:
         normalized_state = "unknown"
     now = _now()
     auto_resume_at = now + max(0, int(auto_resume_s or 0)) if auto_resume_s else None
@@ -589,12 +589,20 @@ def _tour_token(tour_config: Dict[str, Any]) -> str:
 
 def _tour_operation(tour_config: Dict[str, Any], action: str) -> str:
     if action == "pause":
+        return str(tour_config.get("pause_operation") or "Pause")
+    if action == "stop":
+        return str(tour_config.get("stop_operation") or "Stop")
+    if action == "start":
         return str(
-            tour_config.get("pause_operation")
-            or tour_config.get("stop_operation")
-            or "Stop"
+            tour_config.get("start_operation")
+            or tour_config.get("resume_operation")
+            or "Start"
         )
-    return str(tour_config.get("resume_operation") or "Start")
+    return str(
+        tour_config.get("resume_operation")
+        or tour_config.get("start_operation")
+        or "Start"
+    )
 
 
 def _send_onvif_tour_operation(
@@ -638,17 +646,32 @@ def _send_http_tour_operation(
     tour_config: Dict[str, Any],
     action: str,
 ):
-    url = tour_config.get(f"{action}_url")
-    if not url and action == "pause":
-        url = tour_config.get("stop_url")
-    if not url and action == "resume":
-        url = tour_config.get("start_url")
+    aliases = {
+        "pause": ("pause", "stop"),
+        "resume": ("resume", "start"),
+        "start": ("start", "resume"),
+        "stop": ("stop",),
+    }.get(action, (action,))
+    url = next(
+        (
+            tour_config.get(f"{alias}_url")
+            for alias in aliases
+            if tour_config.get(f"{alias}_url")
+        ),
+        None,
+    )
     if not url:
         raise PTZError(f"No HTTP tour URL is configured for {action}.")
 
-    method = str(
-        tour_config.get(f"{action}_method") or tour_config.get("method") or "GET"
+    method_value = next(
+        (
+            tour_config.get(f"{alias}_method")
+            for alias in aliases
+            if tour_config.get(f"{alias}_method")
+        ),
+        None,
     )
+    method = str(method_value or tour_config.get("method") or "GET")
     timeout = float(tour_config.get("timeout_s") or 5)
     auth = None
     if _bool_config(tour_config.get("use_ptz_auth"), True):
@@ -872,14 +895,20 @@ def set_tour_state(
         raise PTZError("PTZ tour control is not enabled for this camera.")
 
     normalized_action = str(action or "").strip().lower()
-    if normalized_action in {"disable", "disabled", "pause", "stop"}:
+    if normalized_action == "pause":
         normalized_action = "pause"
         tour_state = "paused"
-    elif normalized_action in {"enable", "enabled", "resume", "start"}:
+    elif normalized_action in {"stop", "disable", "disabled"}:
+        normalized_action = "stop"
+        tour_state = "stopped"
+    elif normalized_action == "resume":
         normalized_action = "resume"
         tour_state = "running"
+    elif normalized_action in {"start", "enable", "enabled"}:
+        normalized_action = "start"
+        tour_state = "running"
     else:
-        raise PTZError("tour action must be pause or resume.")
+        raise PTZError("tour action must be start, stop, pause, or resume.")
 
     session = acquire_session(camera_name, owner, duration_s)
     backend = str(tour_config.get("backend") or "onvif").strip().lower()

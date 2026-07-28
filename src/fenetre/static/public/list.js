@@ -127,7 +127,7 @@ function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
     if (!baseUrl) {
         return '';
     }
-    return `${baseUrl}/api/stream.mjpeg?src=${encodeURIComponent(streamName)}`;
+    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
 }
 
 function browserHostCandidates() {
@@ -963,8 +963,11 @@ function createCameraListItem(camera) {
                     </div>
                 </div>
                 <div class="ptz-tour" hidden>
-                    <button type="button" data-tour="pause">Pause tour</button>
-                    <button type="button" data-tour="resume">Resume tour</button>
+                    <div class="ptz-tour-label">Tour control</div>
+                    <button type="button" data-tour="start" title="Start tour" aria-label="Start tour"><span aria-hidden="true">&#9654;</span></button>
+                    <button type="button" data-tour="stop" title="Stop tour" aria-label="Stop tour"><span aria-hidden="true">&#9632;</span></button>
+                    <button type="button" data-tour="pause" title="Pause tour" aria-label="Pause tour"><span aria-hidden="true">&#9208;</span></button>
+                    <button type="button" data-tour="resume" title="Resume tour" aria-label="Resume tour"><span aria-hidden="true">&#9654;</span></button>
                 </div>
                 <div class="ptz-live-view" hidden>
                     <button class="ptz-live-preview" type="button" aria-label="Start PTZ alignment preview">
@@ -1025,6 +1028,8 @@ function configurePtzPresets(camera, listItem) {
     const livePreviewUrl = go2rtcPreviewPlayerUrl(go2rtc);
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
     const fullLivePlayerUrl = go2rtc.full_view_url || go2rtcFullPlayerUrl(go2rtc);
+    const fullLivePageUrl = `/live.html?camera=${encodeURIComponent(id)}&stream=full`;
+    const previewLivePageUrl = `/live.html?camera=${encodeURIComponent(id)}&stream=preview`;
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
         : 60;
@@ -1083,18 +1088,39 @@ function configurePtzPresets(camera, listItem) {
         const secondsUntilResume = Number(currentStatus.seconds_until_resume || 0);
         listItem._ptzTourState = state;
         listItem._ptzTourStatus = { ...currentStatus, state };
-        const pauseButton = tourControls.querySelector('[data-tour="pause"]');
-        const resumeButton = tourControls.querySelector('[data-tour="resume"]');
-        if (pauseButton) {
-            pauseButton.disabled = state === 'paused';
-            pauseButton.textContent = state === 'paused' ? 'Tour paused' : 'Pause tour';
+        const buttons = {
+            start: tourControls.querySelector('[data-tour="start"]'),
+            stop: tourControls.querySelector('[data-tour="stop"]'),
+            pause: tourControls.querySelector('[data-tour="pause"]'),
+            resume: tourControls.querySelector('[data-tour="resume"]')
+        };
+        Object.values(buttons).forEach(item => {
+            if (item) {
+                item.hidden = false;
+                item.disabled = false;
+            }
+        });
+        if (state === 'running') {
+            if (buttons.start) buttons.start.hidden = true;
+            if (buttons.resume) buttons.resume.hidden = true;
+        } else if (state === 'paused') {
+            if (buttons.start) buttons.start.hidden = true;
+            if (buttons.pause) buttons.pause.hidden = true;
+        } else if (state === 'stopped') {
+            if (buttons.stop) buttons.stop.hidden = true;
+            if (buttons.pause) buttons.pause.hidden = true;
+            if (buttons.resume) buttons.resume.hidden = true;
         }
-        if (resumeButton) {
-            resumeButton.disabled = state === 'running';
-            resumeButton.textContent = secondsUntilResume > 0
+        if (buttons.resume) {
+            const resumeLabel = secondsUntilResume > 0
                 ? `Resume tour (${secondsUntilResume}s)`
-                : (state === 'running' ? 'Tour running' : 'Resume tour');
+                : 'Resume tour';
+            buttons.resume.title = resumeLabel;
+            buttons.resume.setAttribute('aria-label', resumeLabel);
         }
+        if (buttons.start) buttons.start.title = 'Start tour';
+        if (buttons.stop) buttons.stop.title = 'Stop tour';
+        if (buttons.pause) buttons.pause.title = 'Pause tour';
     };
     applyTourStatus(null);
     const roseControls = manual.querySelector('.ptz-rose');
@@ -1119,7 +1145,7 @@ function configurePtzPresets(camera, listItem) {
     liveView.hidden = !canShowLivePreview;
     liveView.classList.toggle('ptz-live-view-unavailable', canShowLivePreview && !livePreviewUrl);
     if (canUseLivePreview) {
-        liveLink.href = fullLivePlayerUrl || livePreviewUrl;
+        liveLink.href = fullLivePlayerUrl ? fullLivePageUrl : previewLivePageUrl;
         liveLink.hidden = false;
         if (!liveImage.src && liveFrame.src === 'about:blank') {
             livePlaceholder.textContent = 'Click to start low-resolution aiming stream';
@@ -1337,7 +1363,13 @@ function configurePtzPresets(camera, listItem) {
         tourButton.onclick = async () => {
             tourControls.querySelectorAll('button').forEach(item => { item.disabled = true; });
             const action = tourButton.dataset.tour || 'pause';
-            status.textContent = action === 'pause' ? 'Pausing tour...' : 'Resuming tour...';
+            const actionProgress = {
+                start: 'Starting tour...',
+                stop: 'Stopping tour...',
+                pause: 'Pausing tour...',
+                resume: 'Resuming tour...'
+            };
+            status.textContent = actionProgress[action] || 'Updating tour...';
             try {
                 const response = await fetch('/api/ptz/tour', {
                     method: 'POST',
@@ -1351,10 +1383,16 @@ function configurePtzPresets(camera, listItem) {
                 if (action === 'pause' && result.auto_resume_s > 0) {
                     status.textContent = `Tour paused; resumes in ${result.auto_resume_s}s`;
                 } else {
-                    status.textContent = action === 'pause' ? 'Tour paused' : 'Tour resumed';
+                    const actionDone = {
+                        start: 'Tour started',
+                        stop: 'Tour stopped',
+                        pause: 'Tour paused',
+                        resume: 'Tour resumed'
+                    };
+                    status.textContent = actionDone[action] || 'Tour updated';
                 }
                 applyTourStatus(result.tour_status || {
-                    state: action === 'pause' ? 'paused' : 'running',
+                    state: action === 'stop' ? 'stopped' : (action === 'pause' ? 'paused' : 'running'),
                     seconds_until_resume: action === 'pause' ? Number(result.auto_resume_s || 0) : 0
                 });
             } catch (error) {

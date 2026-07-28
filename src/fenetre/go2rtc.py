@@ -9,7 +9,9 @@ _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 _DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}&media=video&muted=1"
 _OLD_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
 _LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
-_DEFAULT_PREVIEW_URL_TEMPLATE = "{base_url}/api/stream.mjpeg?src={stream}"
+_DEFAULT_PREVIEW_URL_TEMPLATE = (
+    "{base_url}/stream.html?src={stream}&media=video&muted=1"
+)
 
 
 def _go2rtc_config(global_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:

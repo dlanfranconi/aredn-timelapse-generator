@@ -556,6 +556,23 @@ body.dark-mode .camera-metadata {
     flex-wrap: wrap;
 }
 
+.ptz-tour-label {
+    color: #4b5563;
+    flex-basis: 100%;
+    font-size: 0.82em;
+    font-weight: 600;
+}
+
+.ptz-tour button {
+    align-items: center;
+    display: inline-flex;
+    font-size: 1.1em;
+    height: 36px;
+    justify-content: center;
+    min-width: 36px;
+    padding: 0;
+}
+
 .ptz-speed-control,
 .ptz-duration-control {
     align-items: center;
@@ -773,6 +790,9 @@ body.dark-mode .ptz-presets select {
     color: #e0e0e0;
 }
 body.dark-mode .ptz-status {
+    color: #bbb;
+}
+body.dark-mode .ptz-tour-label {
     color: #bbb;
 }
 body.dark-mode .ptz-live-preview {
