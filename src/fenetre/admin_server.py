@@ -579,6 +579,8 @@ def _go2rtc_runtime_status(config: dict) -> dict:
         ),
         "api_base": api_base,
         "base_url_configured": bool(str(go2rtc_config.get("base_url") or "").strip()),
+        "base_urls_configured": bool(go2rtc_config.get("base_urls") or {}),
+        "base_url_hosts": sorted((go2rtc_config.get("base_urls") or {}).keys()),
         "same_host_fallback_enabled": not bool(
             str(go2rtc_config.get("base_url") or "").strip()
         ),

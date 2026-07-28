@@ -23,8 +23,11 @@ global:
 
   go2rtc:
     enabled: true
-    # Set this to the host/IP and port browsers can reach.
-    base_url: http://HOST_OR_IP:1984
+    # Leave blank to let local/offline browsers use the current host on port 1984.
+    base_url: ""
+    # Optional exact browser-host overrides, useful for Cloudflare Tunnel hostnames.
+    base_urls:
+      aredncameras.aredn805.net: https://streams.aredncameras.aredn805.net
     # stream.html is the default compatibility player. Fenetre keeps generated
     # player URLs video-only and muted by default.
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"

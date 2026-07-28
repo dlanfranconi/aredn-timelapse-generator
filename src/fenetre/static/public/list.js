@@ -119,7 +119,29 @@ function sameHostGo2rtcPlayerUrl(go2rtc, streamName) {
     return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
 }
 
+function hostSpecificGo2rtcPlayerUrl(urlsByHost) {
+    if (!urlsByHost || typeof urlsByHost !== 'object') {
+        return '';
+    }
+    const candidates = [
+        window.location.host,
+        window.location.hostname
+    ]
+        .filter(Boolean)
+        .map(value => value.toLowerCase());
+    for (const host of candidates) {
+        if (urlsByHost[host]) {
+            return mutedGo2rtcPlayerUrl(urlsByHost[host]);
+        }
+    }
+    return '';
+}
+
 function go2rtcPreviewPlayerUrl(go2rtc) {
+    const hostUrl = hostSpecificGo2rtcPlayerUrl(go2rtc.preview_urls || go2rtc.player_urls);
+    if (hostUrl) {
+        return hostUrl;
+    }
     const configuredUrl = mutedGo2rtcPlayerUrl(go2rtc.preview_url || go2rtc.player_url);
     if (configuredUrl) {
         return configuredUrl;
@@ -131,6 +153,12 @@ function go2rtcPreviewPlayerUrl(go2rtc) {
 }
 
 function go2rtcFullPlayerUrl(go2rtc) {
+    const hostUrl = hostSpecificGo2rtcPlayerUrl(
+        go2rtc.full_player_urls || go2rtc.player_urls
+    );
+    if (hostUrl) {
+        return hostUrl;
+    }
     const configuredUrl = mutedGo2rtcPlayerUrl(go2rtc.full_player_url || go2rtc.player_url);
     if (configuredUrl) {
         return configuredUrl;

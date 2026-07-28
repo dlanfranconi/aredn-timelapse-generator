@@ -761,6 +761,46 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("rtsp://", encoded)
         self.assertNotIn("secret", encoded)
 
+    def test_cameras_metadata_publishes_host_specific_go2rtc_urls(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                    "ptz_rtsp_url": "rtsp://admin:secret@example.test:554/stream2",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "",
+                    "base_urls": {
+                        "aredncameras.aredn805.net": "https://streams.aredncameras.aredn805.net/",
+                        "10.123.159.233": "http://10.123.159.233:1984",
+                    },
+                    "api_listen": ":11984",
+                    "stream_name_prefix": "site_",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        go2rtc = metadata["cameras"][0]["go2rtc"]
+        self.assertFalse(go2rtc["base_url_configured"])
+        self.assertTrue(go2rtc["base_urls_configured"])
+        self.assertEqual(go2rtc["same_host_port"], 11984)
+        self.assertEqual(
+            go2rtc["preview_urls"]["aredncameras.aredn805.net"],
+            "https://streams.aredncameras.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
+        )
+        self.assertEqual(
+            go2rtc["full_player_urls"]["10.123.159.233"],
+            "http://10.123.159.233:1984/stream.html?src=site_North_Ridge_Camera_full&media=video&muted=1",
+        )
+        self.assertNotIn("player_url", go2rtc)
+
     def test_cameras_metadata_omits_disabled_camera_go2rtc(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(
@@ -791,6 +831,9 @@ class FenetreConfigTestCase(unittest.TestCase):
                 "go2rtc": {
                     "enabled": True,
                     "base_url": "http://go2rtc.local:1984",
+                    "base_urls": {
+                        "AREDnCameras.AREDN805.net": "https://streams.aredncameras.aredn805.net/"
+                    },
                     "player_url_template": "{base_url}/webrtc.html?src={stream}",
                     "preview_url_template": "{base_url}/api/stream.mjpeg?src={stream}",
                     "stream_name_prefix": "mesh_",
@@ -809,6 +852,12 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertTrue(global_conf["go2rtc"]["enabled"])
         self.assertEqual(global_conf["go2rtc"]["base_url"], "http://go2rtc.local:1984")
+        self.assertEqual(
+            global_conf["go2rtc"]["base_urls"],
+            {
+                "aredncameras.aredn805.net": "https://streams.aredncameras.aredn805.net"
+            },
+        )
         self.assertEqual(
             global_conf["go2rtc"]["preview_url_template"],
             "{base_url}/api/stream.mjpeg?src={stream}",

@@ -240,7 +240,11 @@ Recommended defaults:
 global:
   go2rtc:
     enabled: true
-    base_url: http://HOST:1984  # optional when browsers can use the Fenetre host on port 1984
+    # Leave base_url blank when local/offline users should use the current host on port 1984.
+    base_url: ""
+    # Optional exact browser-host overrides. Use this for Cloudflare/Tunnel hostnames.
+    base_urls:
+      aredncameras.aredn805.net: https://streams.aredncameras.aredn805.net
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
@@ -251,7 +255,7 @@ global:
     live_view_idle_timeout_s: 60
 ```
 
-The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Set `base_url` explicitly when browsers must use a different host, scheme, proxy path, or HTTPS endpoint.
+The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. Set `base_url` only as a default for every browser host that does not match `base_urls`.
 
 `rtsp_url` and `ptz_rtsp_url` have different jobs:
 

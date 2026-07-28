@@ -469,6 +469,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         {
             "enabled",
             "base_url",
+            "base_urls",
             "player_url_template",
             "preview_url_template",
             "stream_name_prefix",
@@ -490,7 +491,30 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.go2rtc.base_url",
         errors,
         default="",
-    )
+    ).rstrip("/")
+    base_urls_cfg = go2rtc_cfg.get("base_urls")
+    base_urls_out = {}
+    if base_urls_cfg is None:
+        base_urls_cfg = {}
+    if isinstance(base_urls_cfg, dict):
+        for host, base_url in base_urls_cfg.items():
+            entry_path = f"global.go2rtc.base_urls.{host}"
+            if not isinstance(host, str):
+                errors.append(
+                    f"global.go2rtc.base_urls: expected string host keys, got {type(host).__name__}"
+                )
+                continue
+            host_key = host.strip().lower()
+            if not host_key:
+                continue
+            base_url_value = _str(base_url, entry_path, errors, default="")
+            if base_url_value:
+                base_urls_out[host_key] = base_url_value.rstrip("/")
+    else:
+        errors.append(
+            f"global.go2rtc.base_urls: expected mapping, got {type(base_urls_cfg).__name__}"
+        )
+    go2rtc_out["base_urls"] = base_urls_out
     player_url_template = _str(
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",

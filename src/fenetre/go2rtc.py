@@ -21,6 +21,19 @@ def _go2rtc_config(global_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return config if isinstance(config, dict) else {}
 
 
+def _host_base_urls(config: Dict[str, Any]) -> Dict[str, str]:
+    base_urls = config.get("base_urls") or {}
+    if not isinstance(base_urls, dict):
+        return {}
+    normalized = {}
+    for host, base_url in base_urls.items():
+        host_key = str(host or "").strip().lower()
+        base_url_text = str(base_url or "").strip().rstrip("/")
+        if host_key and base_url_text:
+            normalized[host_key] = base_url_text
+    return normalized
+
+
 def sanitize_stream_name(value: str) -> str:
     stream = _STREAM_NAME_PATTERN.sub("_", value.strip())
     stream = stream.strip("_")
@@ -126,6 +139,7 @@ def build_go2rtc_metadata(
 ) -> Optional[Dict[str, Any]]:
     config = _go2rtc_config(global_config)
     base_url = str(config.get("base_url") or "").rstrip("/")
+    base_urls = _host_base_urls(config)
     if not config.get("enabled"):
         return None
     if camera_config.get("go2rtc_enabled") is False:
@@ -151,6 +165,8 @@ def build_go2rtc_metadata(
         "full_stream": full_stream_name,
         "full_view_url": f"live.html?camera={quote(camera_name, safe='')}&stream=full",
         "base_url_configured": bool(base_url),
+        "base_urls_configured": bool(base_urls),
+        "same_host_port": go2rtc_browser_port(global_config),
         "idle_timeout_s": int(idle_timeout_s),
     }
     if base_url:
@@ -161,8 +177,23 @@ def build_go2rtc_metadata(
                 "preview_url": _preview_url(config, base_url, stream_name),
             }
         )
-    else:
-        metadata["same_host_port"] = go2rtc_browser_port(global_config)
+    if base_urls:
+        metadata.update(
+            {
+                "player_urls": {
+                    host: _player_url(config, host_base_url, stream_name)
+                    for host, host_base_url in base_urls.items()
+                },
+                "full_player_urls": {
+                    host: _player_url(config, host_base_url, full_stream_name)
+                    for host, host_base_url in base_urls.items()
+                },
+                "preview_urls": {
+                    host: _preview_url(config, host_base_url, stream_name)
+                    for host, host_base_url in base_urls.items()
+                },
+            }
+        )
     return metadata
 
 
