@@ -6,11 +6,15 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import yaml
 
 _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
-_DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+_DEFAULT_PLAYER_MODE = "webrtc,webrtc/tcp,mse,mp4"
+_DEFAULT_PREVIEW_MODE = _DEFAULT_PLAYER_MODE
+_DEFAULT_PLAYER_URL_TEMPLATE = (
+    "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+)
 _OLD_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
 _LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
 _DEFAULT_PREVIEW_URL_TEMPLATE = (
-    "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
 )
 
 
@@ -72,7 +76,9 @@ def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(config.get("player_url_template") or _DEFAULT_PLAYER_URL_TEMPLATE)
     if template in {_LEGACY_PLAYER_URL_TEMPLATE, _OLD_PLAYER_URL_TEMPLATE}:
         template = _DEFAULT_PLAYER_URL_TEMPLATE
-    return _stream_url_from_template(config, base_url, stream_name, template)
+    return _stream_url_from_template(
+        config, base_url, stream_name, template, _go2rtc_player_mode(config)
+    )
 
 
 def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
@@ -83,11 +89,30 @@ def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str
         _DEFAULT_PLAYER_URL_TEMPLATE,
     }:
         template = _DEFAULT_PREVIEW_URL_TEMPLATE
-    return _stream_url_from_template(config, base_url, stream_name, template)
+    return _stream_url_from_template(
+        config, base_url, stream_name, template, _go2rtc_preview_mode(config)
+    )
+
+
+def _go2rtc_player_mode(config: Dict[str, Any]) -> str:
+    return (
+        str(config.get("player_mode") or _DEFAULT_PLAYER_MODE).strip()
+        or _DEFAULT_PLAYER_MODE
+    )
+
+
+def _go2rtc_preview_mode(config: Dict[str, Any]) -> str:
+    return str(
+        config.get("preview_mode") or config.get("player_mode") or _DEFAULT_PREVIEW_MODE
+    ).strip() or _DEFAULT_PREVIEW_MODE
 
 
 def _stream_url_from_template(
-    config: Dict[str, Any], base_url: str, stream_name: str, template: str
+    config: Dict[str, Any],
+    base_url: str,
+    stream_name: str,
+    template: str,
+    mode: str,
 ) -> str:
     encoded_stream = quote(stream_name, safe="")
     try:
@@ -95,13 +120,19 @@ def _stream_url_from_template(
             base_url=base_url,
             stream=encoded_stream,
             stream_name=stream_name,
+            mode=quote(mode, safe="/,"),
+            player_mode=quote(_go2rtc_player_mode(config), safe="/,"),
+            preview_mode=quote(_go2rtc_preview_mode(config), safe="/,"),
         )
     except (IndexError, KeyError, ValueError):
-        rendered = f"{base_url}/stream.html?src={encoded_stream}&media=video&muted=1"
-    return _force_muted_player_url(rendered)
+        rendered = (
+            f"{base_url}/stream.html?src={encoded_stream}"
+            f"&mode={quote(mode, safe='/,')}&media=video&muted=1"
+        )
+    return _force_muted_player_url(rendered, mode)
 
 
-def _force_muted_player_url(url: str) -> str:
+def _force_muted_player_url(url: str, mode: str = "") -> str:
     parsed = urlsplit(url)
     player_path = parsed.path.rsplit("/", 1)[-1]
     if player_path not in {"stream.html", "webrtc.html"}:
@@ -112,6 +143,8 @@ def _force_muted_player_url(url: str) -> str:
         for key, value in parse_qsl(parsed.query, keep_blank_values=True)
         if key.lower() not in {"media", "muted"}
     ]
+    if player_path == "stream.html" and mode and not _has_url_query_key(query, "mode"):
+        query.append(("mode", mode))
     query.extend([("media", "video"), ("muted", "1")])
     return urlunsplit(
         (
@@ -122,6 +155,11 @@ def _force_muted_player_url(url: str) -> str:
             parsed.fragment,
         )
     )
+
+
+def _has_url_query_key(query: list[tuple[str, str]], name: str) -> bool:
+    name = name.strip().lower()
+    return any(key.strip().lower() == name for key, _ in query)
 
 
 def _split_go2rtc_source_params(source_text: str) -> tuple[str, list[str]]:
@@ -142,13 +180,21 @@ def _join_go2rtc_source_params(base: str, params: list[str]) -> str:
 
 
 def _go2rtc_source_mode(config: Dict[str, Any], camera_config: Dict[str, Any]) -> str:
-    mode = str(
-        camera_config.get("go2rtc_source_mode") or config.get("source_mode") or "ffmpeg"
-    ).strip().lower()
+    mode = (
+        str(
+            camera_config.get("go2rtc_source_mode")
+            or config.get("source_mode")
+            or "ffmpeg"
+        )
+        .strip()
+        .lower()
+    )
     return mode if mode in {"ffmpeg", "rtsp"} else "ffmpeg"
 
 
-def _go2rtc_rtsp_timeout_s(config: Dict[str, Any], camera_config: Dict[str, Any]) -> int:
+def _go2rtc_rtsp_timeout_s(
+    config: Dict[str, Any], camera_config: Dict[str, Any]
+) -> int:
     value = camera_config.get("go2rtc_rtsp_timeout_s")
     if value is None:
         value = config.get("rtsp_timeout_s")
@@ -160,10 +206,38 @@ def _go2rtc_rtsp_timeout_s(config: Dict[str, Any], camera_config: Dict[str, Any]
         return 30
 
 
+def _go2rtc_rtsp_transport(
+    config: Dict[str, Any], camera_config: Dict[str, Any]
+) -> str:
+    transport = (
+        str(
+            camera_config.get("go2rtc_rtsp_transport")
+            or config.get("rtsp_transport")
+            or "tcp"
+        )
+        .strip()
+        .lower()
+    )
+    return transport if transport in {"tcp", "udp"} else "tcp"
+
+
+def _go2rtc_video_mode(config: Dict[str, Any], camera_config: Dict[str, Any]) -> str:
+    mode = (
+        str(
+            camera_config.get("go2rtc_video_mode") or config.get("video_mode") or "copy"
+        )
+        .strip()
+        .lower()
+    )
+    return mode if mode in {"copy", "h264", "h265", "mjpeg"} else "copy"
+
+
 def _video_only_source(
     source: Any,
     source_mode: str = "ffmpeg",
     timeout_s: int = 30,
+    rtsp_transport: str = "tcp",
+    video_mode: str = "copy",
 ) -> str:
     source_text = str(source or "").strip()
     if not source_text.lower().startswith(("rtsp://", "rtsps://")):
@@ -171,6 +245,8 @@ def _video_only_source(
 
     base, params = _split_go2rtc_source_params(source_text)
     source_mode = str(source_mode or "ffmpeg").strip().lower()
+    rtsp_transport = str(rtsp_transport or "tcp").strip().lower()
+    video_mode = str(video_mode or "copy").strip().lower()
     if source_mode == "ffmpeg":
         ffmpeg_params = [
             param
@@ -179,7 +255,9 @@ def _video_only_source(
             in {"input", "raw", "timeout", "video", "hardware"}
         ]
         if not _has_source_param(ffmpeg_params, "video"):
-            ffmpeg_params.append("video=copy")
+            ffmpeg_params.append(f"video={video_mode}")
+        if rtsp_transport == "udp" and not _has_source_param(ffmpeg_params, "input"):
+            ffmpeg_params.append("input=rtsp/udp")
         if not _has_source_param(ffmpeg_params, "timeout"):
             ffmpeg_params.append(f"timeout={timeout_s}")
         return _join_go2rtc_source_params(f"ffmpeg:{base}", ffmpeg_params)
@@ -188,6 +266,8 @@ def _video_only_source(
         params.append("media=video")
     if not _has_source_param(params, "backchannel"):
         params.append("backchannel=0")
+    if rtsp_transport == "udp" and not _has_source_param(params, "transport"):
+        params.append("transport=udp")
     if not _has_source_param(params, "timeout"):
         params.append(f"timeout={timeout_s}")
     return _join_go2rtc_source_params(base, params)
@@ -229,6 +309,8 @@ def build_go2rtc_metadata(
         "base_urls_configured": bool(base_urls),
         "same_host_port": go2rtc_browser_port(global_config),
         "idle_timeout_s": int(idle_timeout_s),
+        "player_mode": _go2rtc_player_mode(config),
+        "preview_mode": _go2rtc_preview_mode(config),
     }
     if base_url:
         metadata.update(
@@ -282,13 +364,25 @@ def build_go2rtc_runtime_config(
             stream_name = go2rtc_stream_name(str(camera_name), global_config)
             source_mode = _go2rtc_source_mode(config, camera_config)
             rtsp_timeout_s = _go2rtc_rtsp_timeout_s(config, camera_config)
+            rtsp_transport = _go2rtc_rtsp_transport(config, camera_config)
+            video_mode = _go2rtc_video_mode(config, camera_config)
             streams[stream_name] = _video_only_source(
-                alignment_source, source_mode, rtsp_timeout_s
+                alignment_source,
+                source_mode,
+                rtsp_timeout_s,
+                rtsp_transport,
+                video_mode,
             )
             full_source = camera_config.get("rtsp_url")
             if full_source and full_source != alignment_source:
                 streams[go2rtc_full_stream_name(str(camera_name), global_config)] = (
-                    _video_only_source(full_source, source_mode, rtsp_timeout_s)
+                    _video_only_source(
+                        full_source,
+                        source_mode,
+                        rtsp_timeout_s,
+                        rtsp_transport,
+                        video_mode,
+                    )
                 )
 
     if not streams:

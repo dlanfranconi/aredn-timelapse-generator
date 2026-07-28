@@ -472,9 +472,13 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "base_urls",
             "player_url_template",
             "preview_url_template",
+            "player_mode",
+            "preview_mode",
             "stream_name_prefix",
             "source_mode",
             "rtsp_timeout_s",
+            "rtsp_transport",
+            "video_mode",
             "api_listen",
             "rtsp_listen",
             "webrtc_listen",
@@ -521,19 +525,22 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
+        default="{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
     )
     if player_url_template in {
         "{base_url}/webrtc.html?src={stream}",
         "{base_url}/stream.html?src={stream}",
+        "{base_url}/stream.html?src={stream}&media=video&muted=1",
     }:
-        player_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+        player_url_template = (
+            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+        )
     go2rtc_out["player_url_template"] = player_url_template
     preview_url_template = _str(
         go2rtc_cfg.get("preview_url_template"),
         "global.go2rtc.preview_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
+        default="{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
     )
     if preview_url_template in {
         "{base_url}/webrtc.html?src={stream}",
@@ -541,8 +548,28 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "{base_url}/stream.html?src={stream}&media=video&muted=1",
         "{base_url}/api/stream.mjpeg?src={stream}",
     }:
-        preview_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+        preview_url_template = (
+            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+        )
     go2rtc_out["preview_url_template"] = preview_url_template
+    player_mode = _str(
+        go2rtc_cfg.get("player_mode"),
+        "global.go2rtc.player_mode",
+        errors,
+        default="webrtc,webrtc/tcp,mse,mp4",
+    ).strip()
+    if not player_mode:
+        player_mode = "webrtc,webrtc/tcp,mse,mp4"
+    go2rtc_out["player_mode"] = player_mode
+    preview_mode = _str(
+        go2rtc_cfg.get("preview_mode"),
+        "global.go2rtc.preview_mode",
+        errors,
+        default=player_mode,
+    ).strip()
+    if not preview_mode:
+        preview_mode = player_mode
+    go2rtc_out["preview_mode"] = preview_mode
     go2rtc_out["stream_name_prefix"] = _str(
         go2rtc_cfg.get("stream_name_prefix"),
         "global.go2rtc.stream_name_prefix",
@@ -556,12 +583,26 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default="ffmpeg",
         choices={"ffmpeg", "rtsp"},
     )
+    go2rtc_out["video_mode"] = _str(
+        go2rtc_cfg.get("video_mode"),
+        "global.go2rtc.video_mode",
+        errors,
+        default="copy",
+        choices={"copy", "h264", "h265", "mjpeg"},
+    )
     go2rtc_out["rtsp_timeout_s"] = _int(
         go2rtc_cfg.get("rtsp_timeout_s"),
         "global.go2rtc.rtsp_timeout_s",
         errors,
         default=30,
         min_value=1,
+    )
+    go2rtc_out["rtsp_transport"] = _str(
+        go2rtc_cfg.get("rtsp_transport"),
+        "global.go2rtc.rtsp_transport",
+        errors,
+        default="tcp",
+        choices={"tcp", "udp"},
     )
     go2rtc_out["api_listen"] = _str(
         go2rtc_cfg.get("api_listen"),
@@ -1343,6 +1384,20 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 f"cameras.{name}.go2rtc_rtsp_timeout_s",
                 errors,
                 min_value=1,
+            )
+        if cam.get("go2rtc_rtsp_transport") is not None:
+            cam_out["go2rtc_rtsp_transport"] = _str(
+                cam.get("go2rtc_rtsp_transport"),
+                f"cameras.{name}.go2rtc_rtsp_transport",
+                errors,
+                choices={"tcp", "udp"},
+            )
+        if cam.get("go2rtc_video_mode") is not None:
+            cam_out["go2rtc_video_mode"] = _str(
+                cam.get("go2rtc_video_mode"),
+                f"cameras.{name}.go2rtc_video_mode",
+                errors,
+                choices={"copy", "h264", "h265", "mjpeg"},
             )
         if cam.get("unavailable_command") is not None:
             cam_out["unavailable_command"] = _str(

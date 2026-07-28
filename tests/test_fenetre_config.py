@@ -270,6 +270,8 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "go2rtc_enabled": False,
                     "go2rtc_source_mode": "rtsp",
                     "go2rtc_rtsp_timeout_s": 45,
+                    "go2rtc_rtsp_transport": "udp",
+                    "go2rtc_video_mode": "h264",
                 }
             },
         }
@@ -280,6 +282,8 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertFalse(cameras_conf["cam1"]["go2rtc_enabled"])
         self.assertEqual(cameras_conf["cam1"]["go2rtc_source_mode"], "rtsp")
         self.assertEqual(cameras_conf["cam1"]["go2rtc_rtsp_timeout_s"], 45)
+        self.assertEqual(cameras_conf["cam1"]["go2rtc_rtsp_transport"], "udp")
+        self.assertEqual(cameras_conf["cam1"]["go2rtc_video_mode"], "h264")
 
     def test_config_load_camera_image_profiles(self):
         test_data = {
@@ -722,7 +726,7 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
         )
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["preview_url"],
@@ -797,11 +801,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(go2rtc["same_host_port"], 11984)
         self.assertEqual(
             go2rtc["preview_urls"]["aredncameras.aredn805.net"],
-            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
+            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
         )
         self.assertEqual(
             go2rtc["full_player_urls"]["10.123.159.233"],
-            "http://10.123.159.233:1984/stream.html?src=site_North_Ridge_Camera_full&media=video&muted=1",
+            "http://10.123.159.233:1984/stream.html?src=site_North_Ridge_Camera_full&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
         )
         self.assertNotIn("player_url", go2rtc)
 
@@ -840,9 +844,13 @@ class FenetreConfigTestCase(unittest.TestCase):
                     },
                     "player_url_template": "{base_url}/webrtc.html?src={stream}",
                     "preview_url_template": "{base_url}/api/stream.mjpeg?src={stream}",
+                    "player_mode": "mp4,mse",
+                    "preview_mode": "mse",
                     "stream_name_prefix": "mesh_",
                     "source_mode": "rtsp",
+                    "video_mode": "h264",
                     "rtsp_timeout_s": 45,
+                    "rtsp_transport": "udp",
                     "api_listen": ":11984",
                     "rtsp_listen": ":18554",
                     "webrtc_listen": ":18555",
@@ -864,15 +872,19 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             global_conf["go2rtc"]["preview_url_template"],
-            "{base_url}/stream.html?src={stream}&media=video&muted=1",
+            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
         )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],
-            "{base_url}/stream.html?src={stream}&media=video&muted=1",
+            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
         )
+        self.assertEqual(global_conf["go2rtc"]["player_mode"], "mp4,mse")
+        self.assertEqual(global_conf["go2rtc"]["preview_mode"], "mse")
         self.assertEqual(global_conf["go2rtc"]["stream_name_prefix"], "mesh_")
         self.assertEqual(global_conf["go2rtc"]["source_mode"], "rtsp")
+        self.assertEqual(global_conf["go2rtc"]["video_mode"], "h264")
         self.assertEqual(global_conf["go2rtc"]["rtsp_timeout_s"], 45)
+        self.assertEqual(global_conf["go2rtc"]["rtsp_transport"], "udp")
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
         self.assertEqual(global_conf["go2rtc"]["rtsp_listen"], ":18554")
         self.assertEqual(global_conf["go2rtc"]["webrtc_listen"], ":18555")
@@ -991,6 +1003,62 @@ class FenetreConfigTestCase(unittest.TestCase):
             runtime_config["streams"],
             {
                 "fenetre_South": "rtsp://admin:secret@example.test/stream#media=video#backchannel=0#timeout=12"
+            },
+        )
+
+    def test_go2rtc_runtime_config_honors_transport_and_video_mode(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {
+                    "go2rtc": {
+                        "enabled": True,
+                        "rtsp_transport": "udp",
+                        "video_mode": "h264",
+                    }
+                },
+                "cameras": {
+                    "South": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/main",
+                        "ptz_rtsp_url": "rtsp://admin:secret@example.test/sub",
+                    },
+                    "West": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/west",
+                        "go2rtc_rtsp_transport": "tcp",
+                        "go2rtc_video_mode": "copy",
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            runtime_config["streams"],
+            {
+                "fenetre_South": "ffmpeg:rtsp://admin:secret@example.test/sub#video=h264#input=rtsp/udp#timeout=30",
+                "fenetre_South_full": "ffmpeg:rtsp://admin:secret@example.test/main#video=h264#input=rtsp/udp#timeout=30",
+                "fenetre_West": "ffmpeg:rtsp://admin:secret@example.test/west#video=copy#timeout=30",
+            },
+        )
+
+    def test_go2rtc_runtime_config_adds_udp_transport_to_direct_rtsp_source(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {
+                    "go2rtc": {
+                        "enabled": True,
+                        "source_mode": "rtsp",
+                        "rtsp_transport": "udp",
+                    }
+                },
+                "cameras": {
+                    "South": {"rtsp_url": "rtsp://admin:secret@example.test/stream"}
+                },
+            }
+        )
+
+        self.assertEqual(
+            runtime_config["streams"],
+            {
+                "fenetre_South": "rtsp://admin:secret@example.test/stream#media=video#backchannel=0#transport=udp#timeout=30"
             },
         )
 

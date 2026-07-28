@@ -31,13 +31,18 @@ global:
     # stream.html is the default compatibility player. Fenetre keeps generated
     # player URLs video-only and muted by default. The PTZ aiming preview uses
     # the low-resolution go2rtc stream rather than the _full stream.
-    player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
-    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    player_url_template: "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+    preview_url_template: "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+    player_mode: webrtc,webrtc/tcp,mse,mp4
+    preview_mode: webrtc,webrtc/tcp,mse,mp4
     stream_name_prefix: fenetre_
     # ffmpeg copies camera video into go2rtc without transcoding and is more
     # stable for some RTSP cameras than go2rtc's direct RTSP source.
     source_mode: ffmpeg
+    video_mode: copy
     rtsp_timeout_s: 30
+    # Use udp on lossy point-to-point paths if TCP stalls live playback.
+    rtsp_transport: tcp
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"

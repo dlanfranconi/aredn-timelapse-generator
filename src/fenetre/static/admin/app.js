@@ -155,6 +155,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
     const newCameraPtzCapabilityFocus = document.getElementById('newCameraPtzCapabilityFocus');
     const newCameraGo2rtcEnabled = document.getElementById('newCameraGo2rtcEnabled');
+    const newCameraGo2rtcTransport = document.getElementById('newCameraGo2rtcTransport');
+    const newCameraGo2rtcVideoMode = document.getElementById('newCameraGo2rtcVideoMode');
     const newCameraPtzTourEnabled = document.getElementById('newCameraPtzTourEnabled');
     const newCameraPtzTourAutoResume = document.getElementById('newCameraPtzTourAutoResume');
     const newCameraPtzPresetRows = document.getElementById('newCameraPtzPresetRows');
@@ -1382,6 +1384,8 @@ document.addEventListener('DOMContentLoaded', () => {
         newCameraPtzRtspRow.hidden = !showPtzRtsp;
         newCameraRtspUrl.disabled = !showRtspUrl;
         newCameraPtzRtspUrl.disabled = !showPtzRtsp;
+        newCameraGo2rtcTransport.disabled = !liveViewEnabled;
+        newCameraGo2rtcVideoMode.disabled = !liveViewEnabled;
     }
 
     function resetCameraForm() {
@@ -1412,6 +1416,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraMozjpeg', true);
         setCheckboxValue('newCameraTimelapse', true);
         setCheckboxValue('newCameraGo2rtcEnabled', true);
+        setSelectValue('newCameraGo2rtcTransport', 'tcp');
+        setSelectValue('newCameraGo2rtcVideoMode', 'copy');
         setInputValue('newCameraFailureRetry', 60);
         setInputValue('newCameraTimeout', 15);
         setCheckboxValue('newCameraFixedIntervalEnabled', true);
@@ -1507,6 +1513,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
         setCheckboxValue('newCameraTimelapse', camera.timelapse_enabled !== false && camera.generate_timelapse !== false);
         setCheckboxValue('newCameraGo2rtcEnabled', camera.go2rtc_enabled !== false);
+        setSelectValue('newCameraGo2rtcTransport', camera.go2rtc_rtsp_transport || 'tcp');
+        setSelectValue('newCameraGo2rtcVideoMode', camera.go2rtc_video_mode || 'copy');
 
         setCheckboxValue('newCameraFixedIntervalEnabled', camera.snap_interval_s !== undefined);
         setInputValue('newCameraSnapInterval', camera.snap_interval_s ?? 60);
@@ -2055,6 +2063,8 @@ document.addEventListener('DOMContentLoaded', () => {
             mozjpeg_optimize: checked('newCameraMozjpeg'),
             timelapse_enabled: checked('newCameraTimelapse'),
             go2rtc_enabled: checked('newCameraGo2rtcEnabled'),
+            go2rtc_rtsp_transport: newCameraGo2rtcTransport.value || 'tcp',
+            go2rtc_video_mode: newCameraGo2rtcVideoMode.value || 'copy',
             require_test: requireTest,
             postprocessing
         };

@@ -814,6 +814,9 @@ GUIDED_CAMERA_KEYS = {
     "http_auth",
     "rtsp_url",
     "ptz_rtsp_url",
+    "go2rtc_enabled",
+    "go2rtc_rtsp_transport",
+    "go2rtc_video_mode",
     "local_command",
     "timeout_s",
     "cache_bust",
@@ -944,6 +947,27 @@ def _build_camera_config(
         camera["rtsp_url"] = rtsp_url
     if payload.get("ptz_rtsp_url"):
         camera["ptz_rtsp_url"] = str(payload.get("ptz_rtsp_url")).strip()
+    go2rtc_rtsp_transport = (
+        payload.get("go2rtc_rtsp_transport")
+        if "go2rtc_rtsp_transport" in payload
+        else existing_camera.get("go2rtc_rtsp_transport")
+    )
+    go2rtc_rtsp_transport = str(go2rtc_rtsp_transport or "").strip().lower()
+    if go2rtc_rtsp_transport and go2rtc_rtsp_transport not in {"tcp", "udp"}:
+        raise ValueError("go2rtc RTSP transport must be tcp or udp.")
+    if go2rtc_rtsp_transport and go2rtc_rtsp_transport != "tcp":
+        camera["go2rtc_rtsp_transport"] = go2rtc_rtsp_transport
+    go2rtc_video_mode = (
+        payload.get("go2rtc_video_mode")
+        if "go2rtc_video_mode" in payload
+        else existing_camera.get("go2rtc_video_mode")
+    )
+    go2rtc_video_mode = str(go2rtc_video_mode or "").strip().lower()
+    valid_go2rtc_video_modes = {"copy", "h264", "h265", "mjpeg"}
+    if go2rtc_video_mode and go2rtc_video_mode not in valid_go2rtc_video_modes:
+        raise ValueError("go2rtc video mode must be copy, h264, h265, or mjpeg.")
+    if go2rtc_video_mode and go2rtc_video_mode != "copy":
+        camera["go2rtc_video_mode"] = go2rtc_video_mode
     if source_type == "rtsp":
         command = local_command or rtsp_snapshot_command(rtsp_url)
         camera["local_command"] = (

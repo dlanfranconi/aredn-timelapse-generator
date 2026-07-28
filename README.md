@@ -245,11 +245,15 @@ global:
     # Optional exact browser-host overrides. Use this for Cloudflare/Tunnel hostnames.
     base_urls:
       aredncameras.aredn805.net: https://stream.aredn805.net
-    player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
-    preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    player_url_template: "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+    preview_url_template: "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+    player_mode: webrtc,webrtc/tcp,mse,mp4
+    preview_mode: webrtc,webrtc/tcp,mse,mp4
     stream_name_prefix: fenetre_
     source_mode: ffmpeg
+    video_mode: copy
     rtsp_timeout_s: 30
+    rtsp_transport: tcp
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
@@ -257,7 +261,11 @@ global:
     live_view_idle_timeout_s: 60
 ```
 
-The default full player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. The PTZ aiming preview uses the low-resolution go2rtc stream, not the `_full` stream. `source_mode: ffmpeg` makes go2rtc start FFmpeg as the camera-side RTSP client and copy the video stream without transcoding; this is more stable for cameras that play directly but freeze in go2rtc. Set `source_mode: rtsp` globally, or `go2rtc_source_mode: rtsp` on one camera, to use go2rtc's direct RTSP client instead. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
+The default full player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. `player_mode` and `preview_mode` control the go2rtc `stream.html` playback priority; use `webrtc,webrtc/tcp,mse,mp4` for local/offline use, or try `hls,mp4,mse` for high-latency Cloudflare paths. The PTZ aiming preview uses the low-resolution go2rtc stream, not the `_full` stream.
+
+`source_mode: ffmpeg` makes go2rtc start FFmpeg as the camera-side RTSP client and copy the video stream without transcoding; this is more stable for cameras that play directly but freeze in go2rtc. Set `source_mode: rtsp` globally, or `go2rtc_source_mode: rtsp` on one camera, to use go2rtc's direct RTSP client instead. On lossy point-to-point paths, keep `source_mode: ffmpeg` and set `rtsp_transport: udp` globally or `go2rtc_rtsp_transport: udp` for one camera. That generates `#input=rtsp/udp`, which can keep live video moving through packet loss at the cost of occasional visual corruption. If a substream opens as a black box, try `go2rtc_video_mode: h264` on that camera; it transcodes and uses more CPU, so use it only where needed.
+
+If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
 
 For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate.
 
@@ -280,9 +288,12 @@ Override the go2rtc source mode for one camera if needed:
 
 ```yaml
 cameras:
-  Direct-Go2RTC-Camera:
-    go2rtc_source_mode: rtsp
+  Lossy-Link-Camera:
+    go2rtc_source_mode: ffmpeg
+    go2rtc_rtsp_transport: udp
     go2rtc_rtsp_timeout_s: 45
+    # Optional only when the substream is black or browser-incompatible.
+    go2rtc_video_mode: h264
 ```
 
 Inspect the generated config:
@@ -652,6 +663,6 @@ Inspect go2rtc streams:
 http://HOST:1984/
 ```
 
-If direct camera RTSP playback is stable but go2rtc pauses or buffers after a few seconds, inspect `/tmp/fenetre-go2rtc.yaml`. Current Fenetre defaults should generate stream sources like `ffmpeg:rtsp://...#video=copy#timeout=30`. If a source still starts with plain `rtsp://`, reload/save the camera settings so the go2rtc runtime is synced, or set `global.go2rtc.source_mode: ffmpeg`.
+If direct camera RTSP playback is stable but go2rtc pauses or buffers after a few seconds, inspect `/tmp/fenetre-go2rtc.yaml`. Current Fenetre defaults should generate stream sources like `ffmpeg:rtsp://...#video=copy#timeout=30`. On lossy mesh paths, test `go2rtc_rtsp_transport: udp` for the affected camera; the generated source should become `ffmpeg:rtsp://...#video=copy#input=rtsp/udp#timeout=30`. If the low-resolution aiming stream is black, test `go2rtc_video_mode: h264` on that camera. If a source still starts with plain `rtsp://`, reload/save the camera settings so the go2rtc runtime is synced, or set `global.go2rtc.source_mode: ffmpeg`.
 
 If ONVIF PTZ fails while RTSP works, test the ONVIF host and port separately from the RTSP URL. A `405 Method Not Allowed` response to a plain browser or curl GET on `/onvif/device_service` can still mean the ONVIF service is present, because ONVIF expects SOAP POST requests.

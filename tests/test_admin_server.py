@@ -483,6 +483,8 @@ class ConfigServerTestCase(unittest.TestCase):
                     "url": "http://camera/snapshot.jpg",
                     "rtsp_url": "rtsp://admin:secret@camera:554/11",
                     "go2rtc_enabled": True,
+                    "go2rtc_rtsp_transport": "udp",
+                    "go2rtc_video_mode": "h264",
                     "require_test": False,
                 }
             ),
@@ -495,9 +497,15 @@ class ConfigServerTestCase(unittest.TestCase):
         camera = updated_data_yaml["cameras"]["snapshot-live-cam"]
         self.assertEqual(camera["url"], "http://camera/snapshot.jpg")
         self.assertEqual(camera["rtsp_url"], "rtsp://admin:secret@camera:554/11")
+        self.assertEqual(camera["go2rtc_rtsp_transport"], "udp")
+        self.assertEqual(camera["go2rtc_video_mode"], "h264")
         self.assertNotIn("local_command", camera)
         self.assertTrue(updated_data_yaml["global"]["go2rtc"]["enabled"])
         mock_go2rtc_put.assert_called_once()
+        self.assertEqual(
+            mock_go2rtc_put.call_args.kwargs["params"]["src"],
+            "ffmpeg:rtsp://admin:secret@camera:554/11#video=h264#input=rtsp/udp#timeout=30",
+        )
 
     @patch("fenetre.admin_server.requests.put")
     @patch("fenetre.admin_server._fetch_local_command_bytes")

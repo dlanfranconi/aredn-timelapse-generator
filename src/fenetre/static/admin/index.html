@@ -226,6 +226,18 @@
                     <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
                     <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
                     <label><input id="newCameraGo2rtcEnabled" type="checkbox" checked> Enable RTSP live view</label>
+                    <label for="newCameraGo2rtcTransport">go2rtc RTSP transport</label>
+                    <select id="newCameraGo2rtcTransport">
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                    </select>
+                    <label for="newCameraGo2rtcVideoMode">go2rtc video mode</label>
+                    <select id="newCameraGo2rtcVideoMode">
+                        <option value="copy">Copy</option>
+                        <option value="h264">H.264 transcode</option>
+                        <option value="h265">H.265 transcode</option>
+                        <option value="mjpeg">MJPEG transcode</option>
+                    </select>
                     <label for="newCameraTimeout">Timeout seconds</label>
                     <input id="newCameraTimeout" type="number" min="1" value="15">
                     <label for="newCameraFailureRetry">Failure retry seconds</label>

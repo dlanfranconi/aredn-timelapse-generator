@@ -10,6 +10,7 @@
     const title = document.getElementById('camera-name');
     const status = document.getElementById('live-status');
     let heartbeatTimer = null;
+    const defaultGo2rtcMode = 'webrtc,webrtc/tcp,mse,mp4';
 
     function authHeaders() {
         const token = localStorage.getItem('fenetreAuthToken');
@@ -24,7 +25,16 @@
         status.textContent = 'Unavailable';
     }
 
-    function mutedGo2rtcPlayerUrl(rawUrl) {
+    function go2rtcPlayerMode(go2rtc) {
+        return String((go2rtc && go2rtc.player_mode) || defaultGo2rtcMode).trim() || defaultGo2rtcMode;
+    }
+
+    function go2rtcPreviewMode(go2rtc) {
+        return String((go2rtc && (go2rtc.preview_mode || go2rtc.player_mode)) || defaultGo2rtcMode).trim()
+            || defaultGo2rtcMode;
+    }
+
+    function mutedGo2rtcPlayerUrl(rawUrl, mode = '') {
         if (!rawUrl) {
             return rawUrl;
         }
@@ -32,6 +42,9 @@
             const url = new URL(rawUrl, window.location.href);
             const page = url.pathname.split('/').pop();
             if (page === 'stream.html' || page === 'webrtc.html') {
+                if (page === 'stream.html' && mode && !url.searchParams.has('mode')) {
+                    url.searchParams.set('mode', mode);
+                }
                 url.searchParams.set('media', 'video');
                 url.searchParams.set('muted', '1');
                 return url.href;
@@ -39,7 +52,10 @@
         } catch (error) {
             if (/(^|\/)(stream|webrtc)\.html(?:\?|$)/.test(rawUrl)) {
                 const separator = rawUrl.includes('?') ? '&' : '?';
-                return `${rawUrl}${separator}media=video&muted=1`;
+                const modeParam = mode && /(^|[?&])mode=/.test(rawUrl) === false
+                    ? `mode=${encodeURIComponent(mode)}&`
+                    : '';
+                return `${rawUrl}${separator}${modeParam}media=video&muted=1`;
             }
         }
         return rawUrl;
@@ -62,7 +78,8 @@
         if (!baseUrl) {
             return '';
         }
-        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
+        const mode = encodeURIComponent(go2rtcPlayerMode(go2rtc));
+        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&mode=${mode}&media=video&muted=1`;
     }
 
     function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
@@ -73,7 +90,8 @@
         if (!baseUrl) {
             return '';
         }
-        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
+        const mode = encodeURIComponent(go2rtcPreviewMode(go2rtc));
+        return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&mode=${mode}&media=video&muted=1`;
     }
 
     function browserHostCandidates() {
@@ -123,13 +141,13 @@
         return true;
     }
 
-    function hostSpecificGo2rtcPlayerUrl(urlsByHost) {
+    function hostSpecificGo2rtcPlayerUrl(urlsByHost, mode = '') {
         if (!urlsByHost || typeof urlsByHost !== 'object') {
             return '';
         }
         for (const host of browserHostCandidates()) {
             if (urlsByHost[host]) {
-                return mutedGo2rtcPlayerUrl(urlsByHost[host]);
+                return mutedGo2rtcPlayerUrl(urlsByHost[host], mode);
             }
         }
         return '';
@@ -205,11 +223,14 @@
         const fallbackStream = streamKind === 'preview'
             ? go2rtc.stream
             : (go2rtc.full_stream || go2rtc.stream);
+        const mode = streamKind === 'preview'
+            ? go2rtcPreviewMode(go2rtc)
+            : go2rtcPlayerMode(go2rtc);
         const hostMappedPlayerUrl = streamKind === 'preview'
-            ? hostSpecificGo2rtcPlayerUrl(go2rtc.preview_urls || go2rtc.player_urls)
-            : hostSpecificGo2rtcPlayerUrl(go2rtc.full_player_urls || go2rtc.player_urls);
+            ? hostSpecificGo2rtcPlayerUrl(go2rtc.preview_urls || go2rtc.player_urls, mode)
+            : hostSpecificGo2rtcPlayerUrl(go2rtc.full_player_urls || go2rtc.player_urls, mode);
         const playerUrl = hostMappedPlayerUrl
-            || mutedGo2rtcPlayerUrl(rawPlayerUrl)
+            || mutedGo2rtcPlayerUrl(rawPlayerUrl, mode)
             || (canUseSameHostGo2rtcFallback(go2rtc)
                 ? (streamKind === 'preview'
                     ? sameHostGo2rtcPreviewUrl(go2rtc, fallbackStream)
