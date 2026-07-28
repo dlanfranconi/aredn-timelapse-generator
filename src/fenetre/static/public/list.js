@@ -27,7 +27,7 @@ let authUser = null;
 let siteIsPublic = true;
 let launchWorkflowEnabled = false;
 let deploymentName = 'Fenetre';
-const defaultGo2rtcMode = 'webrtc,webrtc/tcp,mse,mp4';
+const defaultGo2rtcMode = '';
 
 function syncThemeToggleIcon() {
     themeToggle.classList.toggle('dark-mode-active', body.classList.contains('dark-mode'));
@@ -132,8 +132,9 @@ function sameHostGo2rtcPlayerUrl(go2rtc, streamName) {
     if (!baseUrl) {
         return '';
     }
-    const mode = encodeURIComponent(go2rtcPlayerMode(go2rtc));
-    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&mode=${mode}&media=video&muted=1`;
+    const mode = go2rtcPlayerMode(go2rtc);
+    const modeParam = mode ? `&mode=${encodeURIComponent(mode)}` : '';
+    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}${modeParam}&media=video&muted=1`;
 }
 
 function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
@@ -144,8 +145,9 @@ function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
     if (!baseUrl) {
         return '';
     }
-    const mode = encodeURIComponent(go2rtcPreviewMode(go2rtc));
-    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&mode=${mode}&media=video&muted=1`;
+    const mode = go2rtcPreviewMode(go2rtc);
+    const modeParam = mode ? `&mode=${encodeURIComponent(mode)}` : '';
+    return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}${modeParam}&media=video&muted=1`;
 }
 
 function browserHostCandidates() {

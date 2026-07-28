@@ -6,15 +6,13 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import yaml
 
 _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
-_DEFAULT_PLAYER_MODE = "webrtc,webrtc/tcp,mse,mp4"
+_DEFAULT_PLAYER_MODE = ""
 _DEFAULT_PREVIEW_MODE = _DEFAULT_PLAYER_MODE
-_DEFAULT_PLAYER_URL_TEMPLATE = (
-    "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
-)
+_DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}&media=video&muted=1"
 _OLD_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
 _LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
 _DEFAULT_PREVIEW_URL_TEMPLATE = (
-    "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
+    "{base_url}/stream.html?src={stream}&media=video&muted=1"
 )
 
 
@@ -125,10 +123,7 @@ def _stream_url_from_template(
             preview_mode=quote(_go2rtc_preview_mode(config), safe="/,"),
         )
     except (IndexError, KeyError, ValueError):
-        rendered = (
-            f"{base_url}/stream.html?src={encoded_stream}"
-            f"&mode={quote(mode, safe='/,')}&media=video&muted=1"
-        )
+        rendered = f"{base_url}/stream.html?src={encoded_stream}&media=video&muted=1"
     return _force_muted_player_url(rendered, mode)
 
 

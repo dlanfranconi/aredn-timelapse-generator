@@ -525,41 +525,36 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         go2rtc_cfg.get("player_url_template"),
         "global.go2rtc.player_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
     )
     if player_url_template in {
         "{base_url}/webrtc.html?src={stream}",
         "{base_url}/stream.html?src={stream}",
-        "{base_url}/stream.html?src={stream}&media=video&muted=1",
+        "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
     }:
-        player_url_template = (
-            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
-        )
+        player_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
     go2rtc_out["player_url_template"] = player_url_template
     preview_url_template = _str(
         go2rtc_cfg.get("preview_url_template"),
         "global.go2rtc.preview_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
     )
     if preview_url_template in {
         "{base_url}/webrtc.html?src={stream}",
         "{base_url}/stream.html?src={stream}",
         "{base_url}/stream.html?src={stream}&media=video&muted=1",
+        "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
         "{base_url}/api/stream.mjpeg?src={stream}",
     }:
-        preview_url_template = (
-            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1"
-        )
+        preview_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
     go2rtc_out["preview_url_template"] = preview_url_template
     player_mode = _str(
         go2rtc_cfg.get("player_mode"),
         "global.go2rtc.player_mode",
         errors,
-        default="webrtc,webrtc/tcp,mse,mp4",
+        default="",
     ).strip()
-    if not player_mode:
-        player_mode = "webrtc,webrtc/tcp,mse,mp4"
     go2rtc_out["player_mode"] = player_mode
     preview_mode = _str(
         go2rtc_cfg.get("preview_mode"),

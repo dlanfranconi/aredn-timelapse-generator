@@ -702,7 +702,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertNotIn("rtsp://", encoded)
         self.assertNotIn("secret", encoded)
 
-    def test_cameras_metadata_defaults_go2rtc_player_to_webrtc(self):
+    def test_cameras_metadata_defaults_go2rtc_player_to_stream_html(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
         metadata = build_cameras_metadata(
             {
@@ -726,7 +726,7 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["player_url"],
-            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
         )
         self.assertEqual(
             metadata["cameras"][0]["go2rtc"]["preview_url"],
@@ -737,6 +737,38 @@ class FenetreConfigTestCase(unittest.TestCase):
             "live.html?camera=North%20Ridge%20Camera&stream=full",
         )
         self.assertEqual(metadata["cameras"][0]["go2rtc"]["idle_timeout_s"], 15)
+
+    def test_cameras_metadata_adds_go2rtc_mode_only_when_configured(self):
+        json_path = os.path.join(self.temp_dir.name, "cameras.json")
+        metadata = build_cameras_metadata(
+            {
+                "North Ridge Camera": {
+                    "rtsp_url": "rtsp://admin:secret@example.test:554/stream1",
+                },
+            },
+            {
+                "ui": {},
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "http://go2rtc.local:1984/",
+                    "player_mode": "mse,mp4",
+                    "preview_mode": "mse",
+                    "stream_name_prefix": "site_",
+                },
+            },
+            {"daily_timelapse": {"file_extension": "mp4"}},
+            json_path,
+        )
+
+        go2rtc = metadata["cameras"][0]["go2rtc"]
+        self.assertEqual(
+            go2rtc["player_url"],
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=mse%2Cmp4&media=video&muted=1",
+        )
+        self.assertEqual(
+            go2rtc["preview_url"],
+            "http://go2rtc.local:1984/stream.html?src=site_North_Ridge_Camera&mode=mse&media=video&muted=1",
+        )
 
     def test_cameras_metadata_publishes_same_host_go2rtc_fallback(self):
         json_path = os.path.join(self.temp_dir.name, "cameras.json")
@@ -801,11 +833,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(go2rtc["same_host_port"], 11984)
         self.assertEqual(
             go2rtc["preview_urls"]["aredncameras.aredn805.net"],
-            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
+            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
         )
         self.assertEqual(
             go2rtc["full_player_urls"]["10.123.159.233"],
-            "http://10.123.159.233:1984/stream.html?src=site_North_Ridge_Camera_full&mode=webrtc%2Cwebrtc%2Ftcp%2Cmse%2Cmp4&media=video&muted=1",
+            "http://10.123.159.233:1984/stream.html?src=site_North_Ridge_Camera_full&media=video&muted=1",
         )
         self.assertNotIn("player_url", go2rtc)
 
@@ -872,11 +904,11 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertEqual(
             global_conf["go2rtc"]["preview_url_template"],
-            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+            "{base_url}/stream.html?src={stream}&media=video&muted=1",
         )
         self.assertEqual(
             global_conf["go2rtc"]["player_url_template"],
-            "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+            "{base_url}/stream.html?src={stream}&media=video&muted=1",
         )
         self.assertEqual(global_conf["go2rtc"]["player_mode"], "mp4,mse")
         self.assertEqual(global_conf["go2rtc"]["preview_mode"], "mse")
