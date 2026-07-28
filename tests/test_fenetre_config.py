@@ -776,7 +776,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "enabled": True,
                     "base_url": "",
                     "base_urls": {
-                        "aredncameras.aredn805.net": "https://streams.aredncameras.aredn805.net/",
+                        "aredncameras.aredn805.net": "https://stream.aredn805.net/",
                         "10.123.159.233": "http://10.123.159.233:1984",
                     },
                     "api_listen": ":11984",
@@ -793,7 +793,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(go2rtc["same_host_port"], 11984)
         self.assertEqual(
             go2rtc["preview_urls"]["aredncameras.aredn805.net"],
-            "https://streams.aredncameras.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
+            "https://stream.aredn805.net/stream.html?src=site_North_Ridge_Camera&media=video&muted=1",
         )
         self.assertEqual(
             go2rtc["full_player_urls"]["10.123.159.233"],
@@ -832,7 +832,7 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "enabled": True,
                     "base_url": "http://go2rtc.local:1984",
                     "base_urls": {
-                        "AREDnCameras.AREDN805.net": "https://streams.aredncameras.aredn805.net/"
+                        "AREDnCameras.AREDN805.net": "https://stream.aredn805.net/"
                     },
                     "player_url_template": "{base_url}/webrtc.html?src={stream}",
                     "preview_url_template": "{base_url}/api/stream.mjpeg?src={stream}",
@@ -854,9 +854,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(global_conf["go2rtc"]["base_url"], "http://go2rtc.local:1984")
         self.assertEqual(
             global_conf["go2rtc"]["base_urls"],
-            {
-                "aredncameras.aredn805.net": "https://streams.aredncameras.aredn805.net"
-            },
+            {"aredncameras.aredn805.net": "https://stream.aredn805.net"},
         )
         self.assertEqual(
             global_conf["go2rtc"]["preview_url_template"],

@@ -244,7 +244,7 @@ global:
     base_url: ""
     # Optional exact browser-host overrides. Use this for Cloudflare/Tunnel hostnames.
     base_urls:
-      aredncameras.aredn805.net: https://streams.aredncameras.aredn805.net
+      aredncameras.aredn805.net: https://stream.aredn805.net
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
@@ -255,7 +255,9 @@ global:
     live_view_idle_timeout_s: 60
 ```
 
-The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. Set `base_url` only as a default for every browser host that does not match `base_urls`.
+The default player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
+
+For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate.
 
 `rtsp_url` and `ptz_rtsp_url` have different jobs:
 

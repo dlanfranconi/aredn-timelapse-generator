@@ -65,17 +65,58 @@
         return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
     }
 
+    function browserHostCandidates() {
+        const candidates = [];
+        [window.location.host, window.location.hostname].forEach(value => {
+            const host = String(value || '').trim().toLowerCase();
+            if (!host || candidates.includes(host)) {
+                return;
+            }
+            candidates.push(host);
+            const withoutDefaultPort = host
+                .replace(/:443$/, '')
+                .replace(/:80$/, '');
+            if (withoutDefaultPort && !candidates.includes(withoutDefaultPort)) {
+                candidates.push(withoutDefaultPort);
+            }
+        });
+        return candidates;
+    }
+
+    function isLocalGo2rtcFallbackHost() {
+        const host = String(window.location.hostname || '').trim().toLowerCase();
+        if (!host) {
+            return false;
+        }
+        if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.local.mesh')
+            || host.endsWith('.mesh') || host.endsWith('.lan') || host.endsWith('.home.arpa')
+            || host.endsWith('.ts.net')) {
+            return true;
+        }
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+            return true;
+        }
+        if (host.includes(':')) {
+            return true;
+        }
+        return false;
+    }
+
+    function canUseSameHostGo2rtcFallback(go2rtc) {
+        if (!go2rtc || go2rtc.base_url_configured !== false) {
+            return false;
+        }
+        if (go2rtc.base_urls_configured) {
+            return isLocalGo2rtcFallbackHost();
+        }
+        return true;
+    }
+
     function hostSpecificGo2rtcPlayerUrl(urlsByHost) {
         if (!urlsByHost || typeof urlsByHost !== 'object') {
             return '';
         }
-        const candidates = [
-            window.location.host,
-            window.location.hostname
-        ]
-            .filter(Boolean)
-            .map(value => value.toLowerCase());
-        for (const host of candidates) {
+        for (const host of browserHostCandidates()) {
             if (urlsByHost[host]) {
                 return mutedGo2rtcPlayerUrl(urlsByHost[host]);
             }
@@ -158,10 +199,15 @@
             : hostSpecificGo2rtcPlayerUrl(go2rtc.full_player_urls || go2rtc.player_urls);
         const playerUrl = hostMappedPlayerUrl
             || mutedGo2rtcPlayerUrl(rawPlayerUrl)
-            || (go2rtc.base_url_configured === false
+            || (canUseSameHostGo2rtcFallback(go2rtc)
                 ? sameHostGo2rtcPlayerUrl(go2rtc, fallbackStream)
                 : '');
         if (!playerUrl) {
+            const host = window.location.hostname || window.location.host || 'this host';
+            if (go2rtc.base_urls_configured) {
+                showMessage(`Live view URL is not available for ${host}. Add a matching global.go2rtc.base_urls entry for this browser host.`);
+                return;
+            }
             showMessage('Live view URL is not available.');
             return;
         }
