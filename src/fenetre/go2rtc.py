@@ -9,9 +9,7 @@ _STREAM_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 _DEFAULT_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}&media=video&muted=1"
 _OLD_PLAYER_URL_TEMPLATE = "{base_url}/stream.html?src={stream}"
 _LEGACY_PLAYER_URL_TEMPLATE = "{base_url}/webrtc.html?src={stream}"
-_DEFAULT_PREVIEW_URL_TEMPLATE = (
-    "{base_url}/stream.html?src={stream}&media=video&muted=1"
-)
+_DEFAULT_PREVIEW_URL_TEMPLATE = "{base_url}/api/stream.mjpeg?src={stream}"
 
 
 def _go2rtc_config(global_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -77,7 +75,11 @@ def _player_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
 
 def _preview_url(config: Dict[str, Any], base_url: str, stream_name: str) -> str:
     template = str(config.get("preview_url_template") or _DEFAULT_PREVIEW_URL_TEMPLATE)
-    if template in {_LEGACY_PLAYER_URL_TEMPLATE, _OLD_PLAYER_URL_TEMPLATE}:
+    if template in {
+        _LEGACY_PLAYER_URL_TEMPLATE,
+        _OLD_PLAYER_URL_TEMPLATE,
+        _DEFAULT_PLAYER_URL_TEMPLATE,
+    }:
         template = _DEFAULT_PREVIEW_URL_TEMPLATE
     return _stream_url_from_template(config, base_url, stream_name, template)
 

@@ -27,6 +27,7 @@ class PTZSession:
 
 _sessions: Dict[str, PTZSession] = {}
 _locks: Dict[str, Dict[str, Any]] = {}
+_tour_states: Dict[str, Dict[str, Any]] = {}
 _endpoint_locks: Dict[str, RLock] = {}
 _endpoint_locks_guard = RLock()
 _profile_token_cache: Dict[str, str] = {}
@@ -110,10 +111,17 @@ def public_ptz_metadata(ptz_config: Dict[str, Any]) -> Dict[str, Any]:
         "stop_disabled": _stop_disabled(ptz_config),
         "tour": {
             "enabled": _bool_config(tour.get("enabled"), False),
-            "auto_resume_s": int(tour.get("auto_resume_s") or 1800),
+            "auto_resume_s": _tour_auto_resume_s(tour),
         },
         "presets": presets,
     }
+
+
+def _tour_auto_resume_s(tour_config: Dict[str, Any]) -> int:
+    value = tour_config.get("auto_resume_s")
+    if value is None or value == "":
+        value = 1800
+    return max(0, int(value))
 
 
 def ptz_configured(ptz_config: Dict[str, Any]) -> bool:
@@ -172,7 +180,42 @@ def ptz_status(camera_name: str) -> Dict[str, Any]:
         "camera": camera_name,
         "lock": lock_status(camera_name),
         "session": current_session(camera_name),
+        "tour": tour_status(camera_name),
     }
+
+
+def tour_status(camera_name: str) -> Dict[str, Any]:
+    status = _tour_states.get(camera_name)
+    if not status:
+        return {"state": "unknown", "auto_resume_at": None, "seconds_until_resume": 0}
+    auto_resume_at = status.get("auto_resume_at")
+    seconds_until_resume = 0
+    if auto_resume_at:
+        seconds_until_resume = max(0, int(float(auto_resume_at) - _now()))
+    return {
+        "state": status.get("state") or "unknown",
+        "updated_at": int(status.get("updated_at") or 0),
+        "updated_by": status.get("updated_by") or "",
+        "auto_resume_at": int(auto_resume_at) if auto_resume_at else None,
+        "seconds_until_resume": seconds_until_resume,
+    }
+
+
+def mark_tour_state(
+    camera_name: str, state: str, owner: str = "", auto_resume_s: int = 0
+) -> Dict[str, Any]:
+    normalized_state = str(state or "").strip().lower()
+    if normalized_state not in {"paused", "running", "unknown"}:
+        normalized_state = "unknown"
+    now = _now()
+    auto_resume_at = now + max(0, int(auto_resume_s or 0)) if auto_resume_s else None
+    _tour_states[camera_name] = {
+        "state": normalized_state,
+        "updated_at": now,
+        "updated_by": str(owner or ""),
+        "auto_resume_at": auto_resume_at,
+    }
+    return tour_status(camera_name)
 
 
 def _endpoint_lock_key(ptz_config: Dict[str, Any]) -> str:
@@ -648,12 +691,16 @@ def goto_preset(
         _call_ptz_operation(
             ptz_config, "preset", lambda: ptz_service.GotoPreset(request)
         )
-    return {
+    result = {
         "ok": True,
         "camera": camera_name,
         "preset": preset["id"],
         "session": session,
     }
+    tour_config = _tour_config(ptz_config)
+    if _bool_config(tour_config.get("enabled"), False):
+        result["tour_status"] = mark_tour_state(camera_name, "paused", owner)
+    return result
 
 
 def discover_presets(
@@ -802,7 +849,11 @@ def stop_move(camera_name: str, camera_config: Dict[str, Any]) -> Dict[str, Any]
     with _endpoint_lock(ptz_config):
         ptz_service, profile_token = _onvif_services_and_profile_token(ptz_config)
         _send_stop(ptz_config, ptz_service, profile_token)
-    return {"ok": True, "camera": camera_name}
+    result = {"ok": True, "camera": camera_name}
+    tour_config = _tour_config(ptz_config)
+    if _bool_config(tour_config.get("enabled"), False):
+        result["tour_status"] = mark_tour_state(camera_name, "paused")
+    return result
 
 
 def set_tour_state(
@@ -823,8 +874,10 @@ def set_tour_state(
     normalized_action = str(action or "").strip().lower()
     if normalized_action in {"disable", "disabled", "pause", "stop"}:
         normalized_action = "pause"
+        tour_state = "paused"
     elif normalized_action in {"enable", "enabled", "resume", "start"}:
         normalized_action = "resume"
+        tour_state = "running"
     else:
         raise PTZError("tour action must be pause or resume.")
 
@@ -840,12 +893,21 @@ def set_tour_state(
                 ),
             )
         elif backend == "none":
+            auto_resume_s = _tour_auto_resume_s(tour_config)
+            tour = mark_tour_state(
+                camera_name,
+                tour_state,
+                owner,
+                auto_resume_s if normalized_action == "pause" else 0,
+            )
             return {
                 "ok": True,
                 "camera": camera_name,
                 "tour": normalized_action,
+                "auto_resume_s": auto_resume_s,
                 "skipped": True,
                 "session": session,
+                "tour_status": tour,
             }
         else:
             ptz_service, profile_token = _onvif_services_and_profile_token(ptz_config)
@@ -857,10 +919,18 @@ def set_tour_state(
                 normalized_action,
             )
 
+    auto_resume_s = _tour_auto_resume_s(tour_config)
+    tour = mark_tour_state(
+        camera_name,
+        tour_state,
+        owner,
+        auto_resume_s if normalized_action == "pause" else 0,
+    )
     return {
         "ok": True,
         "camera": camera_name,
         "tour": normalized_action,
-        "auto_resume_s": int(tour_config.get("auto_resume_s") or 1800),
+        "auto_resume_s": auto_resume_s,
         "session": session,
+        "tour_status": tour,
     }

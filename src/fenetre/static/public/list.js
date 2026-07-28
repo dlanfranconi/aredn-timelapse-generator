@@ -119,6 +119,17 @@ function sameHostGo2rtcPlayerUrl(go2rtc, streamName) {
     return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
 }
 
+function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
+    if (!streamName) {
+        return '';
+    }
+    const baseUrl = sameHostGo2rtcBaseUrl(go2rtc);
+    if (!baseUrl) {
+        return '';
+    }
+    return `${baseUrl}/api/stream.mjpeg?src=${encodeURIComponent(streamName)}`;
+}
+
 function browserHostCandidates() {
     const candidates = [];
     [window.location.host, window.location.hostname].forEach(value => {
@@ -188,7 +199,7 @@ function go2rtcPreviewPlayerUrl(go2rtc) {
         return configuredUrl;
     }
     if (canUseSameHostGo2rtcFallback(go2rtc)) {
-        return sameHostGo2rtcPlayerUrl(go2rtc, go2rtc.stream);
+        return sameHostGo2rtcPreviewUrl(go2rtc, go2rtc.stream);
     }
     return '';
 }
@@ -235,6 +246,36 @@ mapToggleButton.addEventListener('click', () => {
 
 function authHeaders() {
     return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+function newClientSessionId() {
+    if (window.crypto && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function sendLiveViewHeartbeat(camera, stream, sessionId, active = true) {
+    if (!camera || !sessionId || !authToken) {
+        return null;
+    }
+    const response = await fetch('/api/live-view/heartbeat', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+            camera,
+            stream,
+            session_id: sessionId,
+            ttl_s: 45,
+            active
+        })
+    });
+    if (!response.ok && active) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || `Live-view heartbeat failed: ${response.status}`);
+    }
+    return response.json().catch(() => null);
 }
 
 function storeAuthToken(token) {
@@ -1033,6 +1074,29 @@ function configurePtzPresets(camera, listItem) {
     button.hidden = !canUsePresets;
     manual.hidden = !canUseManual;
     tourControls.hidden = !canUseTour;
+    const applyTourStatus = tourStatus => {
+        if (!canUseTour) {
+            return;
+        }
+        const currentStatus = tourStatus || listItem._ptzTourStatus || {};
+        const state = currentStatus.state || listItem._ptzTourState || 'unknown';
+        const secondsUntilResume = Number(currentStatus.seconds_until_resume || 0);
+        listItem._ptzTourState = state;
+        listItem._ptzTourStatus = { ...currentStatus, state };
+        const pauseButton = tourControls.querySelector('[data-tour="pause"]');
+        const resumeButton = tourControls.querySelector('[data-tour="resume"]');
+        if (pauseButton) {
+            pauseButton.disabled = state === 'paused';
+            pauseButton.textContent = state === 'paused' ? 'Tour paused' : 'Pause tour';
+        }
+        if (resumeButton) {
+            resumeButton.disabled = state === 'running';
+            resumeButton.textContent = secondsUntilResume > 0
+                ? `Resume tour (${secondsUntilResume}s)`
+                : (state === 'running' ? 'Tour running' : 'Resume tour');
+        }
+    };
+    applyTourStatus(null);
     const roseControls = manual.querySelector('.ptz-rose');
     const lensControls = manual.querySelector('.ptz-lens-controls');
     manual.querySelectorAll('[data-axis]').forEach(manualButton => {
@@ -1075,6 +1139,15 @@ function configurePtzPresets(camera, listItem) {
         liveLink.hidden = true;
     }
     const unloadLiveView = () => {
+        if (listItem._ptzLiveHeartbeatTimer) {
+            clearInterval(listItem._ptzLiveHeartbeatTimer);
+            listItem._ptzLiveHeartbeatTimer = null;
+        }
+        if (listItem._ptzLiveSessionId) {
+            sendLiveViewHeartbeat(id, 'preview', listItem._ptzLiveSessionId, false)
+                .catch(() => {});
+            listItem._ptzLiveSessionId = '';
+        }
         liveImage.removeAttribute('src');
         liveFrame.src = 'about:blank';
         liveFrame.hidden = true;
@@ -1085,6 +1158,29 @@ function configurePtzPresets(camera, listItem) {
         liveIdleTimer = null;
         if (status.textContent === 'Aiming stream loaded') {
             status.textContent = '';
+        }
+    };
+    const startLiveHeartbeat = () => {
+        if (!authToken) {
+            return;
+        }
+        if (!listItem._ptzLiveSessionId) {
+            listItem._ptzLiveSessionId = newClientSessionId();
+        }
+        sendLiveViewHeartbeat(id, 'preview', listItem._ptzLiveSessionId, true)
+            .catch(error => {
+                status.textContent = error.message;
+            });
+        if (!listItem._ptzLiveHeartbeatTimer) {
+            listItem._ptzLiveHeartbeatTimer = setInterval(() => {
+                if (!listItem._ptzLiveSessionId) {
+                    return;
+                }
+                sendLiveViewHeartbeat(id, 'preview', listItem._ptzLiveSessionId, true)
+                    .catch(error => {
+                        status.textContent = error.message;
+                    });
+            }, 15000);
         }
     };
     const scheduleLiveViewUnload = () => {
@@ -1114,6 +1210,7 @@ function configurePtzPresets(camera, listItem) {
             status.textContent = 'Aiming stream loaded';
         }
         if (canUseLivePreview) {
+            startLiveHeartbeat();
             scheduleLiveViewUnload();
         }
     };
@@ -1181,6 +1278,9 @@ function configurePtzPresets(camera, listItem) {
             status.textContent = result.session && result.session.seconds_remaining
                 ? `${result.session.seconds_remaining}s`
                 : 'Done';
+            if (result.tour_status) {
+                applyTourStatus(result.tour_status);
+            }
             if (result.capture && result.capture.requested) {
                 status.textContent = 'Capturing new snapshot...';
                 pollCameraSnapshotRefresh(camera, listItem, previousImageUrl);
@@ -1223,6 +1323,9 @@ function configurePtzPresets(camera, listItem) {
                     throw new Error(result.error || `PTZ request failed: ${response.status}`);
                 }
                 status.textContent = isStop ? 'Stopped' : (isFocus ? 'Focused' : 'Nudged');
+                if (result.tour_status) {
+                    applyTourStatus(result.tour_status);
+                }
             } catch (error) {
                 status.textContent = error.message;
             } finally {
@@ -1250,10 +1353,18 @@ function configurePtzPresets(camera, listItem) {
                 } else {
                     status.textContent = action === 'pause' ? 'Tour paused' : 'Tour resumed';
                 }
+                applyTourStatus(result.tour_status || {
+                    state: action === 'pause' ? 'paused' : 'running',
+                    seconds_until_resume: action === 'pause' ? Number(result.auto_resume_s || 0) : 0
+                });
             } catch (error) {
                 status.textContent = error.message;
             } finally {
-                tourControls.querySelectorAll('button').forEach(item => { item.disabled = false; });
+                if (listItem._ptzTourState) {
+                    applyTourStatus(null);
+                } else {
+                    tourControls.querySelectorAll('button').forEach(item => { item.disabled = false; });
+                }
             }
         };
     });

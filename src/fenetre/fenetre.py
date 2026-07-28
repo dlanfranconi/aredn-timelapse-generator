@@ -94,6 +94,7 @@ from fenetre.ptz import (
     discover_presets,
     focus_move,
     goto_preset,
+    mark_tour_state,
     normalize_presets,
     nudge_move,
     ptz_status,
@@ -250,6 +251,21 @@ def record_live_view_heartbeat(
         "active": bool(active),
         "active_count": count,
     }
+
+
+def camera_uses_rtsp_capture_or_live_view(camera_config: Dict[str, Any]) -> bool:
+    if camera_config.get("rtsp_url") or camera_config.get("ptz_rtsp_url"):
+        return True
+    local_command = camera_local_command(camera_config)
+    return bool(local_command and "rtsp://" in str(local_command).lower())
+
+
+def should_defer_capture_for_live_view(
+    camera_name: str, camera_config: Dict[str, Any]
+) -> bool:
+    if not camera_uses_rtsp_capture_or_live_view(camera_config):
+        return False
+    return active_live_view_count(camera_name) > 0
 
 
 def configure_mqtt_manager(global_cfg: Dict) -> None:
@@ -1038,13 +1054,30 @@ def snap(camera_name, camera_config: Dict):
             current_sleep_interval
         )
         logger.info(f"{camera_name}: Sleeping {current_sleep_interval}s")
-        if wait_for_next_capture_interval(camera_name, current_sleep_interval):
+        capture_requested = wait_for_next_capture_interval(
+            camera_name, current_sleep_interval
+        )
+        if capture_requested:
             logger.info("%s: Waking early for requested capture.", camera_name)
 
         if exit_event.is_set():
             return
         if not current_config_matches_snap_thread():
             return
+
+        if should_defer_capture_for_live_view(camera_name, camera_config):
+            logger.info(
+                "%s: Deferring RTSP capture while live go2rtc stream is active.",
+                camera_name,
+            )
+            if capture_requested:
+                request_camera_capture(
+                    camera_name,
+                    "deferred while live stream active",
+                    delay_s=5,
+                )
+            interruptible_sleep(5, exit_event)
+            continue
 
         start_time = time.time()
         new_pic_dir, new_pic_filename = get_pic_dir_and_filename(camera_name)
@@ -1923,6 +1956,26 @@ window.location.replace({json.dumps(next_url)});
             ptz_tour_resume_timers[camera_name] = timer
         timer.start()
 
+    def _mark_ptz_tour_paused_after_control(
+        self,
+        camera_name: str,
+        ptz_config: Dict[str, Any],
+        owner: str,
+    ):
+        tour_config = ptz_config.get("tour") or {}
+        if not (isinstance(tour_config, dict) and tour_config.get("enabled")):
+            self._cancel_ptz_tour_resume(camera_name)
+            return None
+        auto_resume_value = tour_config.get("auto_resume_s")
+        if auto_resume_value is None or auto_resume_value == "":
+            auto_resume_value = 1800
+        auto_resume_s = max(0, int(auto_resume_value))
+        tour_status = mark_tour_state(
+            camera_name, "paused", owner, auto_resume_s=auto_resume_s
+        )
+        self._schedule_ptz_tour_resume(camera_name, auto_resume_s, owner)
+        return tour_status
+
     def _handle_ptz_status_api(self, parsed_url):
         query = parse_qs(parsed_url.query)
         camera_name = (query.get("camera") or [""])[0]
@@ -1961,6 +2014,11 @@ window.location.replace({json.dumps(next_url)});
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
             )
+            tour_status = self._mark_ptz_tour_paused_after_control(
+                camera_name, ptz_config, self._ptz_owner()
+            )
+            if tour_status:
+                result["tour_status"] = tour_status
             result["capture"] = request_camera_capture(
                 camera_name,
                 f"ptz preset {preset_id}",
@@ -2095,6 +2153,11 @@ window.location.replace({json.dumps(next_url)});
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
             )
+            tour_config = ptz_config.get("tour") or {}
+            if isinstance(tour_config, dict) and tour_config.get("enabled"):
+                result["tour_status"] = self._mark_ptz_tour_paused_after_control(
+                    camera_name, ptz_config, self._ptz_owner()
+                )
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
             self._send_json(501, {"error": str(exc)})
@@ -2142,6 +2205,11 @@ window.location.replace({json.dumps(next_url)});
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
             )
+            tour_config = ptz_config.get("tour") or {}
+            if isinstance(tour_config, dict) and tour_config.get("enabled"):
+                result["tour_status"] = self._mark_ptz_tour_paused_after_control(
+                    camera_name, ptz_config, self._ptz_owner()
+                )
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
             self._send_json(501, {"error": str(exc)})
@@ -2174,6 +2242,11 @@ window.location.replace({json.dumps(next_url)});
                 self._send_json(403, {"error": "Manual PTZ control is not allowed"})
                 return
             result = stop_move(camera_name, camera_config)
+            tour_status = self._mark_ptz_tour_paused_after_control(
+                camera_name, ptz_config, self._ptz_owner()
+            )
+            if tour_status:
+                result["tour_status"] = tour_status
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
             self._send_json(501, {"error": str(exc)})

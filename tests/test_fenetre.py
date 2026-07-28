@@ -27,6 +27,7 @@ from fenetre.fenetre import (
     queue_missing_daily_timelapses,
     record_live_view_heartbeat,
     run_camera_unavailable_command,
+    should_defer_capture_for_live_view,
 )
 import fenetre.fenetre as fenetre_module
 from fenetre.auth import authenticate_config_user_record, hash_password
@@ -357,6 +358,23 @@ class TestFenetre(unittest.TestCase):
         self.assertFalse(result["active"])
         self.assertEqual(result["active_count"], 0)
         self.assertEqual(active_live_view_count("cam1", "full"), 0)
+
+    def test_rtsp_capture_defers_while_live_view_is_active(self):
+        fenetre_module.live_view_sessions.clear()
+
+        try:
+            record_live_view_heartbeat("cam1", "preview", "session-1", "operator")
+
+            self.assertTrue(
+                should_defer_capture_for_live_view(
+                    "cam1", {"rtsp_url": "rtsp://example.test/stream"}
+                )
+            )
+            self.assertFalse(
+                should_defer_capture_for_live_view("cam2", {"url": "http://snapshot"})
+            )
+        finally:
+            fenetre_module.live_view_sessions.clear()
 
     def test_discover_camera_timelapses_reports_existing_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:

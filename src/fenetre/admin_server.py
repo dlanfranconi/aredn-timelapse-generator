@@ -1033,9 +1033,10 @@ def _build_camera_config(
         if "ptz_tour_enabled" in payload:
             tour_config["enabled"] = bool(payload.get("ptz_tour_enabled"))
         if "ptz_tour_auto_resume_s" in payload:
-            tour_config["auto_resume_s"] = int(
-                payload.get("ptz_tour_auto_resume_s") or 1800
-            )
+            value = payload.get("ptz_tour_auto_resume_s")
+            if value is None or value == "":
+                value = 1800
+            tour_config["auto_resume_s"] = max(0, int(value))
         if payload.get("ptz_tour_backend"):
             tour_config["backend"] = str(payload.get("ptz_tour_backend")).strip()
         if tour_config:

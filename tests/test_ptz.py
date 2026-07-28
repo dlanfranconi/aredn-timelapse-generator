@@ -18,6 +18,7 @@ from fenetre.ptz import (
     _endpoint_failure_backoffs,
     _profile_token_cache,
     _sessions,
+    _tour_states,
 )
 
 
@@ -25,6 +26,7 @@ class PTZTestCase(unittest.TestCase):
     def tearDown(self):
         set_lock("cam1", False)
         _sessions.clear()
+        _tour_states.clear()
         _endpoint_failure_backoffs.clear()
         _profile_token_cache.clear()
 
@@ -507,11 +509,55 @@ class PTZTestCase(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["tour"], "pause")
         self.assertEqual(result["auto_resume_s"], 1800)
+        self.assertEqual(result["tour_status"]["state"], "paused")
+        self.assertGreater(result["tour_status"]["seconds_until_resume"], 0)
         ptz.create_type.assert_called_once_with("OperatePresetTour")
         self.assertEqual(request.ProfileToken, "profile-1")
         self.assertEqual(request.PresetTourToken, "tour-1")
         self.assertEqual(request.Operation, "Stop")
         ptz.OperatePresetTour.assert_called_once_with(request)
+
+    def test_tour_control_resume_updates_runtime_state(self):
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "tour": {"enabled": True, "backend": "none"},
+            }
+        }
+
+        result = set_tour_state("cam1", camera_config, "resume")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tour"], "resume")
+        self.assertEqual(result["tour_status"]["state"], "running")
+
+    def test_tour_auto_resume_zero_is_preserved(self):
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "tour": {
+                    "enabled": True,
+                    "backend": "none",
+                    "auto_resume_s": 0,
+                },
+            }
+        }
+
+        metadata = public_ptz_metadata(camera_config["ptz"])
+        result = set_tour_state("cam1", camera_config, "pause")
+
+        self.assertEqual(metadata["tour"]["auto_resume_s"], 0)
+        self.assertEqual(result["auto_resume_s"], 0)
+        self.assertEqual(result["tour_status"]["state"], "paused")
+        self.assertEqual(result["tour_status"]["seconds_until_resume"], 0)
 
     def test_failed_ptz_operation_sets_endpoint_cooldown(self):
         media = MagicMock()

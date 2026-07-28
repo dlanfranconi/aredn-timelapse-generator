@@ -531,13 +531,14 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         go2rtc_cfg.get("preview_url_template"),
         "global.go2rtc.preview_url_template",
         errors,
-        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
+        default="{base_url}/api/stream.mjpeg?src={stream}",
     )
     if preview_url_template in {
         "{base_url}/webrtc.html?src={stream}",
         "{base_url}/stream.html?src={stream}",
+        "{base_url}/stream.html?src={stream}&media=video&muted=1",
     }:
-        preview_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+        preview_url_template = "{base_url}/api/stream.mjpeg?src={stream}"
     go2rtc_out["preview_url_template"] = preview_url_template
     go2rtc_out["stream_name_prefix"] = _str(
         go2rtc_cfg.get("stream_name_prefix"),

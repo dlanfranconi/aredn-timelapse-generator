@@ -65,6 +65,17 @@
         return `${baseUrl}/stream.html?src=${encodeURIComponent(streamName)}&media=video&muted=1`;
     }
 
+    function sameHostGo2rtcPreviewUrl(go2rtc, streamName) {
+        if (!streamName) {
+            return '';
+        }
+        const baseUrl = sameHostGo2rtcBaseUrl(go2rtc);
+        if (!baseUrl) {
+            return '';
+        }
+        return `${baseUrl}/api/stream.mjpeg?src=${encodeURIComponent(streamName)}`;
+    }
+
     function browserHostCandidates() {
         const candidates = [];
         [window.location.host, window.location.hostname].forEach(value => {
@@ -200,7 +211,9 @@
         const playerUrl = hostMappedPlayerUrl
             || mutedGo2rtcPlayerUrl(rawPlayerUrl)
             || (canUseSameHostGo2rtcFallback(go2rtc)
-                ? sameHostGo2rtcPlayerUrl(go2rtc, fallbackStream)
+                ? (streamKind === 'preview'
+                    ? sameHostGo2rtcPreviewUrl(go2rtc, fallbackStream)
+                    : sameHostGo2rtcPlayerUrl(go2rtc, fallbackStream))
                 : '');
         if (!playerUrl) {
             const host = window.location.hostname || window.location.host || 'this host';
