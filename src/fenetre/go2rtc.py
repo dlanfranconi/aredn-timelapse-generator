@@ -107,6 +107,18 @@ def _force_muted_player_url(url: str) -> str:
     )
 
 
+def _video_only_source(source: Any) -> str:
+    source_text = str(source or "").strip()
+    if not source_text.lower().startswith(("rtsp://", "rtsps://")):
+        return source_text
+
+    parts = source_text.split("#")
+    params = parts[1:]
+    if any(param.split("=", 1)[0].strip().lower() == "media" for param in params):
+        return source_text
+    return f"{source_text}#media=video"
+
+
 def build_go2rtc_metadata(
     camera_name: str,
     camera_config: Dict[str, Any],
@@ -176,11 +188,11 @@ def build_go2rtc_runtime_config(
             if not alignment_source:
                 continue
             stream_name = go2rtc_stream_name(str(camera_name), global_config)
-            streams[stream_name] = alignment_source
+            streams[stream_name] = _video_only_source(alignment_source)
             full_source = camera_config.get("rtsp_url")
             if full_source and full_source != alignment_source:
                 streams[go2rtc_full_stream_name(str(camera_name), global_config)] = (
-                    full_source
+                    _video_only_source(full_source)
                 )
 
     if not streams:

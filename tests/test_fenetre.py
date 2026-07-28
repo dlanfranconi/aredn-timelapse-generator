@@ -231,9 +231,7 @@ class TestFenetre(unittest.TestCase):
             "username": "admin",
             "role": "admin",
         }
-        handler._send_json = lambda status, payload: responses.append(
-            (status, payload)
-        )
+        handler._send_json = lambda status, payload: responses.append((status, payload))
         snapshot = (
             {"cam1": {"rtsp_url": "rtsp://camera/stream"}},
             {"go2rtc": {"enabled": True}},
@@ -264,9 +262,7 @@ class TestFenetre(unittest.TestCase):
             "username": "viewer",
             "role": "viewer",
         }
-        handler._send_json = lambda status, payload: responses.append(
-            (status, payload)
-        )
+        handler._send_json = lambda status, payload: responses.append((status, payload))
 
         with patch.object(fenetre_module, "_go2rtc_runtime_status") as mock_status:
             handler._handle_go2rtc_status_api()
@@ -298,9 +294,7 @@ class TestFenetre(unittest.TestCase):
         handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
         responses = []
         handler._read_json_body = lambda: {"camera": "cam1", "preset": "home"}
-        handler._send_json = lambda status, payload: responses.append(
-            (status, payload)
-        )
+        handler._send_json = lambda status, payload: responses.append((status, payload))
         handler._user_can_control_ptz = lambda camera, ptz, level: True
         handler._ptz_owner = lambda: "operator"
         old_cameras_config = getattr(fenetre_module, "cameras_config", {})
@@ -318,7 +312,7 @@ class TestFenetre(unittest.TestCase):
                 return_value={
                     "requested": True,
                     "reason": "ptz preset home",
-                    "delay_s": 2.0,
+                    "delay_s": 5.0,
                 },
             ) as mock_capture:
                 handler._handle_ptz_preset_api()
@@ -334,9 +328,7 @@ class TestFenetre(unittest.TestCase):
             owner="operator",
             duration_s=30,
         )
-        mock_capture.assert_called_once_with(
-            "cam1", "ptz preset home", delay_s=2.0
-        )
+        mock_capture.assert_called_once_with("cam1", "ptz preset home", delay_s=5.0)
 
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()

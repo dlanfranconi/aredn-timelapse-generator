@@ -328,7 +328,6 @@ document.addEventListener('DOMContentLoaded', () => {
     newCameraSnapshotAuthType.addEventListener('change', resetNewCameraTest);
     newCameraRtspUrl.addEventListener('input', resetNewCameraTest);
     newCameraPtzRtspUrl.addEventListener('input', resetNewCameraTest);
-    newCameraName.addEventListener('input', resetNewCameraTest);
     testNewCameraBtn.addEventListener('click', testNewCameraSnapshot);
     confirmNewCameraBtn.addEventListener('click', confirmNewCameraAdd);
     [addCameraModal, userModal, passwordModal].forEach(modal => {
@@ -1488,7 +1487,7 @@ document.addEventListener('DOMContentLoaded', () => {
         editingOriginalCamera = camera;
         cameraModalTitle.textContent = `Edit ${cameraName}`;
         confirmNewCameraBtn.textContent = 'Save Camera Changes';
-        newCameraName.disabled = true;
+        newCameraName.disabled = false;
 
         setInputValue('newCameraName', cameraName);
         setInputValue('newCameraDisplayName', camera.display_name || cameraName);
@@ -2280,11 +2279,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!isEdit) {
                 cameraFormMode = 'edit';
                 editingCameraName = savedName;
-                newCameraName.disabled = true;
+                newCameraName.disabled = false;
                 cameraModalTitle.textContent = `Edit ${savedName}`;
                 confirmNewCameraBtn.textContent = 'Save Camera Changes';
             } else {
                 editingCameraName = savedName;
+                cameraModalTitle.textContent = `Edit ${savedName}`;
             }
             editingOriginalCamera = ((loadedConfigData && loadedConfigData.cameras) || {})[savedName] || editingOriginalCamera;
             setCameraModalStatus(

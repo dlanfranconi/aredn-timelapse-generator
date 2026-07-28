@@ -859,8 +859,8 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(
             runtime_config["streams"],
             {
-                "mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2",
-                "mesh_Ridge_Camera_full": "rtsp://admin:snapshot@example.test/stream1",
+                "mesh_Ridge_Camera": "rtsp://admin:ptz@example.test/stream2#media=video",
+                "mesh_Ridge_Camera_full": "rtsp://admin:snapshot@example.test/stream1#media=video",
             },
         )
 
@@ -888,7 +888,26 @@ class FenetreConfigTestCase(unittest.TestCase):
 
         self.assertEqual(
             runtime_config["streams"],
-            {"mesh_Enabled_Camera": "rtsp://admin:secret@example.test/enabled"},
+            {
+                "mesh_Enabled_Camera": "rtsp://admin:secret@example.test/enabled#media=video"
+            },
+        )
+
+    def test_go2rtc_runtime_config_preserves_existing_media_filter(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {"go2rtc": {"enabled": True}},
+                "cameras": {
+                    "South": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/stream#media=video"
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(
+            runtime_config["streams"],
+            {"fenetre_South": "rtsp://admin:secret@example.test/stream#media=video"},
         )
 
     def test_go2rtc_runtime_config_writer(self):
@@ -909,7 +928,7 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(generated["api"]["listen"], ":1984")
         self.assertEqual(
             generated["streams"],
-            {"fenetre_South": "rtsp://admin:secret@example.test/stream"},
+            {"fenetre_South": "rtsp://admin:secret@example.test/stream#media=video"},
         )
 
     def test_config_load_adds_default_sun_path_postprocessing(self):

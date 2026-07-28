@@ -1895,7 +1895,7 @@ window.location.replace({json.dumps(next_url)});
             result["capture"] = request_camera_capture(
                 camera_name,
                 f"ptz preset {preset_id}",
-                delay_s=float(ptz_config.get("post_preset_capture_delay_s") or 2.0),
+                delay_s=float(ptz_config.get("post_preset_capture_delay_s") or 5.0),
             )
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
@@ -2478,7 +2478,7 @@ def create_and_start_and_watch_thread(
 
 
 def update_cameras_metadata(cameras_configs: Dict, work_dir: str):
-    """Regenerates cameras.json, preserving metadata for removed cameras."""
+    """Regenerates cameras.json from the current camera config."""
     json_filepath = os.path.join(work_dir, "cameras.json")
     write_cameras_metadata(
         cameras_configs,

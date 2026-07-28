@@ -665,7 +665,15 @@ async function updateTimelapseArchiveSelect(camera, select, todayStr) {
     }
 }
 
-function applyCameraMetadata(camera, listItem, metadata) {
+function cacheBustedImageUrl(url) {
+    if (!url) {
+        return url;
+    }
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}_fenetre_view=${Date.now()}`;
+}
+
+function applyCameraMetadata(camera, listItem, metadata, options = {}) {
     const id = cameraId(camera);
     const thumbImg = listItem.querySelector('.camera-header img');
     const lastPictureTime = listItem.querySelector('.last-picture-time');
@@ -690,8 +698,11 @@ function applyCameraMetadata(camera, listItem, metadata) {
     const fullImageUrl = `/${basePath}/${lastPictureUrl}`;
     const filename = lastPictureUrl.substring(lastPictureUrl.lastIndexOf('/') + 1);
 
-    thumbImg.src = fullImageUrl;
-    detailsImg.src = fullImageUrl;
+    const imageSrc = options.cacheBustImages
+        ? cacheBustedImageUrl(fullImageUrl)
+        : fullImageUrl;
+    thumbImg.src = imageSrc;
+    detailsImg.src = imageSrc;
     listItem.dataset.lastPictureUrl = fullImageUrl;
     filenameLink.textContent = `Download: ${filename}`;
     filenameLink.href = fullImageUrl;
@@ -734,18 +745,19 @@ async function refreshCameraMetadata(camera, listItem, options = {}) {
     if (options.waitForChange && options.previousImageUrl && fullImageUrl === options.previousImageUrl) {
         return false;
     }
-    return Boolean(applyCameraMetadata(camera, listItem, metadata));
+    return Boolean(applyCameraMetadata(camera, listItem, metadata, options));
 }
 
 function pollCameraSnapshotRefresh(camera, listItem, previousImageUrl) {
     const ptzStatus = listItem.querySelector('.ptz-status');
     let attempts = 0;
-    const maxAttempts = 20;
+    const maxAttempts = 60;
     const delayMs = 1500;
 
     const poll = () => {
         attempts += 1;
         refreshCameraMetadata(camera, listItem, {
+            cacheBustImages: true,
             waitForChange: true,
             previousImageUrl
         })
@@ -900,11 +912,9 @@ function configurePtzPresets(camera, listItem) {
     const supportsTilt = capabilities.tilt !== false;
     const supportsZoom = capabilities.zoom !== false;
     const supportsFocus = capabilities.focus === true;
-    const livePreviewUrl = go2rtc.enabled ? go2rtcPreviewPlayerUrl(go2rtc) : '';
+    const livePreviewUrl = go2rtcPreviewPlayerUrl(go2rtc);
     const previewUsesImage = /\/api\/stream\.mjpeg|\.mjpeg(?:\?|$)/.test(livePreviewUrl);
-    const fullLivePlayerUrl = go2rtc.enabled
-        ? (go2rtc.full_view_url || go2rtcFullPlayerUrl(go2rtc))
-        : '';
+    const fullLivePlayerUrl = go2rtc.full_view_url || go2rtcFullPlayerUrl(go2rtc);
     const liveIdleTimeoutS = Object.prototype.hasOwnProperty.call(go2rtc, 'idle_timeout_s')
         ? Number(go2rtc.idle_timeout_s)
         : 60;

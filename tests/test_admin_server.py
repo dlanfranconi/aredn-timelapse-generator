@@ -265,6 +265,29 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(camera["timelapse_enabled"])
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_preserves_camera_id_capitalization(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "Cuesta-Peak-PTZ",
+                    "display_name": "Cuesta Peak PTZ",
+                    "url": "http://camera/snapshot.jpg",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("Cuesta-Peak-PTZ", updated_data_yaml["cameras"])
+        self.assertNotIn("cuesta-peak-ptz", updated_data_yaml["cameras"])
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_with_snapshot_http_auth(self, mock_fetch):
         mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
         response = self.app.post(
@@ -435,7 +458,7 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         self.assertEqual(
             mock_go2rtc_put.call_args.kwargs["params"]["src"],
-            "rtsp://admin:secret@camera:554/11",
+            "rtsp://admin:secret@camera:554/11#media=video",
         )
         mock_fetch.assert_called_once_with(
             camera["local_command"], timeout_s=camera["timeout_s"]
@@ -859,6 +882,106 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["custom_key"], "keep-me")
         self.assertEqual(camera["ptz"]["password"], "existing-secret")
         self.assertEqual(camera["ptz"]["port"], 8899)
+
+    def test_update_camera_renames_references_and_moves_photo_directory(self):
+        work_dir = tempfile.mkdtemp()
+        old_camera_dir = os.path.join(work_dir, "photos", "Old-Cam", "2026-07-27")
+        os.makedirs(old_camera_dir)
+        with open(os.path.join(old_camera_dir, "frame.jpg"), "wb") as f:
+            f.write(b"jpeg")
+        with open(os.path.join(work_dir, "cameras.json"), "w") as f:
+            json.dump({"cameras": [{"id": "Old-Cam", "title": "Old Cam"}]}, f)
+        self.test_config_data = {
+            "global": {
+                "work_dir": work_dir,
+                "timezone": "UTC",
+                "ui": {
+                    "camera_order": ["Old-Cam"],
+                    "fullscreen_camera": "Old-Cam",
+                },
+                "launch_workflow": {
+                    "enabled": True,
+                    "plans": {
+                        "vandenberg": {
+                            "match": {"locations": ["Vandenberg"]},
+                            "cameras": {"Old-Cam": {"preset": "launch"}},
+                        }
+                    },
+                },
+            },
+            "users": {
+                "operator": {
+                    "role": "operator",
+                    "password_hash": "hash",
+                    "ptz_access": "manual",
+                    "ptz_cameras": ["Old-Cam"],
+                }
+            },
+            "cameras": {
+                "Old-Cam": {
+                    "url": "http://old-camera/snapshot.jpg",
+                    "ptz": {
+                        "enabled": True,
+                        "host": "192.0.2.10",
+                        "username": "operator",
+                        "password": "secret",
+                    },
+                }
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.put(
+            "/api/camera/Old-Cam",
+            data=json.dumps(
+                {
+                    "name": "New-Cam",
+                    "display_name": "New Cam",
+                    "capture_source": "snapshot",
+                    "url": "http://old-camera/snapshot.jpg",
+                    "timeout_s": 20,
+                    "public": True,
+                    "require_test": False,
+                    "ptz_enabled": True,
+                    "ptz_host": "192.0.2.10",
+                    "ptz_port": 80,
+                    "ptz_username": "operator",
+                    "ptz_password": "",
+                    "ptz_presets": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("Old-Cam", updated_data_yaml["cameras"])
+        self.assertIn("New-Cam", updated_data_yaml["cameras"])
+        self.assertEqual(updated_data_yaml["global"]["ui"]["camera_order"], ["New-Cam"])
+        self.assertEqual(
+            updated_data_yaml["global"]["ui"]["fullscreen_camera"], "New-Cam"
+        )
+        self.assertEqual(
+            updated_data_yaml["users"]["operator"]["ptz_cameras"], ["New-Cam"]
+        )
+        self.assertIn(
+            "New-Cam",
+            updated_data_yaml["global"]["launch_workflow"]["plans"]["vandenberg"][
+                "cameras"
+            ],
+        )
+        self.assertFalse(os.path.exists(os.path.join(work_dir, "photos", "Old-Cam")))
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(work_dir, "photos", "New-Cam", "2026-07-27", "frame.jpg")
+            )
+        )
+        with open(os.path.join(work_dir, "cameras.json"), "r") as f:
+            cameras_json = json.load(f)
+        camera_ids = [camera["id"] for camera in cameras_json["cameras"]]
+        self.assertEqual(camera_ids, ["New-Cam"])
 
     @patch("fenetre.admin_server.requests.put")
     def test_update_camera_to_rtsp_capture_removes_stale_snapshot_fields(

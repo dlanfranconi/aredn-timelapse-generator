@@ -124,11 +124,11 @@
         const metadata = await response.json();
         const cameras = Array.isArray(metadata.cameras) ? metadata.cameras : [];
         const camera = cameras.find(item => cameraId(item) === cameraName);
-        if (!camera || !camera.go2rtc || !camera.go2rtc.enabled) {
+        const go2rtc = (camera && camera.go2rtc) || {};
+        if (!camera) {
             showMessage('Live view is not configured for this camera.');
             return;
         }
-        const go2rtc = camera.go2rtc;
         const rawPlayerUrl = streamKind === 'preview'
             ? (go2rtc.preview_url || go2rtc.player_url)
             : (go2rtc.full_player_url || go2rtc.player_url);

@@ -643,13 +643,121 @@ def _replace_user_camera_access(config: dict, old_camera: str, new_camera: str) 
     return changed
 
 
+def _replace_camera_order_reference(config: dict, old_camera: str, new_camera: str):
+    ui_config = (config.get("global") or {}).get("ui") or {}
+    camera_order = ui_config.get("camera_order")
+    if not isinstance(camera_order, list) or old_camera not in camera_order:
+        return []
+    replaced = [new_camera if item == old_camera else item for item in camera_order]
+    camera_names = set((config.get("cameras") or {}).keys())
+    cleaned = []
+    for item in replaced:
+        if item in camera_names and item not in cleaned:
+            cleaned.append(item)
+    ui_config["camera_order"] = cleaned
+    return cleaned
+
+
+def _replace_launch_workflow_camera_reference(
+    config: dict, old_camera: str, new_camera: str
+) -> list[str]:
+    changed_plans = []
+    global_config = config.get("global") or {}
+    for workflow_key in ("launch_workflow", "rocket_launches"):
+        workflow = global_config.get(workflow_key)
+        if not isinstance(workflow, dict):
+            continue
+        plans = workflow.get("plans")
+        if isinstance(plans, dict):
+            plan_items = plans.items()
+        elif isinstance(plans, list):
+            plan_items = [
+                (str(plan.get("id") or index), plan)
+                for index, plan in enumerate(plans)
+                if isinstance(plan, dict)
+            ]
+        else:
+            continue
+        for plan_id, plan in plan_items:
+            cameras = plan.get("cameras")
+            if not isinstance(cameras, dict) or old_camera not in cameras:
+                continue
+            old_plan = cameras.pop(old_camera)
+            cameras.setdefault(new_camera, old_plan)
+            changed_plans.append(f"{workflow_key}:{plan_id}")
+    return changed_plans
+
+
+def _replace_camera_references(config: dict, old_camera: str, new_camera: str) -> dict:
+    changes = {
+        "user_ptz_access": _replace_user_camera_access(config, old_camera, new_camera),
+        "camera_order": _replace_camera_order_reference(config, old_camera, new_camera),
+        "launch_workflow": _replace_launch_workflow_camera_reference(
+            config, old_camera, new_camera
+        ),
+    }
+    ui_config = (config.get("global") or {}).get("ui") or {}
+    if ui_config.get("fullscreen_camera") == old_camera:
+        ui_config["fullscreen_camera"] = new_camera
+        changes["fullscreen_camera"] = {"from": old_camera, "to": new_camera}
+    return changes
+
+
 def _slugify_camera_name(value: str) -> str:
-    value = (value or "").strip().lower()
-    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = (value or "").strip()
+    value = re.sub(r"[^A-Za-z0-9_-]+", "-", value)
     value = re.sub(r"-+", "-", value).strip("-")
     if not value:
         raise ValueError("Camera name cannot be empty.")
     return value
+
+
+def _unique_destination_path(path: str) -> str:
+    base, ext = os.path.splitext(path)
+    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    candidate = f"{base}.migrated-{stamp}{ext}"
+    index = 1
+    while os.path.exists(candidate):
+        candidate = f"{base}.migrated-{stamp}-{index}{ext}"
+        index += 1
+    return candidate
+
+
+def _merge_directory_contents(src_dir: str, dst_dir: str) -> None:
+    os.makedirs(dst_dir, exist_ok=True)
+    for entry in os.listdir(src_dir):
+        src_path = os.path.join(src_dir, entry)
+        dst_path = os.path.join(dst_dir, entry)
+        if os.path.isdir(src_path) and not os.path.islink(src_path):
+            if os.path.exists(dst_path) and not os.path.isdir(dst_path):
+                dst_path = _unique_destination_path(dst_path)
+            _merge_directory_contents(src_path, dst_path)
+            continue
+        if os.path.exists(dst_path):
+            dst_path = _unique_destination_path(dst_path)
+        shutil.move(src_path, dst_path)
+    shutil.rmtree(src_dir)
+
+
+def _move_camera_media_dir(config: dict, old_camera: str, new_camera: str) -> dict:
+    if old_camera == new_camera:
+        return {"moved": False}
+    work_dir = _work_dir_from_config(config)
+    if not work_dir:
+        return {"moved": False, "warning": "work_dir not set"}
+    photos_dir = os.path.join(work_dir, "photos")
+    src_dir = os.path.join(photos_dir, old_camera)
+    dst_dir = os.path.join(photos_dir, new_camera)
+    if not os.path.isdir(src_dir):
+        return {"moved": False, "from": src_dir, "to": dst_dir}
+    if os.path.abspath(src_dir) == os.path.abspath(dst_dir):
+        return {"moved": False, "from": src_dir, "to": dst_dir}
+    if os.path.exists(dst_dir):
+        _merge_directory_contents(src_dir, dst_dir)
+        return {"moved": True, "merged": True, "from": src_dir, "to": dst_dir}
+    os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
+    shutil.move(src_dir, dst_dir)
+    return {"moved": True, "merged": False, "from": src_dir, "to": dst_dir}
 
 
 GUIDED_CAMERA_KEYS = {
@@ -1756,12 +1864,17 @@ def update_camera(camera_name):
                 )
 
         updated_camera = _merge_guided_camera_update(old_camera, camera)
+        rename_changes = {}
+        media_move_result = {"moved": False}
         if name != camera_name:
             cameras.pop(camera_name)
-            _replace_user_camera_access(config, camera_name, name)
         _ensure_go2rtc_enabled_for_camera(config, updated_camera)
         cameras[name] = updated_camera
+        if name != camera_name:
+            rename_changes = _replace_camera_references(config, camera_name, name)
         user_access_removed = _cleanup_user_camera_access(config)
+        if name != camera_name:
+            media_move_result = _move_camera_media_dir(config, camera_name, name)
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
@@ -1773,6 +1886,8 @@ def update_camera(camera_name):
                 "camera_name": name,
                 "go2rtc": go2rtc_result,
                 **publish_result,
+                "camera_rename": rename_changes,
+                "media_move": media_move_result,
                 "user_camera_access_removed": user_access_removed,
                 **metadata,
             }
@@ -1796,19 +1911,27 @@ def rename_camera():
             return jsonify({"error": f"Camera '{old_name}' was not found."}), 404
         if new_name in cameras and new_name != old_name:
             return jsonify({"error": f"Camera '{new_name}' already exists."}), 409
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         cameras[new_name] = cameras.pop(old_name)
-        user_access_replaced = _replace_user_camera_access(config, old_name, new_name)
+        rename_changes = _replace_camera_references(config, old_name, new_name)
         user_access_removed = _cleanup_user_camera_access(config)
         if payload.get("description"):
             cameras[new_name]["description"] = payload.get("description")
+        media_move_result = _move_camera_media_dir(config, old_name, new_name)
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
         return (
             jsonify(
                 {
-                    "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.",
-                    "user_camera_access_replaced": user_access_replaced,
+                    "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folder was moved when present.",
+                    "camera_name": new_name,
+                    "camera_rename": rename_changes,
+                    "media_move": media_move_result,
+                    "go2rtc": go2rtc_result,
+                    **publish_result,
                     "user_camera_access_removed": user_access_removed,
                     **metadata,
                 }

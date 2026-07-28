@@ -225,12 +225,14 @@ def write_cameras_metadata(
     global_config: Dict[str, Any],
     timelapse_config: Dict[str, Any],
     json_filepath: str,
+    include_removed: bool = False,
 ) -> Dict[str, Any]:
     updated_cameras_metadata = build_cameras_metadata(
         cameras_configs,
         global_config,
         timelapse_config,
         json_filepath,
+        include_removed=include_removed,
         include_go2rtc=False,
     )
 
