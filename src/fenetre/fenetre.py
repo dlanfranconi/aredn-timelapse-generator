@@ -80,7 +80,11 @@ from fenetre.camera_utils import (
 )
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
-from fenetre.launch_workflow import preview_launch_workflow, run_due_launch_actions
+from fenetre.launch_workflow import (
+    list_past_launch_recordings,
+    preview_launch_workflow,
+    run_due_launch_actions,
+)
 from fenetre.postprocess import postprocess, publish_metrics_from_exif_dict
 from fenetre.rtsp_capture import camera_local_command
 from fenetre.ptz import (
@@ -774,6 +778,15 @@ def snap(camera_name, camera_config: Dict):
     picamera2_initial_exposure_state = None
     camera_capture_request_event(camera_name)
 
+    def current_config_matches_snap_thread() -> bool:
+        if cameras_config.get(camera_name) == camera_config:
+            return True
+        logger.info(
+            "%s: Snap thread exiting because camera config was removed or changed.",
+            camera_name,
+        )
+        return False
+
     def load_picamera2_exposure_state() -> Optional[Dict]:
         metadata_path = os.path.join(
             global_config["work_dir"], "photos", camera_name, "metadata.json"
@@ -892,6 +905,8 @@ def snap(camera_name, camera_config: Dict):
     previous_mode = "unknown"
     previous_pic = None
     while not exit_event.is_set():
+        if not current_config_matches_snap_thread():
+            return
         try:
             with profiler.timed(f"camera.{camera_name}.capture"):
                 previous_pic = capture(mode=previous_mode)
@@ -915,6 +930,8 @@ def snap(camera_name, camera_config: Dict):
         logger.info(
             "%s: Exiting snap loop before initial capture completed.", camera_name
         )
+        return
+    if not current_config_matches_snap_thread():
         return
     previous_exif_bytes = previous_pic.info.get("exif") or b""
     if len(camera_config.get("postprocessing", [])) > 0:
@@ -941,6 +958,8 @@ def snap(camera_name, camera_config: Dict):
         )
 
     while not exit_event.is_set():
+        if not current_config_matches_snap_thread():
+            return
         # Immediately save the previous pic to disk.
         write_pic_to_disk(
             previous_pic,
@@ -1024,6 +1043,8 @@ def snap(camera_name, camera_config: Dict):
 
         if exit_event.is_set():
             return
+        if not current_config_matches_snap_thread():
+            return
 
         start_time = time.time()
         new_pic_dir, new_pic_filename = get_pic_dir_and_filename(camera_name)
@@ -1041,6 +1062,8 @@ def snap(camera_name, camera_config: Dict):
 
         new_pic = None
         while not exit_event.is_set():
+            if not current_config_matches_snap_thread():
+                return
             try:
                 with profiler.timed(f"camera.{camera_name}.capture"):
                     new_pic = capture(current_mode)
@@ -1063,6 +1086,8 @@ def snap(camera_name, camera_config: Dict):
                 )
                 interruptible_sleep(retry_interval, exit_event)
         if exit_event.is_set():
+            return
+        if not current_config_matches_snap_thread():
             return
         if new_pic is None:
             logger.error(f"{camera_name}: Could not fetch picture.")
@@ -1449,6 +1474,32 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         filtered["events"] = events
         return filtered
 
+    def _filter_public_launch_history(
+        self, history: Dict, user: Optional[Dict]
+    ) -> Dict:
+        filtered = dict(history or {})
+        launches = []
+        for launch in filtered.get("launches") or []:
+            launch_copy = dict(launch)
+            recordings = []
+            for recording in launch_copy.get("recordings") or []:
+                if not isinstance(recording, dict):
+                    continue
+                camera_name = str(recording.get("camera") or "")
+                if camera_name and self._camera_visible_to_public_user(
+                    camera_name, user
+                ):
+                    recordings.append(dict(recording))
+            if recordings:
+                launch_copy["recordings"] = recordings
+                launch_copy["recording_count"] = len(recordings)
+                launch_copy["bytes"] = sum(
+                    int(recording.get("bytes") or 0) for recording in recordings
+                )
+                launches.append(launch_copy)
+        filtered["launches"] = launches
+        return filtered
+
     def _handle_launches_preview_api(self):
         user = self._public_session_user()
         if not self._site_is_public() and not user:
@@ -1465,6 +1516,24 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(200, self._filter_public_launch_preview(preview, user))
         except Exception as exc:
             logger.error("Unexpected launch preview error.", exc_info=True)
+            self._send_json(500, {"ok": False, "error": str(exc)})
+
+    def _handle_launches_history_api(self):
+        user = self._public_session_user()
+        if not self._site_is_public() and not user:
+            self._send_public_auth_required()
+            return
+        current_cameras_config, current_global_config, _ = load_public_config_snapshot()
+        try:
+            history = list_past_launch_recordings(
+                {
+                    "global": current_global_config or {},
+                    "cameras": current_cameras_config or {},
+                }
+            )
+            self._send_json(200, self._filter_public_launch_history(history, user))
+        except Exception as exc:
+            logger.error("Unexpected launch history error.", exc_info=True)
             self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _handle_timelapses_api(self, parsed_url):
@@ -2173,6 +2242,9 @@ window.location.replace({json.dumps(next_url)});
         if parsed_url.path == "/api/launches/preview":
             self._handle_launches_preview_api()
             return
+        if parsed_url.path == "/api/launches/history":
+            self._handle_launches_history_api()
+            return
         if parsed_url.path == "/api/ptz/status":
             self._handle_ptz_status_api(parsed_url)
             return
@@ -2194,6 +2266,13 @@ window.location.replace({json.dumps(next_url)});
         user = self._public_session_user()
         if (
             parsed_url.path == "/cameras.json"
+            and not self._site_is_public()
+            and not user
+        ):
+            self._send_public_auth_required()
+            return
+        if (
+            parsed_url.path.startswith("/launches/")
             and not self._site_is_public()
             and not user
         ):
@@ -2392,22 +2471,39 @@ def create_and_start_and_watch_thread(
     # It should be initialized once globally or per camera by the main logic.
 
     thread_instance = None  # Keep a reference to the running thread
+    managed_camera_config = None
+    if camera_name_for_management and len(arguments) >= 2:
+        candidate_config = arguments[1]
+        if isinstance(candidate_config, dict):
+            managed_camera_config = candidate_config
 
     while not exit_event.is_set():
         # Check if this thread (for a specific camera) should still be running
+        current_camera_config = (
+            cameras_config.get(camera_name_for_management)
+            if camera_name_for_management
+            else None
+        )
         if (
             camera_name_for_management
-            and camera_name_for_management not in cameras_config
+            and (
+                current_camera_config is None
+                or (
+                    managed_camera_config is not None
+                    and current_camera_config != managed_camera_config
+                )
+            )
         ):
             logger.info(
-                f"Camera {camera_name_for_management} removed from config. Watchdog {name} stopping."
+                f"Camera {camera_name_for_management} removed or changed in config. Watchdog {name} stopping."
             )
             if thread_instance and thread_instance.is_alive():
                 # The 'snap' function needs to respect exit_event to terminate gracefully.
                 # Forcing a stop is harder; relying on exit_event being set for the thread.
                 logger.info(
-                    f"Thread {name} for {camera_name_for_management} should stop due to config removal."
+                    f"Thread {name} for {camera_name_for_management} should stop due to config removal or change."
                 )
+                request_camera_capture(camera_name_for_management, "config reload")
             return  # Exit the watchdog loop for this camera
 
         if not thread_instance or not thread_instance.is_alive():
@@ -2771,15 +2867,34 @@ def manage_camera_threads():
 
     # Stop threads for removed or disabled cameras
     for cam_name, thread_info in list(active_camera_threads.items()):
-        if cam_name not in current_camera_names or cameras_config[cam_name].get(
-            "disabled", False
-        ):
-            logger.info(f"Camera {cam_name} removed or disabled. Stopping its threads.")
+        current_camera_config = cameras_config.get(cam_name)
+        managed_camera_config = thread_info.get("camera_config")
+        config_changed = (
+            current_camera_config is not None
+            and managed_camera_config is not None
+            and managed_camera_config != current_camera_config
+        )
+        disabled = bool(
+            current_camera_config and current_camera_config.get("disabled", False)
+        )
+        if cam_name not in current_camera_names or disabled or config_changed:
+            reason = (
+                "changed"
+                if config_changed
+                else "removed or disabled"
+            )
+            logger.info(f"Camera {cam_name} {reason}. Stopping its threads.")
+            request_camera_capture(cam_name, "config reload")
+            if (
+                "watchdog_thread" in thread_info
+                and thread_info["watchdog_thread"].is_alive()
+            ):
+                thread_info["watchdog_thread"].join(timeout=5)
             if (
                 "watchdog_manager_thread" in thread_info
                 and thread_info["watchdog_manager_thread"].is_alive()
             ):
-                # The watchdog manager will see the camera is gone and exit.
+                # The watchdog manager will see the camera is gone/changed and exit.
                 # We join to ensure it cleans up.
                 thread_info["watchdog_manager_thread"].join(timeout=5)
             if (
@@ -2848,6 +2963,7 @@ def manage_camera_threads():
             cam_watchdog_thread.start()
             if cam_name not in active_camera_threads:
                 active_camera_threads[cam_name] = {}
+            active_camera_threads[cam_name]["camera_config"] = cam_conf
             active_camera_threads[cam_name][
                 "watchdog_manager_thread"
             ] = cam_watchdog_thread
@@ -3530,6 +3646,68 @@ def _remove_file_for_storage(path: str, dry_run: bool) -> int:
     return size
 
 
+def _storage_entry_mtime(path: str) -> float:
+    if os.path.isfile(path):
+        return os.path.getmtime(path)
+    latest_mtime = os.path.getmtime(path)
+    for root, _dirs, files in os.walk(path):
+        for filename in files:
+            try:
+                latest_mtime = max(
+                    latest_mtime, os.path.getmtime(os.path.join(root, filename))
+                )
+            except FileNotFoundError:
+                continue
+    return latest_mtime
+
+
+def _is_current_storage_entry(path: str) -> bool:
+    try:
+        timezone_name = (global_config or {}).get("timezone") or "UTC"
+        tz = pytz.timezone(timezone_name)
+        mtime_date = datetime.fromtimestamp(_storage_entry_mtime(path), tz).date()
+        return mtime_date == datetime.now(tz).date()
+    except Exception:
+        return False
+
+
+def _remove_path_for_storage(path: str, dry_run: bool) -> int:
+    if os.path.isfile(path):
+        return _remove_file_for_storage(path, dry_run)
+    if not os.path.isdir(path):
+        return 0
+    size = get_dir_size(path)
+    if dry_run:
+        logger.info("[DRY RUN] Would delete %s to free %.2f MB", path, size / (1024**2))
+    else:
+        logger.info("Deleting %s to free %.2f MB", path, size / (1024**2))
+        shutil.rmtree(path)
+    return size
+
+
+def _prune_launch_recordings_for_global_limit(
+    work_dir: str, current_size_bytes: int, limit_bytes: int, dry_run: bool
+) -> int:
+    launches_dir = os.path.join(work_dir, "launches")
+    if not os.path.isdir(launches_dir):
+        return current_size_bytes
+
+    entries = []
+    for entry in os.scandir(launches_dir):
+        if not entry.is_dir() and not entry.is_file():
+            continue
+        entries.append((_storage_entry_mtime(entry.path), entry.path))
+    entries.sort(key=lambda item: item[0])
+
+    for _mtime, path in entries:
+        if current_size_bytes <= limit_bytes:
+            break
+        if _is_current_storage_entry(path):
+            continue
+        current_size_bytes -= _remove_path_for_storage(path, dry_run)
+    return current_size_bytes
+
+
 def _prune_snapshots_keep_daily_timelapse(
     camera_dir: str, current_size_bytes: int, limit_bytes: int, dry_run: bool
 ) -> int:
@@ -3734,6 +3912,18 @@ def disk_management_loop():
                                 )
                                 shutil.rmtree(day_dir)
                             current_work_dir_size -= dir_to_delete_size
+                    if current_work_dir_size > global_limit_bytes:
+                        logger.info(
+                            "Global work_dir is still over limit after camera pruning; trimming oldest launch recordings."
+                        )
+                        current_work_dir_size = (
+                            _prune_launch_recordings_for_global_limit(
+                                work_dir,
+                                current_work_dir_size,
+                                global_limit_bytes,
+                                dry_run,
+                            )
+                        )
         except Exception as e:
             logger.warning(f"Error in disk management loop for global limit: {e}")
             logger.error(

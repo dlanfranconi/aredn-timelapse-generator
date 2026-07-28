@@ -561,7 +561,9 @@ Public launch dashboard:
 http://HOST:8888/launches.html
 ```
 
-The public launch dashboard is linked from the main camera page only when launch automation is enabled. It shows upcoming matched launch times, matching plans, relevant launch cameras, presets, image profiles, recording status, and configured download paths.
+The public launch dashboard is linked from the main camera page only when launch automation is enabled. It shows upcoming matched launch times, matching plans, relevant launch cameras, presets, image profiles, recording status, and configured download paths. It also lists past launch recordings saved under `work_dir/launches`, filtered by the same camera visibility rules as the main page.
+
+Past launch recordings follow the normal global storage policy. They count toward `global.storage_management.work_dir_max_size_GB`; if the global work directory is still over limit after normal camera pruning, Fenetre trims the oldest launch recording folders/files while preserving current-day launch recordings.
 
 Use the admin Launch Automation panel to preview schedules before disabling dry-run.
 

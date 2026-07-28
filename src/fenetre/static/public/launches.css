@@ -128,13 +128,16 @@ body {
 
 #login-status,
 #password-status,
-#dashboard-status {
+#dashboard-status,
+#past-dashboard-status {
     color: #666;
     font-size: 0.9rem;
 }
 
 .page-shell {
     box-sizing: border-box;
+    display: grid;
+    gap: 18px;
     margin: 0 auto;
     max-width: 1180px;
     padding: 18px 20px 40px;
@@ -267,6 +270,12 @@ body {
     overflow-wrap: anywhere;
 }
 
+.launch-recording-link {
+    color: #0056b3;
+    font-weight: bold;
+    overflow-wrap: anywhere;
+}
+
 body.dark-mode {
     background: #121212;
     color: #e0e0e0;
@@ -319,6 +328,7 @@ body.dark-mode .site-header p,
 body.dark-mode #login-status,
 body.dark-mode #password-status,
 body.dark-mode #dashboard-status,
+body.dark-mode #past-dashboard-status,
 body.dark-mode .launch-meta,
 body.dark-mode .launch-camera-card span,
 body.dark-mode .launch-camera-card small,
@@ -338,6 +348,10 @@ body.dark-mode .launch-plan {
 body.dark-mode .launch-camera-card {
     background: #242424;
     border-color: #333;
+}
+
+body.dark-mode .launch-recording-link {
+    color: #8ec5ff;
 }
 
 @media (max-width: 700px) {

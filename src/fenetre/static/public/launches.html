@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <title>Launch Dashboard</title>
-    <link rel="stylesheet" href="launches.css?v=20260721-public-account-menu">
+    <link rel="stylesheet" href="launches.css?v=20260728-launch-history">
 </head>
 <body>
     <header class="site-header">
         <div>
             <h1 id="page-title">Launch Dashboard</h1>
-            <p id="page-subtitle">Upcoming launches and configured cameras</p>
+            <p id="page-subtitle">Upcoming and past launches with configured cameras</p>
         </div>
         <nav class="header-controls" aria-label="Page controls">
             <a class="control-link" href="/">Cameras</a>
@@ -57,8 +57,16 @@
             </div>
             <div id="dashboard" class="dashboard-grid"></div>
         </section>
+
+        <section id="past-dashboard-panel" class="dashboard-panel">
+            <div class="dashboard-heading">
+                <h2>Past Launches</h2>
+                <span id="past-dashboard-status">Loading...</span>
+            </div>
+            <div id="past-dashboard" class="dashboard-grid"></div>
+        </section>
     </main>
 
-    <script src="launches.js?v=20260721-public-account-menu"></script>
+    <script src="launches.js?v=20260728-launch-history"></script>
 </body>
 </html>

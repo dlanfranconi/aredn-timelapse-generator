@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fenetre.launch_workflow import (
     due_launch_actions,
     execute_launch_action,
+    list_past_launch_recordings,
     preview_launch_workflow,
     run_due_launch_actions,
 )
@@ -133,6 +134,33 @@ class LaunchWorkflowTestCase(unittest.TestCase):
         self.assertFalse(preview["enabled"])
         self.assertEqual(preview["events"], [])
         mock_get.assert_not_called()
+
+    def test_list_past_launch_recordings_groups_downloaded_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            launch_dir = os.path.join(temp_dir, "launches", "falcon-9")
+            os.makedirs(launch_dir)
+            recording_path = os.path.join(launch_dir, "falcon-9-cam-one.mp4")
+            with open(recording_path, "wb") as recording_file:
+                recording_file.write(b"video")
+
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            config["global"]["storage_management"] = {
+                "enabled": True,
+                "work_dir_max_size_GB": 40,
+            }
+            config["cameras"] = {"Cam One": {"url": "http://camera.local"}}
+
+            history = list_past_launch_recordings(config)
+
+        self.assertTrue(history["ok"])
+        self.assertTrue(history["enabled"])
+        self.assertEqual(history["retention"]["policy"], "work_dir")
+        self.assertEqual(history["launches"][0]["id"], "falcon-9")
+        self.assertEqual(history["launches"][0]["recording_count"], 1)
+        recording = history["launches"][0]["recordings"][0]
+        self.assertEqual(recording["camera"], "Cam One")
+        self.assertEqual(recording["url"], "/launches/falcon-9/falcon-9-cam-one.mp4")
 
     def test_due_launch_actions_builds_prelaunch_actions(self):
         actions = due_launch_actions(

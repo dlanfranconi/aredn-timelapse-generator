@@ -26,6 +26,9 @@
     const dashboardPanel = document.getElementById('dashboard-panel');
     const dashboard = document.getElementById('dashboard');
     const dashboardStatus = document.getElementById('dashboard-status');
+    const pastDashboardPanel = document.getElementById('past-dashboard-panel');
+    const pastDashboard = document.getElementById('past-dashboard');
+    const pastDashboardStatus = document.getElementById('past-dashboard-status');
 
     let authToken = localStorage.getItem('fenetreAuthToken') || '';
     let authUser = null;
@@ -90,6 +93,20 @@
         return `${value}s`;
     }
 
+    function formatBytes(bytes) {
+        const value = Number(bytes) || 0;
+        if (value >= 1024 * 1024 * 1024) {
+            return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        }
+        if (value >= 1024 * 1024) {
+            return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+        }
+        if (value >= 1024) {
+            return `${(value / 1024).toFixed(1)} KB`;
+        }
+        return `${value} B`;
+    }
+
     function setDeploymentName(name) {
         deploymentName = name || deploymentName;
         pageTitle.textContent = `${deploymentName} Launches`;
@@ -101,10 +118,15 @@
         const locked = !siteIsPublic && !authUser;
         privateLanding.hidden = !locked;
         dashboardPanel.hidden = locked;
+        if (locked) {
+            pastDashboardPanel.hidden = true;
+        }
         refreshButton.disabled = locked;
         if (locked) {
             dashboard.innerHTML = '';
+            pastDashboard.innerHTML = '';
             dashboardStatus.textContent = 'Login required';
+            pastDashboardStatus.textContent = 'Login required';
         }
     }
 
@@ -302,6 +324,33 @@
         `;
     }
 
+    function renderRecording(recording) {
+        return `
+            <div class="launch-camera-card">
+                <strong>${escapeHtml(recording.camera || 'Camera')}</strong>
+                <a class="launch-recording-link" href="${escapeHtml(recording.url)}" target="_blank" rel="noopener">${escapeHtml(recording.filename || 'recording')}</a>
+                <span>${escapeHtml(formatBytes(recording.bytes))}</span>
+                <small>${escapeHtml(formatLaunchTime(recording.modified_at))}</small>
+            </div>
+        `;
+    }
+
+    function renderPastLaunch(launch) {
+        const recordings = Array.isArray(launch.recordings) ? launch.recordings : [];
+        const count = Number(launch.recording_count || recordings.length || 0);
+        const detail = `${count} recording${count === 1 ? '' : 's'} | ${formatBytes(launch.bytes)}`;
+        return `
+            <article class="launch-event-card">
+                <div class="launch-event-header">
+                    <h3>${escapeHtml(launch.id || 'Launch')}</h3>
+                    <div class="launch-time">${escapeHtml(formatLaunchTime(launch.modified_at || (launch.mtime ? launch.mtime * 1000 : '')))}</div>
+                </div>
+                <div class="launch-meta">${escapeHtml(detail)}</div>
+                <div class="launch-camera-grid">${recordings.map(renderRecording).join('')}</div>
+            </article>
+        `;
+    }
+
     function renderDashboard(data) {
         if (!data.enabled) {
             pageSubtitle.textContent = 'Launch automation is disabled for this deployment';
@@ -317,6 +366,28 @@
         dashboard.innerHTML = events.map(renderLaunchEvent).join('');
     }
 
+    function renderPastDashboard(data) {
+        if (!data.enabled) {
+            pastDashboardPanel.hidden = true;
+            pastDashboard.innerHTML = '';
+            return;
+        }
+        pastDashboardPanel.hidden = false;
+        const launches = Array.isArray(data.launches) ? data.launches : [];
+        if (!launches.length) {
+            pastDashboard.innerHTML = '<div class="launch-empty">No past launch recordings found.</div>';
+            return;
+        }
+        pastDashboard.innerHTML = launches.map(renderPastLaunch).join('');
+    }
+
+    function handleUnauthorizedLaunchResponse() {
+        siteIsPublic = false;
+        authUser = null;
+        storeAuthToken('');
+        syncLoginUi();
+    }
+
     async function loadLaunchDashboard() {
         if (!siteIsPublic && !authUser) {
             updatePrivateLanding();
@@ -324,14 +395,12 @@
         }
         refreshButton.disabled = true;
         dashboardStatus.textContent = 'Loading...';
+        pastDashboardStatus.textContent = 'Loading...';
         try {
             const response = await fetch('/api/launches/preview', { headers: authHeaders() });
             const data = await response.json();
             if (response.status === 401) {
-                siteIsPublic = false;
-                authUser = null;
-                storeAuthToken('');
-                syncLoginUi();
+                handleUnauthorizedLaunchResponse();
                 return;
             }
             if (!response.ok || !data.ok) {
@@ -339,9 +408,33 @@
             }
             renderDashboard(data);
             dashboardStatus.textContent = `Updated ${formatLaunchTime(data.now)}`;
+            if (!data.enabled) {
+                renderPastDashboard(data);
+                pastDashboardStatus.textContent = 'Disabled';
+                return;
+            }
+
+            try {
+                const historyResponse = await fetch('/api/launches/history', { headers: authHeaders() });
+                const history = await historyResponse.json();
+                if (historyResponse.status === 401) {
+                    handleUnauthorizedLaunchResponse();
+                    return;
+                }
+                if (!historyResponse.ok || !history.ok) {
+                    throw new Error(history.error || `Past launches failed: ${historyResponse.status}`);
+                }
+                renderPastDashboard(history);
+                pastDashboardStatus.textContent = `Updated ${formatLaunchTime(data.now)}`;
+            } catch (error) {
+                pastDashboard.innerHTML = `<div class="launch-empty">${escapeHtml(error.message)}</div>`;
+                pastDashboardStatus.textContent = 'Unavailable';
+            }
         } catch (error) {
             dashboard.innerHTML = `<div class="launch-empty">${escapeHtml(error.message)}</div>`;
             dashboardStatus.textContent = 'Unavailable';
+            pastDashboard.innerHTML = `<div class="launch-empty">${escapeHtml(error.message)}</div>`;
+            pastDashboardStatus.textContent = 'Unavailable';
         } finally {
             refreshButton.disabled = !siteIsPublic && !authUser;
         }
@@ -409,5 +502,7 @@
         .catch(error => {
             dashboard.innerHTML = `<div class="launch-empty">${escapeHtml(error.message)}</div>`;
             dashboardStatus.textContent = 'Unavailable';
+            pastDashboard.innerHTML = `<div class="launch-empty">${escapeHtml(error.message)}</div>`;
+            pastDashboardStatus.textContent = 'Unavailable';
         });
 })();

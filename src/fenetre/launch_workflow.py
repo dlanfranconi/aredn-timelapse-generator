@@ -5,7 +5,7 @@ import shlex
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
@@ -966,6 +966,104 @@ def _default_launch_download_path(
     launch_id = _slug(str(event.get("id") or event.get("name") or "launch"))
     camera_id = _slug(camera_name)
     return os.path.join(work_dir, "launches", launch_id, f"{launch_id}-{camera_id}.mp4")
+
+
+def _launch_file_url(work_dir: str, path: str) -> str:
+    rel_path = os.path.relpath(path, work_dir)
+    return "/" + "/".join(quote(part) for part in rel_path.split(os.sep))
+
+
+def _camera_name_for_recording(
+    launch_id: str, filename: str, camera_slug_map: Dict[str, str]
+) -> str:
+    stem, _extension = os.path.splitext(filename)
+    launch_slug = _slug(launch_id)
+    camera_slug = stem
+    prefix = f"{launch_slug}-"
+    if camera_slug.startswith(prefix):
+        camera_slug = camera_slug[len(prefix) :]
+    camera_slug = re.sub(r"-\d{2}$", "", camera_slug)
+    return camera_slug_map.get(camera_slug.casefold(), camera_slug)
+
+
+def list_past_launch_recordings(
+    config: Dict[str, Any], limit: int = 100
+) -> Dict[str, Any]:
+    workflow = launch_workflow_config(config)
+    enabled = _bool_config(workflow.get("enabled"), False)
+    work_dir = str((config.get("global") or {}).get("work_dir") or "")
+    storage_config = (config.get("global") or {}).get("storage_management") or {}
+    result = {
+        "ok": True,
+        "enabled": enabled,
+        "launches": [],
+        "retention": {
+            "policy": "work_dir",
+            "storage_management_enabled": _bool_config(
+                storage_config.get("enabled"), False
+            ),
+            "work_dir_max_size_GB": storage_config.get("work_dir_max_size_GB"),
+        },
+    }
+    if not enabled or not work_dir:
+        return result
+
+    launches_dir = os.path.join(work_dir, "launches")
+    if not os.path.isdir(launches_dir):
+        return result
+
+    camera_slug_map = {
+        _slug(str(camera_name)).casefold(): str(camera_name)
+        for camera_name in (config.get("cameras") or {}).keys()
+    }
+    launch_items = []
+    for entry in os.scandir(launches_dir):
+        if not entry.is_dir():
+            continue
+        recordings = []
+        for root, _dirs, files in os.walk(entry.path):
+            for filename in sorted(files):
+                extension = os.path.splitext(filename)[1].lower()
+                if extension not in {".mp4", ".mov", ".mkv", ".webm", ".ts"}:
+                    continue
+                path = os.path.join(root, filename)
+                if not os.path.isfile(path):
+                    continue
+                stat = os.stat(path)
+                if stat.st_size <= 0:
+                    continue
+                recordings.append(
+                    {
+                        "camera": _camera_name_for_recording(
+                            entry.name, filename, camera_slug_map
+                        ),
+                        "filename": filename,
+                        "url": _launch_file_url(work_dir, path),
+                        "bytes": stat.st_size,
+                        "mtime": int(stat.st_mtime),
+                        "modified_at": datetime.fromtimestamp(
+                            stat.st_mtime, timezone.utc
+                        ).isoformat(),
+                    }
+                )
+        if recordings:
+            recordings.sort(key=lambda item: item["mtime"], reverse=True)
+            launch_mtime = max(item["mtime"] for item in recordings)
+            launch_items.append(
+                {
+                    "id": entry.name,
+                    "recordings": recordings,
+                    "mtime": launch_mtime,
+                    "modified_at": datetime.fromtimestamp(
+                        launch_mtime, timezone.utc
+                    ).isoformat(),
+                    "recording_count": len(recordings),
+                    "bytes": sum(int(item["bytes"]) for item in recordings),
+                }
+            )
+    launch_items.sort(key=lambda item: item["mtime"], reverse=True)
+    result["launches"] = launch_items[: max(1, int(limit or 100))]
+    return result
 
 
 def _download_path_for_index(download_path: str, index: int, total: int) -> str:

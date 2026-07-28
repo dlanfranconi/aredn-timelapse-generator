@@ -23,6 +23,7 @@ from fenetre.fenetre import (
     get_ssim_for_area,
     is_sunrise_or_sunset,
     is_camera_timelapse_enabled,
+    _prune_launch_recordings_for_global_limit,
     queue_missing_daily_timelapses,
     record_live_view_heartbeat,
     run_camera_unavailable_command,
@@ -583,6 +584,41 @@ class TestFenetre(unittest.TestCase):
             self.assertFalse(
                 os.path.exists(os.path.join(old_day, "2000-01-01T12-00-00UTC.jpg"))
             )
+
+    def test_global_storage_limit_prunes_old_launch_recordings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            launches_dir = os.path.join(tmpdir, "launches")
+            old_launch_dir = os.path.join(launches_dir, "old-launch")
+            new_launch_dir = os.path.join(launches_dir, "new-launch")
+            os.makedirs(old_launch_dir)
+            os.makedirs(new_launch_dir)
+            old_recording = os.path.join(old_launch_dir, "old-launch-cam1.mp4")
+            new_recording = os.path.join(new_launch_dir, "new-launch-cam1.mp4")
+            with open(old_recording, "wb") as f:
+                f.write(b"o" * 700)
+            with open(new_recording, "wb") as f:
+                f.write(b"n" * 500)
+            os.utime(old_recording, (946684800, 946684800))
+            os.utime(old_launch_dir, (946684800, 946684800))
+            os.utime(new_recording, (978307200, 978307200))
+            os.utime(new_launch_dir, (978307200, 978307200))
+
+            had_global = hasattr(fenetre_module, "global_config")
+            old_global = getattr(fenetre_module, "global_config", None)
+            try:
+                fenetre_module.global_config = {"timezone": "UTC"}
+                current_size = _prune_launch_recordings_for_global_limit(
+                    tmpdir, 1200, 600, dry_run=False
+                )
+            finally:
+                if had_global:
+                    fenetre_module.global_config = old_global
+                else:
+                    delattr(fenetre_module, "global_config")
+
+            self.assertLessEqual(current_size, 600)
+            self.assertFalse(os.path.exists(old_launch_dir))
+            self.assertTrue(os.path.exists(new_launch_dir))
 
     def test_is_camera_timelapse_enabled_respects_disable_flags(self):
         missing = object()

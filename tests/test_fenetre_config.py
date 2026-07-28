@@ -1194,7 +1194,7 @@ class FenetreConfigTestCase(unittest.TestCase):
             },
         }
         config_path = self._create_temp_config_file(initial_data)
-        # mock_flags_instance.config = config_path # No longer needed
+        fenetre_module.FLAGS = SimpleNamespace(config=config_path)
         fenetre_module.exit_event = MagicMock()
         fenetre_module.exit_event.is_set.return_value = False
 
@@ -1285,6 +1285,44 @@ class FenetreConfigTestCase(unittest.TestCase):
         # Cam_to_remove's original watchdog manager thread should have been joined
         # This requires the mock thread to have a join method.
         mock_cam_to_remove_watchdog_manager.join.assert_called_with(timeout=5)
+
+    def test_manage_camera_threads_restarts_changed_camera_config(self):
+        fenetre_module = sys.modules["fenetre.fenetre"]
+        old_config = {"url": "http://old-camera", "snap_interval_s": 30}
+        new_config = {"url": "http://new-camera", "snap_interval_s": 20}
+        old_manager = MagicMock(spec=sys.modules["threading"].Thread)
+        old_manager.is_alive.return_value = True
+        old_snap = MagicMock(spec=sys.modules["threading"].Thread)
+        old_snap.is_alive.return_value = True
+        fenetre_module.cameras_config = {"cam1": new_config}
+        fenetre_module.active_camera_threads = {
+            "cam1": {
+                "camera_config": old_config,
+                "watchdog_manager_thread": old_manager,
+                "watchdog_thread": old_snap,
+            }
+        }
+        fenetre_module.sleep_intervals = {"cam1": 30}
+        fenetre_module.exit_event = MagicMock()
+        fenetre_module.exit_event.is_set.return_value = False
+        fenetre_module.mqtt_manager = None
+
+        new_manager = MagicMock(spec=sys.modules["threading"].Thread)
+        with patch("fenetre.fenetre.Thread", return_value=new_manager) as mock_thread:
+            with patch(
+                "fenetre.fenetre.request_camera_capture"
+            ) as mock_request_capture:
+                fenetre_module.manage_camera_threads()
+
+        mock_request_capture.assert_called_once_with("cam1", "config reload")
+        old_snap.join.assert_called_once_with(timeout=5)
+        old_manager.join.assert_called_once_with(timeout=5)
+        mock_thread.assert_called_once()
+        new_manager.start.assert_called_once()
+        self.assertEqual(
+            fenetre_module.active_camera_threads["cam1"]["camera_config"], new_config
+        )
+        self.assertEqual(fenetre_module.sleep_intervals["cam1"], 20)
 
     def test_config_load_sunrise_sunset_offsets(self):
         test_data = {

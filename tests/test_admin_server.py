@@ -52,11 +52,13 @@ class ConfigServerTestCase(unittest.TestCase):
         flask_app.config["FENETRE_CONFIG_FILE"] = self.temp_config_file.name
         flask_app.config["FENETRE_PID_FILE_PATH"] = self.temp_pid_file.name
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        flask_app.config["FENETRE_RELOAD_ON_CONFIG_WRITE"] = False
         flask_app.config.pop("FENETRE_ADMIN_USERNAME", None)
         flask_app.config.pop("FENETRE_ADMIN_PASSWORD", None)
 
     def tearDown(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        flask_app.config["FENETRE_RELOAD_ON_CONFIG_WRITE"] = False
         set_lock("cam1", False)
 
     def test_get_config_success(self):
@@ -982,6 +984,32 @@ class ConfigServerTestCase(unittest.TestCase):
             cameras_json = json.load(f)
         camera_ids = [camera["id"] for camera in cameras_json["cameras"]]
         self.assertEqual(camera_ids, ["New-Cam"])
+
+    @patch("os.kill")
+    def test_update_camera_signals_runtime_reload_when_enabled(self, mock_kill):
+        with open(self.temp_pid_file.name, "w") as f:
+            f.write("12345")
+        flask_app.config["FENETRE_RELOAD_ON_CONFIG_WRITE"] = True
+
+        response = self.app.put(
+            "/api/camera/cam1",
+            data=json.dumps(
+                {
+                    "name": "cam1",
+                    "capture_source": "snapshot",
+                    "url": "http://localhost",
+                    "timeout_s": 20,
+                    "public": True,
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["runtime_reload"]["ok"])
+        self.assertEqual(response.json["runtime_reload"]["pid"], 12345)
+        mock_kill.assert_called_once_with(12345, signal.SIGHUP)
 
     @patch("fenetre.admin_server.requests.put")
     def test_update_camera_to_rtsp_capture_removes_stale_snapshot_fields(

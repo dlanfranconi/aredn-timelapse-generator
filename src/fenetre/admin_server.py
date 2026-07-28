@@ -333,6 +333,53 @@ def _config_write_metadata(config_file_path: str, backup_path: str | None) -> di
     }
 
 
+def _fenetre_reload_signal_result() -> tuple[dict, int]:
+    fenetre_pid_file_path = app.config.get("FENETRE_PID_FILE_PATH")
+    if not fenetre_pid_file_path:
+        return {"error": "FENETRE_PID_FILE_PATH not set in app config."}, 500
+    if not os.path.exists(fenetre_pid_file_path):
+        return (
+            {
+                "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
+            },
+            404,
+        )
+    try:
+        with open(fenetre_pid_file_path, "r") as f:
+            pid_str = f.read().strip()
+        if not pid_str:
+            return {"error": "PID file is empty."}, 500
+        pid = int(pid_str)
+        os.kill(pid, signal.SIGHUP)
+        return {"message": f"Reload signal sent to process {pid}.", "pid": pid}, 200
+    except ProcessLookupError:
+        return (
+            {
+                "error": f"Process with PID read from {fenetre_pid_file_path} not found."
+            },
+            500,
+        )
+    except ValueError:
+        return {"error": f"Invalid PID found in {fenetre_pid_file_path}."}, 500
+    except Exception as e:
+        return {"error": f"Error signaling reload: {str(e)}"}, 500
+
+
+def _reload_after_config_write() -> dict:
+    if app.config.get("FENETRE_RELOAD_ON_CONFIG_WRITE", True) is False:
+        return {
+            "ok": True,
+            "skipped": True,
+            "message": "Runtime reload after config write is disabled.",
+        }
+    result, status = _fenetre_reload_signal_result()
+    payload = dict(result)
+    payload["ok"] = status == 200
+    if status != 200 and "warning" not in payload:
+        payload["warning"] = payload.get("error", "Runtime reload failed.")
+    return payload
+
+
 def _sync_public_ui_files(config: dict) -> dict:
     work_dir = (config.get("global") or {}).get("work_dir")
     if not work_dir:
@@ -1447,6 +1494,7 @@ def update_config():
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         go2rtc_result = _sync_go2rtc_runtime(new_config_json, previous_config)
         publish_result = _publish_public_artifacts(new_config_json)
+        runtime_reload = _reload_after_config_write()
         message = "Configuration updated successfully (saved as YAML). Public UI files and cameras.json were updated."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
@@ -1456,6 +1504,7 @@ def update_config():
                     "message": message,
                     "go2rtc": go2rtc_result,
                     **publish_result,
+                    "runtime_reload": runtime_reload,
                     "user_camera_access_removed": user_access_removed,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
@@ -1496,6 +1545,7 @@ def update_deployment_name():
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
         message = (
             "Site settings updated. Public UI files and cameras.json were updated."
         )
@@ -1506,6 +1556,7 @@ def update_deployment_name():
                 {
                     "message": message,
                     **publish_result,
+                    "runtime_reload": runtime_reload,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
@@ -1551,6 +1602,7 @@ def update_camera_order():
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
         publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
         message = "Camera order updated. Public UI files and cameras.json were updated."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
@@ -1560,6 +1612,7 @@ def update_camera_order():
                     "message": message,
                     "camera_order": cleaned_order,
                     **publish_result,
+                    "runtime_reload": runtime_reload,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
@@ -1815,6 +1868,7 @@ def add_camera():
         metadata = _config_write_metadata(config_file_path, backup_path)
         go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
         publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
         return (
             jsonify(
                 {
@@ -1822,6 +1876,7 @@ def add_camera():
                     "camera_name": name,
                     "go2rtc": go2rtc_result,
                     **publish_result,
+                    "runtime_reload": runtime_reload,
                     **metadata,
                 }
             ),
@@ -1880,12 +1935,14 @@ def update_camera(camera_name):
         metadata = _config_write_metadata(config_file_path, backup_path)
         go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
         publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
         return jsonify(
             {
                 "message": f"Camera '{name}' updated. Public UI files and cameras.json were updated.",
                 "camera_name": name,
                 "go2rtc": go2rtc_result,
                 **publish_result,
+                "runtime_reload": runtime_reload,
                 "camera_rename": rename_changes,
                 "media_move": media_move_result,
                 "user_camera_access_removed": user_access_removed,
@@ -1923,6 +1980,7 @@ def rename_camera():
         metadata = _config_write_metadata(config_file_path, backup_path)
         go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
         publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
         return (
             jsonify(
                 {
@@ -1932,6 +1990,7 @@ def rename_camera():
                     "media_move": media_move_result,
                     "go2rtc": go2rtc_result,
                     **publish_result,
+                    "runtime_reload": runtime_reload,
                     "user_camera_access_removed": user_access_removed,
                     **metadata,
                 }
@@ -2065,39 +2124,8 @@ def preview_crop():
 
 @app.route("/config/reload", methods=["POST"])
 def reload_config():
-    fenetre_pid_file_path = app.config.get("FENETRE_PID_FILE_PATH")
-    if not fenetre_pid_file_path:
-        return jsonify({"error": "FENETRE_PID_FILE_PATH not set in app config."}), 500
-    try:
-        if not os.path.exists(fenetre_pid_file_path):
-            return (
-                jsonify(
-                    {
-                        "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
-                    }
-                ),
-                404,
-            )
-        with open(fenetre_pid_file_path, "r") as f:
-            pid_str = f.read().strip()
-        if not pid_str:
-            return jsonify({"error": "PID file is empty."}), 500
-        pid = int(pid_str)
-        os.kill(pid, signal.SIGHUP)
-        return jsonify({"message": f"Reload signal sent to process {pid}."}), 200
-    except ProcessLookupError:
-        return (
-            jsonify(
-                {
-                    "error": f"Process with PID read from {fenetre_pid_file_path} not found."
-                }
-            ),
-            500,
-        )
-    except ValueError:
-        return jsonify({"error": f"Invalid PID found in {fenetre_pid_file_path}."}), 500
-    except Exception as e:
-        return jsonify({"error": f"Error signaling reload: {str(e)}"}), 500
+    result, status = _fenetre_reload_signal_result()
+    return jsonify(result), status
 
 
 @app.route("/api/cameras_json/rebuild", methods=["POST"])
