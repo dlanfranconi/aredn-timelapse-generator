@@ -460,7 +460,7 @@ class ConfigServerTestCase(unittest.TestCase):
         )
         self.assertEqual(
             mock_go2rtc_put.call_args.kwargs["params"]["src"],
-            "rtsp://admin:secret@camera:554/11#media=video",
+            "ffmpeg:rtsp://admin:secret@camera:554/11#video=copy#timeout=30",
         )
         mock_fetch.assert_called_once_with(
             camera["local_command"], timeout_s=camera["timeout_s"]

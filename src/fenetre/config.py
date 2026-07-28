@@ -473,6 +473,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "player_url_template",
             "preview_url_template",
             "stream_name_prefix",
+            "source_mode",
+            "rtsp_timeout_s",
             "api_listen",
             "rtsp_listen",
             "webrtc_listen",
@@ -546,6 +548,20 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "global.go2rtc.stream_name_prefix",
         errors,
         default="fenetre_",
+    )
+    go2rtc_out["source_mode"] = _str(
+        go2rtc_cfg.get("source_mode"),
+        "global.go2rtc.source_mode",
+        errors,
+        default="ffmpeg",
+        choices={"ffmpeg", "rtsp"},
+    )
+    go2rtc_out["rtsp_timeout_s"] = _int(
+        go2rtc_cfg.get("rtsp_timeout_s"),
+        "global.go2rtc.rtsp_timeout_s",
+        errors,
+        default=30,
+        min_value=1,
     )
     go2rtc_out["api_listen"] = _str(
         go2rtc_cfg.get("api_listen"),
@@ -1314,6 +1330,20 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             errors,
             default=True,
         )
+        if cam.get("go2rtc_source_mode") is not None:
+            cam_out["go2rtc_source_mode"] = _str(
+                cam.get("go2rtc_source_mode"),
+                f"cameras.{name}.go2rtc_source_mode",
+                errors,
+                choices={"ffmpeg", "rtsp"},
+            )
+        if cam.get("go2rtc_rtsp_timeout_s") is not None:
+            cam_out["go2rtc_rtsp_timeout_s"] = _int(
+                cam.get("go2rtc_rtsp_timeout_s"),
+                f"cameras.{name}.go2rtc_rtsp_timeout_s",
+                errors,
+                min_value=1,
+            )
         if cam.get("unavailable_command") is not None:
             cam_out["unavailable_command"] = _str(
                 cam.get("unavailable_command"),

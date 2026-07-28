@@ -124,16 +124,73 @@ def _force_muted_player_url(url: str) -> str:
     )
 
 
-def _video_only_source(source: Any) -> str:
+def _split_go2rtc_source_params(source_text: str) -> tuple[str, list[str]]:
+    parts = source_text.split("#")
+    return parts[0], parts[1:]
+
+
+def _has_source_param(params: list[str], name: str) -> bool:
+    name = name.strip().lower()
+    return any(param.split("=", 1)[0].strip().lower() == name for param in params)
+
+
+def _join_go2rtc_source_params(base: str, params: list[str]) -> str:
+    clean_params = [param for param in params if str(param or "").strip()]
+    if not clean_params:
+        return base
+    return f"{base}#{'#'.join(clean_params)}"
+
+
+def _go2rtc_source_mode(config: Dict[str, Any], camera_config: Dict[str, Any]) -> str:
+    mode = str(
+        camera_config.get("go2rtc_source_mode") or config.get("source_mode") or "ffmpeg"
+    ).strip().lower()
+    return mode if mode in {"ffmpeg", "rtsp"} else "ffmpeg"
+
+
+def _go2rtc_rtsp_timeout_s(config: Dict[str, Any], camera_config: Dict[str, Any]) -> int:
+    value = camera_config.get("go2rtc_rtsp_timeout_s")
+    if value is None:
+        value = config.get("rtsp_timeout_s")
+    if value is None:
+        value = 30
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 30
+
+
+def _video_only_source(
+    source: Any,
+    source_mode: str = "ffmpeg",
+    timeout_s: int = 30,
+) -> str:
     source_text = str(source or "").strip()
     if not source_text.lower().startswith(("rtsp://", "rtsps://")):
         return source_text
 
-    parts = source_text.split("#")
-    params = parts[1:]
-    if any(param.split("=", 1)[0].strip().lower() == "media" for param in params):
-        return source_text
-    return f"{source_text}#media=video"
+    base, params = _split_go2rtc_source_params(source_text)
+    source_mode = str(source_mode or "ffmpeg").strip().lower()
+    if source_mode == "ffmpeg":
+        ffmpeg_params = [
+            param
+            for param in params
+            if param.split("=", 1)[0].strip().lower()
+            in {"input", "raw", "timeout", "video", "hardware"}
+        ]
+        if not _has_source_param(ffmpeg_params, "video"):
+            ffmpeg_params.append("video=copy")
+        if not _has_source_param(ffmpeg_params, "timeout"):
+            ffmpeg_params.append(f"timeout={timeout_s}")
+        return _join_go2rtc_source_params(f"ffmpeg:{base}", ffmpeg_params)
+
+    if not _has_source_param(params, "media"):
+        params.append("media=video")
+    if not _has_source_param(params, "backchannel"):
+        params.append("backchannel=0")
+    if not _has_source_param(params, "timeout"):
+        params.append(f"timeout={timeout_s}")
+    return _join_go2rtc_source_params(base, params)
 
 
 def build_go2rtc_metadata(
@@ -223,11 +280,15 @@ def build_go2rtc_runtime_config(
             if not alignment_source:
                 continue
             stream_name = go2rtc_stream_name(str(camera_name), global_config)
-            streams[stream_name] = _video_only_source(alignment_source)
+            source_mode = _go2rtc_source_mode(config, camera_config)
+            rtsp_timeout_s = _go2rtc_rtsp_timeout_s(config, camera_config)
+            streams[stream_name] = _video_only_source(
+                alignment_source, source_mode, rtsp_timeout_s
+            )
             full_source = camera_config.get("rtsp_url")
             if full_source and full_source != alignment_source:
                 streams[go2rtc_full_stream_name(str(camera_name), global_config)] = (
-                    _video_only_source(full_source)
+                    _video_only_source(full_source, source_mode, rtsp_timeout_s)
                 )
 
     if not streams:

@@ -34,6 +34,10 @@ global:
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     stream_name_prefix: fenetre_
+    # ffmpeg copies camera video into go2rtc without transcoding and is more
+    # stable for some RTSP cameras than go2rtc's direct RTSP source.
+    source_mode: ffmpeg
+    rtsp_timeout_s: 30
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
