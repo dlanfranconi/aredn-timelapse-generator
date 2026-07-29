@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 FROM ubuntu:26.04
 
-ARG GO2RTC_VERSION=1.9.9
+ARG GO2RTC_VERSION=1.9.14
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \

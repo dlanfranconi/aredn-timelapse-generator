@@ -196,6 +196,7 @@ class ConfigServerTestCase(unittest.TestCase):
             "cache_bust": True,
             "mozjpeg_optimize": True,
             "timelapse_enabled": True,
+            "go2rtc_preload": True,
             "work_dir_max_size_GB": 5,
             "snap_interval_enabled": True,
             "snap_interval_s": 60,
@@ -265,6 +266,7 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["sky_area"], "0,0,1,0.35")
         self.assertTrue(camera["sunrise_sunset"]["enabled"])
         self.assertTrue(camera["timelapse_enabled"])
+        self.assertTrue(camera["go2rtc_preload"])
 
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_add_camera_preserves_camera_id_capitalization(self, mock_fetch):

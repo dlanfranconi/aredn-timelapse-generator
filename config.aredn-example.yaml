@@ -44,6 +44,9 @@ global:
     rtsp_timeout_s: 30
     # Use udp on lossy point-to-point paths if TCP stalls live playback.
     rtsp_transport: tcp
+    # Keeps only low-resolution PTZ aiming streams warm for faster controls.
+    preload_ptz_streams: true
+    preload_query: video
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"

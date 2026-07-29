@@ -255,6 +255,9 @@ global:
     video_mode: copy
     rtsp_timeout_s: 30
     rtsp_transport: tcp
+    # Keep only low-resolution PTZ aiming streams open in go2rtc.
+    preload_ptz_streams: true
+    preload_query: video
     api_listen: ":1984"
     rtsp_listen: ":8554"
     webrtc_listen: ":8555"
@@ -264,11 +267,13 @@ global:
 
 The default full player is `stream.html`, not `webrtc.html`, because it works better across routed mesh networks. Fenetre also forces generated player URLs to `media=video&muted=1` so RTSP streams open muted. Leave `player_mode` and `preview_mode` blank to let go2rtc choose its default `stream.html` playback mode. If you need to test a specific mode order, set values such as `mse`, `mp4,mse`, or `hls,mp4,mse`; keep that explicit because some browsers and network paths fail when WebRTC is forced. The PTZ aiming preview uses the low-resolution go2rtc stream, not the `_full` stream.
 
+By default, `preload_ptz_streams: true` keeps only PTZ aiming streams warm inside go2rtc so the aiming view opens quickly. It does not preload `_full` streams. Set `go2rtc_preload: false` on an individual PTZ camera to opt out, or set `global.go2rtc.preload_ptz_streams: false` to disable the feature globally. This requires go2rtc 1.9.11 or newer; the Docker image bundles 1.9.14.
+
 `source_mode: ffmpeg` makes go2rtc start FFmpeg as the camera-side RTSP client and copy the video stream without transcoding; this is more stable for cameras that play directly but freeze in go2rtc. Set `source_mode: rtsp` globally, or `go2rtc_source_mode: rtsp` on one camera, to use go2rtc's direct RTSP client instead. On lossy point-to-point paths, keep `source_mode: ffmpeg` and set `rtsp_transport: udp` globally or `go2rtc_rtsp_transport: udp` for one camera. That generates `#input=rtsp/udp`, which can keep live video moving through packet loss at the cost of occasional visual corruption. If a substream opens as a black box, try `go2rtc_video_mode: h264` on that camera; it transcodes and uses more CPU, so use it only where needed.
 
 If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
 
-For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate.
+For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate. Browser login state is per hostname, so an authenticated local or Tailscale session does not authenticate `https://aredncameras.aredn805.net`; log in on the Cloudflare hostname before opening live streams because Fenetre does not publish stream URLs to anonymous users.
 
 `rtsp_url` and `ptz_rtsp_url` have different jobs:
 

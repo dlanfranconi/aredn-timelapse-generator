@@ -17,6 +17,10 @@
         return token ? { Authorization: `Bearer ${token}` } : {};
     }
 
+    function hasAuthToken() {
+        return Boolean(localStorage.getItem('fenetreAuthToken'));
+    }
+
     function showMessage(text) {
         frame.hidden = true;
         frame.src = 'about:blank';
@@ -216,7 +220,15 @@
         const camera = cameras.find(item => cameraId(item) === cameraName);
         const go2rtc = (camera && camera.go2rtc) || {};
         if (!camera) {
-            showMessage('Live view is not configured for this camera.');
+            showMessage('Camera was not found or is not visible for this login.');
+            return;
+        }
+        if (go2rtc.enabled !== true || !go2rtc.stream) {
+            showMessage(
+                hasAuthToken()
+                    ? 'Live view is not configured for this camera.'
+                    : 'Login required to view live streams on this host.'
+            );
             return;
         }
         const rawPlayerUrl = streamKind === 'preview'

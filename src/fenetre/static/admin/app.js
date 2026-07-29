@@ -155,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraPtzCapabilityZoom = document.getElementById('newCameraPtzCapabilityZoom');
     const newCameraPtzCapabilityFocus = document.getElementById('newCameraPtzCapabilityFocus');
     const newCameraGo2rtcEnabled = document.getElementById('newCameraGo2rtcEnabled');
+    const newCameraGo2rtcPreload = document.getElementById('newCameraGo2rtcPreload');
     const newCameraGo2rtcTransport = document.getElementById('newCameraGo2rtcTransport');
     const newCameraGo2rtcVideoMode = document.getElementById('newCameraGo2rtcVideoMode');
     const newCameraPtzTourEnabled = document.getElementById('newCameraPtzTourEnabled');
@@ -409,6 +410,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.go2rtc) {
             if (result.go2rtc.api_synced) {
                 details.push(`go2rtc synced ${result.go2rtc.streams.length} stream(s)`);
+                if ((result.go2rtc.preload_streams || []).length) {
+                    details.push(`preloading ${result.go2rtc.preload_streams.length} aiming stream(s) after restart`);
+                }
             } else if (result.go2rtc.warning) {
                 details.push(result.go2rtc.warning);
             } else if (result.go2rtc.enabled === false) {
@@ -1386,6 +1390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         newCameraPtzRtspUrl.disabled = !showPtzRtsp;
         newCameraGo2rtcTransport.disabled = !liveViewEnabled;
         newCameraGo2rtcVideoMode.disabled = !liveViewEnabled;
+        newCameraGo2rtcPreload.disabled = !(ptzEnabled && liveViewEnabled);
     }
 
     function resetCameraForm() {
@@ -1416,6 +1421,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraMozjpeg', true);
         setCheckboxValue('newCameraTimelapse', true);
         setCheckboxValue('newCameraGo2rtcEnabled', true);
+        setCheckboxValue('newCameraGo2rtcPreload', true);
         setSelectValue('newCameraGo2rtcTransport', 'tcp');
         setSelectValue('newCameraGo2rtcVideoMode', 'copy');
         setInputValue('newCameraFailureRetry', 60);
@@ -1472,6 +1478,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'public';
     }
 
+    function globalPtzPreloadDefault() {
+        const go2rtc = (((loadedConfigData || {}).global || {}).go2rtc || {});
+        if (Object.prototype.hasOwnProperty.call(go2rtc, 'preload_ptz_streams')) {
+            return go2rtc.preload_ptz_streams === true;
+        }
+        return true;
+    }
+
+    function cameraGo2rtcPreloadValue(camera) {
+        if (Object.prototype.hasOwnProperty.call(camera, 'go2rtc_preload')) {
+            return camera.go2rtc_preload === true;
+        }
+        return globalPtzPreloadDefault();
+    }
+
     function inferSunWindow(sunConfig = {}) {
         const values = [
             sunConfig.sunrise_offset_start_minutes,
@@ -1513,6 +1534,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCheckboxValue('newCameraMozjpeg', camera.mozjpeg_optimize === true);
         setCheckboxValue('newCameraTimelapse', camera.timelapse_enabled !== false && camera.generate_timelapse !== false);
         setCheckboxValue('newCameraGo2rtcEnabled', camera.go2rtc_enabled !== false);
+        setCheckboxValue('newCameraGo2rtcPreload', cameraGo2rtcPreloadValue(camera));
         setSelectValue('newCameraGo2rtcTransport', camera.go2rtc_rtsp_transport || 'tcp');
         setSelectValue('newCameraGo2rtcVideoMode', camera.go2rtc_video_mode || 'copy');
 
@@ -2063,6 +2085,7 @@ document.addEventListener('DOMContentLoaded', () => {
             mozjpeg_optimize: checked('newCameraMozjpeg'),
             timelapse_enabled: checked('newCameraTimelapse'),
             go2rtc_enabled: checked('newCameraGo2rtcEnabled'),
+            go2rtc_preload: checked('newCameraGo2rtcPreload') && usePtzRtspUrl,
             go2rtc_rtsp_transport: newCameraGo2rtcTransport.value || 'tcp',
             go2rtc_video_mode: newCameraGo2rtcVideoMode.value || 'copy',
             require_test: requireTest,

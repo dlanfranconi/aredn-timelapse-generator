@@ -883,6 +883,8 @@ class FenetreConfigTestCase(unittest.TestCase):
                     "video_mode": "h264",
                     "rtsp_timeout_s": 45,
                     "rtsp_transport": "udp",
+                    "preload_ptz_streams": False,
+                    "preload_query": "video=h264",
                     "api_listen": ":11984",
                     "rtsp_listen": ":18554",
                     "webrtc_listen": ":18555",
@@ -917,6 +919,8 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(global_conf["go2rtc"]["video_mode"], "h264")
         self.assertEqual(global_conf["go2rtc"]["rtsp_timeout_s"], 45)
         self.assertEqual(global_conf["go2rtc"]["rtsp_transport"], "udp")
+        self.assertFalse(global_conf["go2rtc"]["preload_ptz_streams"])
+        self.assertEqual(global_conf["go2rtc"]["preload_query"], "video=h264")
         self.assertEqual(global_conf["go2rtc"]["api_listen"], ":11984")
         self.assertEqual(global_conf["go2rtc"]["rtsp_listen"], ":18554")
         self.assertEqual(global_conf["go2rtc"]["webrtc_listen"], ":18555")
@@ -962,6 +966,57 @@ class FenetreConfigTestCase(unittest.TestCase):
                 "mesh_Ridge_Camera_full": "ffmpeg:rtsp://admin:snapshot@example.test/stream1#video=copy#timeout=30",
             },
         )
+        self.assertNotIn("preload", runtime_config)
+
+    def test_go2rtc_runtime_config_preloads_low_res_ptz_stream_by_default(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {"go2rtc": {"enabled": True}},
+                "cameras": {
+                    "South": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/main",
+                        "ptz_rtsp_url": "rtsp://admin:secret@example.test/sub",
+                        "ptz": {"enabled": True},
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(
+            runtime_config["streams"],
+            {
+                "fenetre_South": "ffmpeg:rtsp://admin:secret@example.test/sub#video=copy#timeout=30",
+                "fenetre_South_full": "ffmpeg:rtsp://admin:secret@example.test/main#video=copy#timeout=30",
+            },
+        )
+        self.assertEqual(runtime_config["preload"], {"fenetre_South": "video"})
+
+    def test_go2rtc_runtime_config_honors_preload_overrides(self):
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {
+                    "go2rtc": {
+                        "enabled": True,
+                        "preload_ptz_streams": True,
+                        "preload_query": "video=h264",
+                    }
+                },
+                "cameras": {
+                    "South": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/main",
+                        "ptz_rtsp_url": "rtsp://admin:secret@example.test/sub",
+                        "ptz": {"enabled": True},
+                        "go2rtc_preload": False,
+                    },
+                    "West": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/west",
+                        "go2rtc_preload": True,
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(runtime_config["preload"], {"fenetre_West": "video=h264"})
 
     def test_go2rtc_runtime_config_skips_disabled_camera_streams(self):
         runtime_config = build_go2rtc_runtime_config(

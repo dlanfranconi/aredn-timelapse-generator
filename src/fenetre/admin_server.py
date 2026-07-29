@@ -506,6 +506,7 @@ def _sync_go2rtc_runtime(
     )
     output_path = os.environ.get("FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml")
     streams = (runtime_config or {}).get("streams") or {}
+    preload = (runtime_config or {}).get("preload") or {}
     previous_streams = (previous_runtime_config or {}).get("streams") or {}
     removed_streams = sorted(set(previous_streams) - set(streams))
     result = {
@@ -513,6 +514,7 @@ def _sync_go2rtc_runtime(
         "config_path": output_path,
         "api_base": _local_go2rtc_api_base(runtime_config or previous_runtime_config),
         "streams": sorted(streams.keys()),
+        "preload_streams": sorted(preload.keys()),
         "removed_streams": removed_streams,
         "api_synced": False,
         "warning": None,
@@ -566,6 +568,7 @@ def _go2rtc_runtime_status(config: dict) -> dict:
     runtime_config = build_go2rtc_runtime_config(config)
     api_base = _local_go2rtc_api_base(runtime_config)
     streams = (runtime_config or {}).get("streams") or {}
+    preload = (runtime_config or {}).get("preload") or {}
     spawned_running = bool(
         go2rtc_spawned_process and go2rtc_spawned_process.poll() is None
     )
@@ -587,6 +590,8 @@ def _go2rtc_runtime_status(config: dict) -> dict:
         "same_host_port": go2rtc_browser_port(global_config),
         "streams": sorted(streams.keys()),
         "stream_count": len(streams),
+        "preload_streams": sorted(preload.keys()),
+        "preload_count": len(preload),
         "spawned_pid": go2rtc_spawned_process.pid if spawned_running else None,
         "spawned_running": spawned_running,
         "api_reachable": False,
@@ -817,6 +822,7 @@ GUIDED_CAMERA_KEYS = {
     "go2rtc_enabled",
     "go2rtc_rtsp_transport",
     "go2rtc_video_mode",
+    "go2rtc_preload",
     "local_command",
     "timeout_s",
     "cache_bust",
@@ -968,6 +974,14 @@ def _build_camera_config(
         raise ValueError("go2rtc video mode must be copy, h264, h265, or mjpeg.")
     if go2rtc_video_mode and go2rtc_video_mode != "copy":
         camera["go2rtc_video_mode"] = go2rtc_video_mode
+    if "go2rtc_preload" in payload:
+        if (
+            payload.get("ptz_enabled")
+            or existing_camera.get("go2rtc_preload") is not None
+        ):
+            camera["go2rtc_preload"] = bool(payload.get("go2rtc_preload"))
+    elif existing_camera.get("go2rtc_preload") is not None:
+        camera["go2rtc_preload"] = bool(existing_camera.get("go2rtc_preload"))
     if source_type == "rtsp":
         command = local_command or rtsp_snapshot_command(rtsp_url)
         camera["local_command"] = (

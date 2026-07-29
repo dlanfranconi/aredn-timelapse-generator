@@ -479,6 +479,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "rtsp_timeout_s",
             "rtsp_transport",
             "video_mode",
+            "preload_ptz_streams",
+            "preload_query",
             "api_listen",
             "rtsp_listen",
             "webrtc_listen",
@@ -599,6 +601,19 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         default="tcp",
         choices={"tcp", "udp"},
     )
+    go2rtc_out["preload_ptz_streams"] = _bool(
+        go2rtc_cfg.get("preload_ptz_streams"),
+        "global.go2rtc.preload_ptz_streams",
+        errors,
+        default=True,
+    )
+    preload_query = _str(
+        go2rtc_cfg.get("preload_query"),
+        "global.go2rtc.preload_query",
+        errors,
+        default="video",
+    ).strip()
+    go2rtc_out["preload_query"] = preload_query or "video"
     go2rtc_out["api_listen"] = _str(
         go2rtc_cfg.get("api_listen"),
         "global.go2rtc.api_listen",
@@ -1393,6 +1408,13 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 f"cameras.{name}.go2rtc_video_mode",
                 errors,
                 choices={"copy", "h264", "h265", "mjpeg"},
+            )
+        if cam.get("go2rtc_preload") is not None:
+            cam_out["go2rtc_preload"] = _bool(
+                cam.get("go2rtc_preload"),
+                f"cameras.{name}.go2rtc_preload",
+                errors,
+                default=False,
             )
         if cam.get("unavailable_command") is not None:
             cam_out["unavailable_command"] = _str(

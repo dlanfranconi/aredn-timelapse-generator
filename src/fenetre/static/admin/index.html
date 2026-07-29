@@ -226,6 +226,7 @@
                     <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
                     <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
                     <label><input id="newCameraGo2rtcEnabled" type="checkbox" checked> Enable RTSP live view</label>
+                    <label><input id="newCameraGo2rtcPreload" type="checkbox" checked> Keep low-res PTZ stream warm</label>
                     <label for="newCameraGo2rtcTransport">go2rtc RTSP transport</label>
                     <select id="newCameraGo2rtcTransport">
                         <option value="tcp">TCP</option>
@@ -446,6 +447,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js?v=20260727-camera-rename-streams"></script>
+    <script src="/static/admin/app.js?v=20260728-go2rtc-preload"></script>
 </body>
 </html>

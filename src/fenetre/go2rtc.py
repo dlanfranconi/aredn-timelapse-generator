@@ -227,6 +227,22 @@ def _go2rtc_video_mode(config: Dict[str, Any], camera_config: Dict[str, Any]) ->
     return mode if mode in {"copy", "h264", "h265", "mjpeg"} else "copy"
 
 
+def _camera_ptz_enabled(camera_config: Dict[str, Any]) -> bool:
+    ptz_config = camera_config.get("ptz") or {}
+    return isinstance(ptz_config, dict) and ptz_config.get("enabled") is True
+
+
+def _go2rtc_preload_enabled(
+    config: Dict[str, Any], camera_config: Dict[str, Any]
+) -> bool:
+    if camera_config.get("go2rtc_preload") is not None:
+        return bool(camera_config.get("go2rtc_preload"))
+    preload_ptz_streams = config.get("preload_ptz_streams")
+    if preload_ptz_streams is None:
+        preload_ptz_streams = True
+    return bool(preload_ptz_streams) and _camera_ptz_enabled(camera_config)
+
+
 def _video_only_source(
     source: Any,
     source_mode: str = "ffmpeg",
@@ -345,6 +361,8 @@ def build_go2rtc_runtime_config(
 
     cameras = raw_config.get("cameras") or {}
     streams = {}
+    preload = {}
+    preload_query = str(config.get("preload_query") or "video").strip() or "video"
     if isinstance(cameras, dict):
         for camera_name, camera_config in cameras.items():
             if not isinstance(camera_config, dict):
@@ -368,6 +386,8 @@ def build_go2rtc_runtime_config(
                 rtsp_transport,
                 video_mode,
             )
+            if _go2rtc_preload_enabled(config, camera_config):
+                preload[stream_name] = preload_query
             full_source = camera_config.get("rtsp_url")
             if full_source and full_source != alignment_source:
                 streams[go2rtc_full_stream_name(str(camera_name), global_config)] = (
@@ -396,6 +416,8 @@ def build_go2rtc_runtime_config(
         "webrtc": webrtc_config,
         "streams": streams,
     }
+    if preload:
+        runtime_config["preload"] = preload
     return runtime_config
 
 
