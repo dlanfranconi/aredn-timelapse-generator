@@ -244,7 +244,7 @@ global:
     base_url: ""
     # Optional exact browser-host overrides. Use this for Cloudflare/Tunnel hostnames.
     base_urls:
-      aredncameras.aredn805.net: https://stream.aredn805.net
+      aredncameras.aredn805.net: https://streams-aredncameras.aredn805.net
     player_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     preview_url_template: "{base_url}/stream.html?src={stream}&media=video&muted=1"
     # Leave blank to let go2rtc stream.html choose its default mode.
@@ -273,7 +273,7 @@ By default, `preload_ptz_streams: true` keeps only PTZ aiming streams warm insid
 
 If `base_url` is blank, the public UI builds stream links from the current browser host and the configured go2rtc API port, for example `http://CURRENT_HOST:1984/stream.html?...`. Use `base_urls` for host-specific exceptions such as Cloudflare Tunnel hostnames. The key is the browser host for Fenetre, and the value is the go2rtc browser base URL. Set `base_url` only as a default for every browser host that does not match `base_urls`.
 
-For Cloudflare, use first-level stream hostnames such as `stream.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate. Browser login state is per hostname, so an authenticated local or Tailscale session does not authenticate `https://aredncameras.aredn805.net`; log in on the Cloudflare hostname before opening live streams because Fenetre does not publish stream URLs to anonymous users.
+For Cloudflare, use first-level stream hostnames such as `streams-aredncameras.aredn805.net`; multi-level names such as `streams.aredncameras.aredn805.net` are not covered by Cloudflare Universal SSL unless you add Total TLS, Advanced Certificate Manager, or a custom edge certificate. The `base_urls` key should normally be the Fenetre page host, and the value should be the go2rtc stream host. Browser login state is per hostname, so an authenticated local or Tailscale session does not authenticate `https://aredncameras.aredn805.net`; log in on the Cloudflare hostname before opening live streams because Fenetre does not publish stream URLs to anonymous users.
 
 `rtsp_url` and `ptz_rtsp_url` have different jobs:
 

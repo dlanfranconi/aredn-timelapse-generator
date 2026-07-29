@@ -156,6 +156,10 @@
                 return mutedGo2rtcPlayerUrl(urlsByHost[host], mode);
             }
         }
+        const configuredUrls = Object.values(urlsByHost).filter(value => String(value || '').trim());
+        if (!isLocalGo2rtcFallbackHost() && configuredUrls.length === 1) {
+            return mutedGo2rtcPlayerUrl(configuredUrls[0], mode);
+        }
         return '';
     }
 

@@ -206,6 +206,10 @@ function hostSpecificGo2rtcPlayerUrl(urlsByHost, mode = '') {
             return mutedGo2rtcPlayerUrl(urlsByHost[host], mode);
         }
     }
+    const configuredUrls = Object.values(urlsByHost).filter(value => String(value || '').trim());
+    if (!isLocalGo2rtcFallbackHost() && configuredUrls.length === 1) {
+        return mutedGo2rtcPlayerUrl(configuredUrls[0], mode);
+    }
     return '';
 }
 
@@ -1193,7 +1197,9 @@ function configurePtzPresets(camera, listItem) {
         liveFrame.classList.remove('loaded');
         livePreview.classList.remove('loaded');
         livePreview.hidden = false;
-        livePlaceholder.textContent = 'Live preview is not configured. Enable RTSP live view and set an RTSP or PTZ live RTSP URL.';
+        livePlaceholder.textContent = go2rtc.enabled === true && go2rtc.stream && go2rtc.base_urls_configured
+            ? `Live preview URL is not available for ${window.location.hostname || 'this host'}. Check global.go2rtc.base_urls.`
+            : 'Live preview is not configured. Enable RTSP live view and set an RTSP or PTZ live RTSP URL.';
         liveLink.hidden = true;
     }
     const unloadLiveView = () => {

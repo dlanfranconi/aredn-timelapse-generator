@@ -27,7 +27,7 @@ global:
     base_url: ""
     # Optional exact browser-host overrides, useful for Cloudflare Tunnel hostnames.
     base_urls:
-      aredncameras.aredn805.net: https://stream.aredn805.net
+      aredncameras.aredn805.net: https://streams-aredncameras.aredn805.net
     # stream.html is the default compatibility player. Fenetre keeps generated
     # player URLs video-only and muted by default. The PTZ aiming preview uses
     # the low-resolution go2rtc stream rather than the _full stream.
