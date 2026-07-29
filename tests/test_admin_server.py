@@ -96,6 +96,37 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml, new_config_data_json)
 
+    def test_update_config_preserves_dotted_go2rtc_base_url_hosts(self):
+        new_config_data_json = {
+            "global": {
+                "go2rtc": {
+                    "enabled": True,
+                    "base_url": "",
+                    "base_urls": {
+                        "aredncameras.aredn805.net": "https://streams-aredncameras.aredn805.net"
+                    },
+                }
+            },
+            "cameras": {"cam1": {"url": "http://localhost"}},
+        }
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps(new_config_data_json),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["global"]["go2rtc"]["base_urls"],
+            {
+                "aredncameras.aredn805.net": "https://streams-aredncameras.aredn805.net"
+            },
+        )
+        self.assertNotIn("net", updated_data_yaml["global"]["go2rtc"]["base_urls"])
+
     def test_update_deployment_name_patches_existing_config(self):
         response = self.app.put(
             "/api/global/deployment_name",

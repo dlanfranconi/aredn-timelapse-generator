@@ -2357,6 +2357,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 input.id = currentKey;
                 input.checked = value;
                 input.dataset.key = currentKey;
+                input.dataset.name = key;
                 inputWrapper.appendChild(input);
                 formRow.appendChild(inputWrapper);
                 parentElement.appendChild(formRow);
@@ -2366,6 +2367,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 input.id = currentKey;
                 input.value = value;
                 input.dataset.key = currentKey;
+                input.dataset.name = key;
                 inputWrapper.appendChild(input);
                 formRow.appendChild(inputWrapper);
                 parentElement.appendChild(formRow);
@@ -2377,6 +2379,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     textarea.value = value;
                     textarea.rows = value.split('\n').length + 1;
                     textarea.dataset.key = currentKey;
+                    textarea.dataset.name = key;
                     inputWrapper.appendChild(textarea);
                     formRow.appendChild(inputWrapper);
                     parentElement.appendChild(formRow);
@@ -2388,6 +2391,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     input.id = currentKey;
                     input.value = value;
                     input.dataset.key = currentKey;
+                    input.dataset.name = key;
                     inputWrapper.appendChild(input);
                     if (sensitive) {
                         appendRevealToggle(inputWrapper, input);
@@ -2406,6 +2410,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 content.className = 'collapsible-content';
                 fieldset.dataset.key = currentKey;
                 fieldset.dataset.type = 'array';
+                fieldset.dataset.name = key;
 
                 value.forEach((item, index) => {
                     const itemContainer = createArrayItemContainer(item, `${currentKey}[${index}]`, index, content);
@@ -2432,6 +2437,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 content.className = 'collapsible-content';
                 fieldset.dataset.key = currentKey;
                 fieldset.dataset.type = 'object';
+                fieldset.dataset.name = key;
                 renderConfigForm(value, content, currentKey);
                 fieldset.appendChild(content);
                 parentElement.appendChild(fieldset);
@@ -2649,6 +2655,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getFormDataAsJson() {
         const data = {};
+        function formFieldName(element) {
+            if (element.dataset.name) {
+                return element.dataset.name;
+            }
+            if (!element.dataset.key) {
+                return '';
+            }
+            return element.dataset.key.split('.').pop().replace(/\[\d+\]$/, '');
+        }
+
         function buildObject(element, obj) {
             if (element.dataset.key) {
                 const keys = element.dataset.key.split('.');
@@ -2711,7 +2727,7 @@ document.addEventListener('DOMContentLoaded', () => {
         function processChildren(parentElement, currentObject) {
             for (const child of parentElement.children) {
                 if (child.tagName === 'FIELDSET') {
-                    const key = child.dataset.key.split('.').pop().replace(/\[\d+\]$/, ''); // Get the actual key name
+                    const key = formFieldName(child);
                     if (child.dataset.type === 'array') {
                         currentObject[key] = [];
                         // Iterate over array item containers
@@ -2751,8 +2767,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // This branch handles direct properties of an object that are input fields.
                     // These inputs should have a data-key.
                     if (child.dataset.key) {
-                        const keyParts = child.dataset.key.split('.');
-                        const actualKey = keyParts[keyParts.length -1]; // The last part is the actual property name
+                        const actualKey = formFieldName(child);
 
                         // Ensure we are not trying to process parts of an array item directly here
                         // if (actualKey.includes('[')) continue; // Skip if it looks like an array element part

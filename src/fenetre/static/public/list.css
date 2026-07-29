@@ -843,11 +843,6 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
 }
 
 @media (orientation: landscape) {
-    .camera-details {
-        max-height: calc(100vh - 240px);
-        overflow-y: auto;
-    }
-
     .camera-details img {
         max-height: calc(100vh - 380px);
         object-fit: contain;
