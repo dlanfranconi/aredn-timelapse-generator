@@ -3,6 +3,7 @@ import os
 import re
 import shlex
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -28,6 +29,9 @@ SENSITIVE_QUERY_KEYS = {
     "secret",
     "token",
 }
+
+LOCAL_RTSP_RECORDING_VENDORS = {"local_rtsp", "local-rtsp", "sunba", "sunba_local"}
+_local_rtsp_recorders: Dict[str, Dict[str, Any]] = {}
 
 
 def _sanitize_url_for_logs(url: str) -> str:
@@ -76,6 +80,13 @@ def _redact(value: Any) -> Any:
                 redacted[key] = _redact(item)
         return redacted
     return value
+
+
+def _sanitize_command_for_logs(command: list[str]) -> str:
+    return " ".join(
+        shlex.quote(_sanitize_url_for_logs(part) if "://" in part else str(part))
+        for part in command
+    )
 
 
 def launch_workflow_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -619,11 +630,17 @@ def _camera_plan_actions(
         vendor = _record_vendor(record)
         if (
             vendor == "reolink"
+            or _is_local_rtsp_record_vendor(vendor)
             or record.get("start_url")
             or record.get("start_command")
         ):
             add("record_start", launch_ts - pre_seconds, "start")
-        if vendor == "reolink" or record.get("stop_url") or record.get("stop_command"):
+        if (
+            vendor == "reolink"
+            or _is_local_rtsp_record_vendor(vendor)
+            or record.get("stop_url")
+            or record.get("stop_command")
+        ):
             add("record_stop", launch_ts + post_seconds, "stop")
         if (
             vendor == "reolink"
@@ -797,6 +814,10 @@ def _record_vendor(record: Dict[str, Any]) -> str:
         .strip()
         .lower()
     )
+
+
+def _is_local_rtsp_record_vendor(vendor: str) -> bool:
+    return str(vendor or "").strip().lower() in LOCAL_RTSP_RECORDING_VENDORS
 
 
 def _reolink_api_url(context: Dict[str, Any], record: Dict[str, Any]) -> str:
@@ -1201,6 +1222,257 @@ def _execute_reolink_record_action(
     raise LaunchWorkflowError(f"Unsupported Reolink launch action '{kind}'.")
 
 
+def _local_rtsp_recording_key(action: Dict[str, Any]) -> str:
+    event_id = str((action.get("event") or {}).get("id") or "launch")
+    return f"{event_id}:{action.get('plan')}:{action.get('camera')}"
+
+
+def _local_rtsp_recording_source(
+    camera_config: Dict[str, Any], record: Dict[str, Any], context: Dict[str, Any]
+) -> str:
+    source = _render_template(
+        record.get("rtsp_url")
+        or record.get("source_url")
+        or camera_config.get("rtsp_url")
+        or "",
+        context,
+    )
+    source = str(source or "").strip()
+    if source:
+        return source
+    raise LaunchWorkflowError(
+        "Local RTSP launch recording requires the camera's high-definition rtsp_url "
+        "or record.rtsp_url. The low-resolution PTZ aiming stream is not used unless "
+        "it is explicitly configured as record.rtsp_url."
+    )
+
+
+def _local_rtsp_recording_path(
+    config: Dict[str, Any],
+    action: Dict[str, Any],
+    record: Dict[str, Any],
+    context: Dict[str, Any],
+) -> str:
+    path = _render_template(
+        record.get("download_path")
+        or record.get("output_path")
+        or _default_launch_download_path(config, action["event"], action["camera"]),
+        context,
+    )
+    return str(path)
+
+
+def _local_rtsp_ffmpeg_command(
+    source_url: str,
+    output_path: str,
+    record: Dict[str, Any],
+    duration_s: int,
+) -> list[str]:
+    transport = str(record.get("rtsp_transport") or record.get("transport") or "tcp")
+    video_codec = str(record.get("video_codec") or record.get("codec") or "copy")
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        str(record.get("loglevel") or "error"),
+        "-rtsp_transport",
+        transport,
+        "-i",
+        source_url,
+        "-map",
+        "0:v:0",
+        "-an",
+        "-t",
+        str(max(1, int(duration_s or 1))),
+    ]
+    if video_codec == "copy":
+        command.extend(["-c:v", "copy"])
+    else:
+        command.extend(["-c:v", video_codec])
+    command.extend(["-movflags", "+faststart", "-y", output_path])
+    return command
+
+
+def _file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _execute_local_rtsp_record_action(
+    config: Dict[str, Any],
+    action: Dict[str, Any],
+    camera_config: Dict[str, Any],
+    record: Dict[str, Any],
+    context: Dict[str, Any],
+    window: Dict[str, datetime],
+    dry_run: bool,
+) -> Dict[str, Any]:
+    kind = action["kind"]
+    recording_key = _local_rtsp_recording_key(action)
+    output_path = _local_rtsp_recording_path(config, action, record, context)
+    duration_s = _parse_int(
+        record.get("manual_record_duration_s") or record.get("duration_s"),
+        max(1, int((window["stop_utc"] - window["start_utc"]).total_seconds()) + 300),
+    )
+    result = {
+        "ok": True,
+        "vendor": "local_rtsp",
+        "kind": kind,
+        "camera": action["camera"],
+        "recording_key": recording_key,
+        "download_path": output_path,
+        "dry_run": dry_run,
+    }
+
+    if kind == "record_start":
+        existing = _local_rtsp_recorders.get(recording_key)
+        existing_process = (
+            existing.get("process") if isinstance(existing, dict) else None
+        )
+        if existing_process and existing_process.poll() is None:
+            result.update(
+                {
+                    "already_running": True,
+                    "pid": existing_process.pid,
+                    "command": existing.get("command"),
+                }
+            )
+            return result
+
+        source_url = _local_rtsp_recording_source(camera_config, record, context)
+        command = _local_rtsp_ffmpeg_command(
+            source_url, output_path, record, duration_s
+        )
+        result.update(
+            {
+                "source": _sanitize_url_for_logs(source_url),
+                "command": _sanitize_command_for_logs(command),
+                "duration_s": duration_s,
+            }
+        )
+        if dry_run:
+            return result
+
+        directory = os.path.dirname(output_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _local_rtsp_recorders[recording_key] = {
+            "process": process,
+            "path": output_path,
+            "command": result["command"],
+            "started_at": time.time(),
+        }
+        result["pid"] = process.pid
+        return result
+
+    if kind == "record_stop":
+        recorder = _local_rtsp_recorders.pop(recording_key, None)
+        process = recorder.get("process") if isinstance(recorder, dict) else None
+        if process and process.poll() is None:
+            timeout_s = float(record.get("stop_timeout_s") or 10)
+            process.terminate()
+            try:
+                process.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+                result["killed"] = True
+        result["returncode"] = process.poll() if process else None
+        result["bytes"] = _file_size(output_path)
+        result["url"] = (
+            _launch_file_url(
+                str((config.get("global") or {}).get("work_dir")), output_path
+            )
+            if (config.get("global") or {}).get("work_dir")
+            else ""
+        )
+        if not process:
+            result["warning"] = (
+                "No in-memory local RTSP recorder was running for this launch. "
+                "The process may have already ended or Fenetre may have restarted."
+            )
+        return result
+
+    if kind == "download_recording":
+        result["bytes"] = _file_size(output_path)
+        result["url"] = (
+            _launch_file_url(
+                str((config.get("global") or {}).get("work_dir")), output_path
+            )
+            if (config.get("global") or {}).get("work_dir")
+            else ""
+        )
+        return result
+
+    raise LaunchWorkflowError(f"Unsupported local RTSP launch action '{kind}'.")
+
+
+def test_reolink_recording_action(
+    config: Dict[str, Any],
+    camera_name: str,
+    record: Dict[str, Any],
+    kind: str,
+    dry_run: bool = True,
+    now: datetime | None = None,
+    window_seconds: int = 900,
+) -> Dict[str, Any]:
+    cameras = config.get("cameras") or {}
+    camera_config = cameras.get(camera_name)
+    if not isinstance(camera_config, dict):
+        raise LaunchWorkflowError(f"Camera '{camera_name}' was not found.")
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    event_id = f"reolink-test-{int(now.timestamp())}"
+    event = {
+        "id": event_id,
+        "name": "Reolink Recording Test",
+        "launch_time_utc": now.isoformat(),
+    }
+    action = {
+        "key": f"{event_id}:admin-test:{camera_name}:{kind}",
+        "kind": kind,
+        "event": event,
+        "plan": "admin-test",
+        "camera": camera_name,
+        "config_key": {
+            "record_start": "start",
+            "record_stop": "stop",
+            "download_recording": "download",
+        }.get(kind, ""),
+    }
+    context = _action_context(event, "admin-test", camera_name, camera_config)
+    context.update(
+        {
+            "record_start_utc": (now - timedelta(seconds=window_seconds)).isoformat(),
+            "record_stop_utc": now.isoformat(),
+            "record_start_local": (now - timedelta(seconds=window_seconds))
+            .astimezone(_timezone_for_config(config))
+            .isoformat(),
+            "record_stop_local": now.astimezone(
+                _timezone_for_config(config)
+            ).isoformat(),
+        }
+    )
+    window = {
+        "start_utc": now - timedelta(seconds=window_seconds),
+        "stop_utc": now,
+        "start_local": (now - timedelta(seconds=window_seconds)).astimezone(
+            _timezone_for_config(config)
+        ),
+        "stop_local": now.astimezone(_timezone_for_config(config)),
+    }
+    record = {**record, "vendor": "reolink"}
+    return _execute_reolink_record_action(
+        config, action, record, context, window, dry_run=bool(dry_run)
+    )
+
+
 def execute_launch_action(
     config: Dict[str, Any],
     action: Dict[str, Any],
@@ -1297,12 +1569,25 @@ def execute_launch_action(
         if not isinstance(record, dict):
             record = {}
         config_key = action.get("config_key") or ""
-        if _record_vendor(record) == "reolink" and not (
+        vendor = _record_vendor(record)
+        if vendor == "reolink" and not (
             record.get(f"{config_key}_command") or record.get(f"{config_key}_url")
         ):
             return _execute_reolink_record_action(
                 config,
                 action,
+                record,
+                context,
+                _record_window(config, workflow, plan, action["event"]),
+                dry_run=bool(dry_run),
+            )
+        if _is_local_rtsp_record_vendor(vendor) and not (
+            record.get(f"{config_key}_command") or record.get(f"{config_key}_url")
+        ):
+            return _execute_local_rtsp_record_action(
+                config,
+                action,
+                camera_config,
                 record,
                 context,
                 _record_window(config, workflow, plan, action["event"]),

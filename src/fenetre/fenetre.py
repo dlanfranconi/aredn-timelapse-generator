@@ -3850,6 +3850,7 @@ def enforce_camera_storage_limit(
 
     camera_dir = os.path.join(global_config["pic_dir"], camera_name)
     if not os.path.isdir(camera_dir):
+        metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(0)
         return 0
 
     current_size_bytes = get_dir_size(camera_dir)

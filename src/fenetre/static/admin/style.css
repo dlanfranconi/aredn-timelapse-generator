@@ -194,6 +194,39 @@ h1 {
     gap: 5px;
 }
 
+.launch-reolink-tools {
+    border: 1px solid #d7e5f5;
+    border-radius: 4px;
+    background: #f8fbff;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+}
+
+.launch-reolink-tools label {
+    align-items: center;
+    display: grid;
+    gap: 4px;
+    margin: 0;
+}
+
+.launch-reolink-tools input {
+    min-width: 0;
+}
+
+.launch-reolink-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.launch-reolink-test-status {
+    color: #374151;
+    font-family: monospace;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+}
+
 .launch-preview-result {
     margin-top: 14px;
 }

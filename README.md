@@ -575,11 +575,30 @@ Built-in Reolink recording uses direct HTTP API calls:
 - Find files: `Search` for the launch record window and selected `stream_type`
 - Download files: `Download` or `Playback` using the file names returned by `Search`
 
-Reolink's official HTTP API documentation covers `Search`, `Download`, and `Playback`; `SetManualRec` is implemented by the maintained `reolink_aio` integration and is capability-dependent. If a camera/NVR returns a Reolink API error for `SetManualRec`, leave the recorder in custom-hook mode or use an external RTSP recorder.
+Reolink's official HTTP API documentation covers `Search`, `Download`, and `Playback`; `SetManualRec` is implemented by the maintained `reolink_aio` integration and is capability-dependent. If a camera/NVR returns a Reolink API error for `SetManualRec`, leave the recorder in custom-hook mode or use the local RTSP recorder.
 
 Fenetre uses the camera-local time window derived from `global.timezone` for Reolink `Search`. Keep `global.timezone` aligned with the camera's local timezone.
 
-For Sunba P636 V2, no verified public local HTTP API for start/stop/download of on-camera recordings has been found. Keep `record.vendor` as custom hooks and only enter URLs/commands that you have tested against that camera or its management software.
+The admin Launch Automation panel includes a Reolink test utility on each Reolink launch-camera card. Use it to dry-run `SetManualRec`, start a short test recording, stop manual recording, and search/download a recent file before trusting an unattended launch capture.
+
+### Local RTSP Launch Recording
+
+For Sunba PTZ cameras and other cameras without a verified recording API, choose `Recording API: Local HD RTSP recording` in the Launch Automation admin panel, or set `record.vendor: local_rtsp`. Fenetre starts `ffmpeg` on the server at the pre-launch time and writes the camera's high-definition `rtsp_url` directly under the normal launch recording folder. It does not use `ptz_rtsp_url` unless you explicitly set `record.rtsp_url`.
+
+```yaml
+global:
+  launch_workflow:
+    plans:
+      vandenberg-spacex:
+        cameras:
+          Sunba-PTZ:
+            preset: launch-pad
+            record:
+              vendor: local_rtsp
+              download_path: /srv/fenetre/data/launches/{launch_id}/{launch_id}-{camera}.mp4
+```
+
+For Sunba P636 V2, no verified public local HTTP API for start/stop/download of on-camera recordings has been found. Use `local_rtsp` for server-side launch recording or custom hooks only for URLs/commands you have tested against that camera or its management software.
 
 ### Launch Dashboards
 

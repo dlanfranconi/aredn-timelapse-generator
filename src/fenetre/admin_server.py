@@ -33,7 +33,11 @@ from fenetre.go2rtc import build_go2rtc_runtime_config, go2rtc_browser_port
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.image_profiles import ImageProfileError, apply_image_profile
 from fenetre.log_sanitizer import sanitize_text_for_logs
-from fenetre.launch_workflow import preview_launch_workflow, run_due_launch_actions
+from fenetre.launch_workflow import (
+    preview_launch_workflow,
+    run_due_launch_actions,
+    test_reolink_recording_action,
+)
 from fenetre.ptz import discover_presets, set_lock
 from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
 from fenetre.ui_utils import copy_public_html_files
@@ -1219,6 +1223,30 @@ def _dir_size(path: str) -> int:
     return total
 
 
+def _camera_media_dirs(photos_dir: str | None, camera_name: str) -> list[str]:
+    if not photos_dir:
+        return []
+    exact_dir = os.path.join(photos_dir, camera_name)
+    matches = []
+    if os.path.isdir(exact_dir):
+        matches.append(exact_dir)
+    if not os.path.isdir(photos_dir):
+        return matches
+
+    expected = {
+        camera_name.casefold(),
+        _slugify_camera_name(camera_name).casefold(),
+    }
+    for entry in os.scandir(photos_dir):
+        if not entry.is_dir():
+            continue
+        if entry.path in matches:
+            continue
+        if entry.name.casefold() in expected:
+            matches.append(entry.path)
+    return matches
+
+
 def _format_bytes(value: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(value)
@@ -1268,8 +1296,8 @@ def storage_summary():
 
         cameras = []
         for name, camera_cfg in (config.get("cameras") or {}).items():
-            camera_dir = os.path.join(photos_dir, name) if photos_dir else None
-            size_bytes = _dir_size(camera_dir) if camera_dir else 0
+            media_dirs = _camera_media_dirs(photos_dir, str(name))
+            size_bytes = sum(_dir_size(camera_dir) for camera_dir in media_dirs)
             limit_gb = camera_cfg.get(
                 "work_dir_max_size_GB", storage_config.get("camera_max_size_GB")
             )
@@ -1279,6 +1307,7 @@ def storage_summary():
                     "bytes": size_bytes,
                     "display": _format_bytes(size_bytes),
                     "limit_GB": limit_gb,
+                    "media_dirs": media_dirs,
                 }
             )
         cameras.sort(key=lambda item: item["bytes"], reverse=True)
@@ -1873,6 +1902,36 @@ def run_due_launches():
             dry_run=None if dry_run is None else dry_run is not False,
         )
         return jsonify(result)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/reolink_test", methods=["POST"])
+def test_reolink_launch_recording():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = str(payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"ok": False, "error": "camera is required."}), 400
+        action = str(payload.get("action") or "").strip()
+        if action not in {"record_start", "record_stop", "download_recording"}:
+            return (
+                jsonify({"ok": False, "error": "unsupported Reolink test action."}),
+                400,
+            )
+        record = payload.get("record") or {}
+        if not isinstance(record, dict):
+            return jsonify({"ok": False, "error": "record must be an object."}), 400
+        _, config = _load_effective_config_with_raw()
+        result = test_reolink_recording_action(
+            config,
+            camera_name,
+            record,
+            action,
+            dry_run=payload.get("dry_run", True) is not False,
+            window_seconds=int(payload.get("window_seconds") or 900),
+        )
+        return jsonify(result), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

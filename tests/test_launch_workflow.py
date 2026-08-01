@@ -254,6 +254,48 @@ class LaunchWorkflowTestCase(unittest.TestCase):
             ["record_start", "record_stop", "download_recording"],
         )
 
+    def test_local_rtsp_vendor_schedules_start_and_stop(self):
+        config = sample_config()
+        config["cameras"]["cam1"]["rtsp_url"] = "rtsp://admin:secret@camera.local/main"
+        camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+            "cameras"
+        ]["cam1"]
+        camera_plan.clear()
+        camera_plan["record"] = {"vendor": "local_rtsp"}
+
+        actions = due_launch_actions(
+            config, now=datetime(2026, 7, 21, 12, 3, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(
+            [action["kind"] for action in actions],
+            ["record_start", "record_stop"],
+        )
+
+    def test_local_rtsp_record_start_dry_run_uses_full_rtsp_url(self):
+        config = sample_config()
+        config["cameras"]["cam1"]["rtsp_url"] = "rtsp://admin:secret@camera.local/main"
+        config["cameras"]["cam1"][
+            "ptz_rtsp_url"
+        ] = "rtsp://admin:secret@camera.local/sub"
+        camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+            "cameras"
+        ]["cam1"]
+        camera_plan.clear()
+        camera_plan["record"] = {"vendor": "local_rtsp"}
+
+        result = run_due_launch_actions(
+            config, now=datetime(2026, 7, 21, 11, 59, 30, tzinfo=timezone.utc)
+        )
+
+        record_start = result["actions"][0]["result"]
+        self.assertEqual(record_start["vendor"], "local_rtsp")
+        self.assertIn("camera.local/main", record_start["source"])
+        self.assertNotIn("secret", record_start["source"])
+        self.assertIn("camera.local/main", record_start["command"])
+        self.assertNotIn("camera.local/sub", record_start["command"])
+        self.assertNotIn("secret", record_start["command"])
+
     @patch("fenetre.launch_workflow.requests.request")
     def test_reolink_manual_record_start_posts_set_manual_rec(self, mock_request):
         mock_request.return_value = FakeResponse(

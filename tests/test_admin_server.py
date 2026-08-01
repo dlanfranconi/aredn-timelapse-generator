@@ -121,9 +121,7 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(
             updated_data_yaml["global"]["go2rtc"]["base_urls"],
-            {
-                "aredncameras.aredn805.net": "https://streams-aredncameras.aredn805.net"
-            },
+            {"aredncameras.aredn805.net": "https://streams-aredncameras.aredn805.net"},
         )
         self.assertNotIn("net", updated_data_yaml["global"]["go2rtc"]["base_urls"])
 
@@ -807,6 +805,39 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(response.json["ok"])
         mock_run_due.assert_called_once()
 
+    @patch("fenetre.admin_server.test_reolink_recording_action")
+    def test_launch_reolink_test_endpoint_runs_configured_camera(self, mock_test):
+        mock_test.return_value = {"ok": True, "command": "SetManualRec"}
+        self.test_config_data["global"] = {"work_dir": tempfile.gettempdir()}
+        self.test_config_data["cameras"]["cam1"] = {
+            "url": "http://camera.local/cgi-bin/api.cgi?cmd=Snap&user=admin&password=secret"
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.post(
+            "/api/launches/reolink_test",
+            data=json.dumps(
+                {
+                    "camera": "cam1",
+                    "action": "record_start",
+                    "dry_run": False,
+                    "window_seconds": 300,
+                    "record": {"vendor": "reolink", "manual_record_duration_s": 15},
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        mock_test.assert_called_once()
+        args, kwargs = mock_test.call_args
+        self.assertEqual(args[1], "cam1")
+        self.assertEqual(args[3], "record_start")
+        self.assertFalse(kwargs["dry_run"])
+        self.assertEqual(kwargs["window_seconds"], 300)
+
     @patch("fenetre.admin_server._fetch_local_command_bytes")
     @patch("fenetre.admin_server._fetch_snapshot_bytes")
     def test_snapshot_test_checks_live_rtsp_urls(self, mock_snapshot, mock_stream):
@@ -1161,6 +1192,33 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.json["limit_GB"], 50)
         self.assertEqual(response.json["cameras"][0]["name"], "cam1")
         self.assertEqual(response.json["cameras"][0]["limit_GB"], 5)
+
+    def test_storage_summary_includes_new_and_case_changed_camera_dirs(self):
+        work_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(work_dir, "photos", "new-cam"))
+        with open(os.path.join(work_dir, "photos", "new-cam", "frame.jpg"), "wb") as f:
+            f.write(b"x" * 512)
+        self.test_config_data["global"] = {
+            "work_dir": work_dir,
+            "storage_management": {"enabled": True, "camera_max_size_GB": 5},
+        }
+        self.test_config_data["cameras"] = {
+            "New-Cam": {"url": "http://localhost"},
+            "Empty-Cam": {"url": "http://localhost/empty"},
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.get("/api/storage/summary")
+
+        self.assertEqual(response.status_code, 200)
+        cameras = {camera["name"]: camera for camera in response.json["cameras"]}
+        self.assertEqual(cameras["New-Cam"]["bytes"], 512)
+        self.assertIn(
+            os.path.join(work_dir, "photos", "new-cam"),
+            cameras["New-Cam"]["media_dirs"],
+        )
+        self.assertEqual(cameras["Empty-Cam"]["bytes"], 0)
 
     def test_user_management_crud(self):
         self.test_config_data["cameras"]["cam1"]["ptz"] = {"enabled": True}
