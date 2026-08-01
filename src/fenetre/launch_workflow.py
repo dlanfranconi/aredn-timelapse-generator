@@ -628,15 +628,18 @@ def _camera_plan_actions(
     record = camera_plan.get("record") or {}
     if isinstance(record, dict):
         vendor = _record_vendor(record)
+        reolink_manual_record = vendor == "reolink" and _reolink_manual_record_enabled(
+            record
+        )
         if (
-            vendor == "reolink"
+            reolink_manual_record
             or _is_local_rtsp_record_vendor(vendor)
             or record.get("start_url")
             or record.get("start_command")
         ):
             add("record_start", launch_ts - pre_seconds, "start")
         if (
-            vendor == "reolink"
+            reolink_manual_record
             or _is_local_rtsp_record_vendor(vendor)
             or record.get("stop_url")
             or record.get("stop_command")
@@ -816,6 +819,13 @@ def _record_vendor(record: Dict[str, Any]) -> str:
     )
 
 
+def _reolink_manual_record_enabled(record: Dict[str, Any]) -> bool:
+    return _bool_config(
+        record.get("manual_record", record.get("trigger_manual_record")),
+        True,
+    )
+
+
 def _is_local_rtsp_record_vendor(vendor: str) -> bool:
     return str(vendor or "").strip().lower() in LOCAL_RTSP_RECORDING_VENDORS
 
@@ -880,6 +890,24 @@ def _reolink_check_json(command: str, payload: Any) -> Any:
         if not isinstance(item, dict):
             continue
         if item.get("code", 0) != 0:
+            error = item.get("error") if isinstance(item.get("error"), dict) else {}
+            detail = str(error.get("detail") or "").strip()
+            rsp_code = error.get("rspCode")
+            if (
+                command == "SetManualRec"
+                and (
+                    detail == "not support"
+                    or rsp_code in {-9, -17}
+                    or item.get("cmd") == "Unknown"
+                )
+            ):
+                raise LaunchWorkflowError(
+                    "This Reolink camera does not support SetManualRec. In Launch "
+                    "Automation, either disable 'Trigger manual recording' to only "
+                    "search/download existing SD/NVR recordings, or switch the "
+                    "camera to 'Local HD RTSP recording' for server-side launch "
+                    f"capture. Original response: {item}"
+                )
             raise LaunchWorkflowError(
                 f"Reolink {command} returned API error code {item.get('code')}: {item}"
             )
@@ -1171,6 +1199,15 @@ def _execute_reolink_record_action(
     channel = _parse_int(record.get("channel") or context.get("channel"), 0)
     kind = action["kind"]
     if kind == "record_start":
+        if not _reolink_manual_record_enabled(record):
+            return {
+                "ok": True,
+                "vendor": "reolink",
+                "kind": kind,
+                "skipped": True,
+                "reason": "manual Reolink recording is disabled",
+                "dry_run": dry_run,
+            }
         duration = _parse_int(
             record.get("manual_record_duration_s"),
             max(
@@ -1194,6 +1231,15 @@ def _execute_reolink_record_action(
             dry_run,
         )
     if kind == "record_stop":
+        if not _reolink_manual_record_enabled(record):
+            return {
+                "ok": True,
+                "vendor": "reolink",
+                "kind": kind,
+                "skipped": True,
+                "reason": "manual Reolink recording is disabled",
+                "dry_run": dry_run,
+            }
         return _reolink_post_json(
             context,
             record,

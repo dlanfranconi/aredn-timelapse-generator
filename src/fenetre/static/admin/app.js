@@ -640,6 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
             http_port: 80,
             channel: 0,
             stream_type: 'main',
+            manual_record: true,
             manual_record_duration_s: 1200,
             download_method: 'Download',
             skip_when_full_viewers: true
@@ -721,6 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
             record.http_port = intInputValue(card.querySelector('.launch-camera-http-port'), 80);
             record.channel = intInputValue(card.querySelector('.launch-camera-channel'), 0);
             record.stream_type = (card.querySelector('.launch-camera-stream-type') || {}).value || 'main';
+            record.manual_record = (card.querySelector('.launch-camera-manual-record') || {}).checked !== false;
             record.manual_record_duration_s = intInputValue(card.querySelector('.launch-camera-manual-duration'), 1200);
             record.download_method = (card.querySelector('.launch-camera-download-method') || {}).value || 'Download';
         }
@@ -922,6 +924,12 @@ document.addEventListener('DOMContentLoaded', () => {
             appendOption(schemeSelect, 'https', 'HTTPS');
             schemeSelect.value = recordView.scheme === 'https' || recordView.protocol === 'https' ? 'https' : 'http';
             appendLaunchField(fields, 'API protocol', schemeSelect, 'reolink');
+
+            const manualRecordInput = document.createElement('input');
+            manualRecordInput.type = 'checkbox';
+            manualRecordInput.className = 'launch-camera-manual-record launch-record-field';
+            manualRecordInput.checked = recordView.manual_record !== false && recordView.trigger_manual_record !== false;
+            appendLaunchField(fields, 'Trigger manual recording', manualRecordInput, 'reolink');
 
             const httpPortInput = document.createElement('input');
             httpPortInput.type = 'number';

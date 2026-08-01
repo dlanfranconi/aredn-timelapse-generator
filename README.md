@@ -579,7 +579,7 @@ Reolink's official HTTP API documentation covers `Search`, `Download`, and `Play
 
 Fenetre uses the camera-local time window derived from `global.timezone` for Reolink `Search`. Keep `global.timezone` aligned with the camera's local timezone.
 
-The admin Launch Automation panel includes a Reolink test utility on each Reolink launch-camera card. Use it to dry-run `SetManualRec`, start a short test recording, stop manual recording, and search/download a recent file before trusting an unattended launch capture. Most Reolink cameras use `API protocol: HTTP` and `HTTP port: 80` for `/cgi-bin/api.cgi`, even when the snapshot URL uses HTTPS.
+The admin Launch Automation panel includes a Reolink test utility on each Reolink launch-camera card. Use it to dry-run `SetManualRec`, start a short test recording, stop manual recording, and search/download a recent file before trusting an unattended launch capture. Most Reolink cameras use `API protocol: HTTP` and `HTTP port: 80` for `/cgi-bin/api.cgi`, even when the snapshot URL uses HTTPS. If `SetManualRec` returns `not support`, disable `Trigger manual recording` and use Reolink as download-only for existing SD/NVR recordings, or switch that camera to `Local HD RTSP recording`.
 
 ### Local RTSP Launch Recording
 

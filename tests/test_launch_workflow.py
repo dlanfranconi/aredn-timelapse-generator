@@ -254,6 +254,23 @@ class LaunchWorkflowTestCase(unittest.TestCase):
             ["record_start", "record_stop", "download_recording"],
         )
 
+    def test_reolink_download_only_skips_manual_record_actions(self):
+        config = sample_config()
+        camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+            "cameras"
+        ]["cam1"]
+        camera_plan.clear()
+        camera_plan["record"] = {"vendor": "reolink", "manual_record": False}
+
+        actions = due_launch_actions(
+            config, now=datetime(2026, 7, 21, 12, 3, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(
+            [action["kind"] for action in actions],
+            ["download_recording"],
+        )
+
     def test_local_rtsp_vendor_schedules_start_and_stop(self):
         config = sample_config()
         config["cameras"]["cam1"]["rtsp_url"] = "rtsp://admin:secret@camera.local/main"
@@ -353,6 +370,37 @@ class LaunchWorkflowTestCase(unittest.TestCase):
             mock_request.call_args.args[1],
             "http://camera.local/cgi-bin/api.cgi",
         )
+
+    @patch("fenetre.launch_workflow.requests.request")
+    def test_reolink_manual_record_not_supported_message_points_to_modes(
+        self, mock_request
+    ):
+        mock_request.return_value = FakeResponse(
+            [
+                {
+                    "cmd": "Unknown",
+                    "code": 1,
+                    "error": {"detail": "not support", "rspCode": -9},
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config(state_file=os.path.join(temp_dir, "state.json"))
+            camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+                "cameras"
+            ]["cam1"]
+            camera_plan.clear()
+            camera_plan["record"] = {"vendor": "reolink"}
+
+            result = run_due_launch_actions(
+                config,
+                now=datetime(2026, 7, 21, 11, 59, 30, tzinfo=timezone.utc),
+                dry_run=False,
+            )
+
+        self.assertIn("does not support SetManualRec", result["actions"][0]["error"])
+        self.assertIn("Trigger manual recording", result["actions"][0]["error"])
+        self.assertIn("Local HD RTSP recording", result["actions"][0]["error"])
 
     @patch("fenetre.launch_workflow.requests.request")
     def test_reolink_download_searches_and_saves_matching_recording(self, mock_request):
