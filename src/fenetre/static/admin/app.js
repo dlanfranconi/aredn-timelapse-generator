@@ -636,6 +636,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const defaults = {
             vendor,
             download_path: defaultLaunchDownloadPath(configData, cameraName),
+            scheme: 'http',
             http_port: 80,
             channel: 0,
             stream_type: 'main',
@@ -716,6 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (vendor === 'reolink') {
             record.vendor = 'reolink';
+            record.scheme = (card.querySelector('.launch-camera-api-scheme') || {}).value || 'http';
             record.http_port = intInputValue(card.querySelector('.launch-camera-http-port'), 80);
             record.channel = intInputValue(card.querySelector('.launch-camera-channel'), 0);
             record.stream_type = (card.querySelector('.launch-camera-stream-type') || {}).value || 'main';
@@ -913,6 +915,13 @@ document.addEventListener('DOMContentLoaded', () => {
             recordNote.className = 'launch-camera-record-note';
             fields.appendChild(document.createElement('span'));
             fields.appendChild(recordNote);
+
+            const schemeSelect = document.createElement('select');
+            schemeSelect.className = 'launch-camera-api-scheme launch-record-field';
+            appendOption(schemeSelect, 'http', 'HTTP');
+            appendOption(schemeSelect, 'https', 'HTTPS');
+            schemeSelect.value = recordView.scheme === 'https' || recordView.protocol === 'https' ? 'https' : 'http';
+            appendLaunchField(fields, 'API protocol', schemeSelect, 'reolink');
 
             const httpPortInput = document.createElement('input');
             httpPortInput.type = 'number';

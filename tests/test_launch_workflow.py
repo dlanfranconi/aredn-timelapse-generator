@@ -328,6 +328,33 @@ class LaunchWorkflowTestCase(unittest.TestCase):
         )
 
     @patch("fenetre.launch_workflow.requests.request")
+    def test_reolink_recording_port_80_uses_http_even_with_https_snapshot(
+        self, mock_request
+    ):
+        mock_request.return_value = FakeResponse(
+            [{"cmd": "SetManualRec", "code": 0, "value": {"rspCode": 200}}]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config(state_file=os.path.join(temp_dir, "state.json"))
+            config["cameras"]["cam1"]["url"] = "https://camera.local/snapshot.jpg"
+            camera_plan = config["global"]["launch_workflow"]["plans"]["vandenberg"][
+                "cameras"
+            ]["cam1"]
+            camera_plan.clear()
+            camera_plan["record"] = {"vendor": "reolink", "http_port": 80}
+
+            run_due_launch_actions(
+                config,
+                now=datetime(2026, 7, 21, 11, 59, 30, tzinfo=timezone.utc),
+                dry_run=False,
+            )
+
+        self.assertEqual(
+            mock_request.call_args.args[1],
+            "http://camera.local/cgi-bin/api.cgi",
+        )
+
+    @patch("fenetre.launch_workflow.requests.request")
     def test_reolink_download_searches_and_saves_matching_recording(self, mock_request):
         search_response = FakeResponse(
             [

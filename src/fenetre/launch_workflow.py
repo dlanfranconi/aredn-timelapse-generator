@@ -824,8 +824,28 @@ def _reolink_api_url(context: Dict[str, Any], record: Dict[str, Any]) -> str:
     host = str(record.get("host") or context.get("host") or "").strip()
     if not host:
         raise LaunchWorkflowError("Reolink recording requires a camera host.")
-    scheme = str(record.get("scheme") or context.get("scheme") or "http").strip()
     port = _parse_int(record.get("http_port") or context.get("http_port"), 80)
+    scheme = (
+        str(
+            record.get("scheme")
+            or record.get("protocol")
+            or record.get("http_scheme")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    if not scheme:
+        if port == 443:
+            scheme = "https"
+        elif port == 80:
+            scheme = "http"
+        else:
+            scheme = str(context.get("scheme") or "http").strip().lower()
+    if scheme not in {"http", "https"}:
+        raise LaunchWorkflowError(
+            "Reolink recording API scheme must be either http or https."
+        )
     default_port = 443 if scheme == "https" else 80
     port_part = "" if port == default_port else f":{port}"
     return f"{scheme}://{host}{port_part}/cgi-bin/api.cgi"
