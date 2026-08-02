@@ -1212,6 +1212,7 @@ class ConfigServerTestCase(unittest.TestCase):
         response = self.app.get("/api/storage/summary")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json["cameras"]), 2)
         cameras = {camera["name"]: camera for camera in response.json["cameras"]}
         self.assertEqual(cameras["New-Cam"]["bytes"], 512)
         self.assertIn(
@@ -1219,6 +1220,29 @@ class ConfigServerTestCase(unittest.TestCase):
             cameras["New-Cam"]["media_dirs"],
         )
         self.assertEqual(cameras["Empty-Cam"]["bytes"], 0)
+
+    def test_storage_summary_reports_effective_camera_limit_under_global_cap(self):
+        work_dir = tempfile.mkdtemp()
+        self.test_config_data["global"] = {
+            "work_dir": work_dir,
+            "storage_management": {
+                "enabled": True,
+                "work_dir_max_size_GB": 10,
+                "camera_max_size_GB": 20,
+            },
+        }
+        self.test_config_data["cameras"] = {
+            "cam1": {"url": "http://localhost", "work_dir_max_size_GB": 15}
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        response = self.app.get("/api/storage/summary")
+
+        self.assertEqual(response.status_code, 200)
+        camera = response.json["cameras"][0]
+        self.assertEqual(camera["limit_GB"], 15)
+        self.assertEqual(camera["effective_limit_GB"], 10)
 
     def test_user_management_crud(self):
         self.test_config_data["cameras"]["cam1"]["ptz"] = {"enabled": True}

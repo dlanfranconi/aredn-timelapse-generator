@@ -603,6 +603,56 @@ class TestFenetre(unittest.TestCase):
                 os.path.exists(os.path.join(old_day, "2000-01-01T12-00-00UTC.jpg"))
             )
 
+    def test_storage_enforces_slugged_camera_dir_and_global_cap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            camera_dir = os.path.join(tmpdir, "photos", "new-cam")
+            day_dir = os.path.join(camera_dir, "2000-01-01")
+            os.makedirs(day_dir)
+            snapshot = os.path.join(day_dir, "2000-01-01T12-00-00UTC.jpg")
+            daily = os.path.join(day_dir, "2000-01-01.mp4")
+            with open(snapshot, "wb") as f:
+                f.write(b"j" * 1000)
+            with open(daily, "wb") as f:
+                f.write(b"d" * 500)
+
+            had_global = hasattr(fenetre_module, "global_config")
+            had_timelapse = hasattr(fenetre_module, "timelapse_config")
+            old_global = getattr(fenetre_module, "global_config", None)
+            old_timelapse = getattr(fenetre_module, "timelapse_config", None)
+            try:
+                fenetre_module.global_config = {
+                    "work_dir": tmpdir,
+                    "pic_dir": os.path.join(tmpdir, "photos"),
+                    "timezone": "UTC",
+                }
+                fenetre_module.timelapse_config = {
+                    "daily_timelapse": {"file_extension": "mp4"}
+                }
+
+                current_size = enforce_camera_storage_limit(
+                    "New-Cam",
+                    {"work_dir_max_size_GB": 5000 / (1024**3)},
+                    {
+                        "work_dir_max_size_GB": 1200 / (1024**3),
+                        "camera_max_size_GB": 5000 / (1024**3),
+                        "prune_snapshots_first": True,
+                    },
+                    dry_run=False,
+                )
+            finally:
+                if had_global:
+                    fenetre_module.global_config = old_global
+                else:
+                    delattr(fenetre_module, "global_config")
+                if had_timelapse:
+                    fenetre_module.timelapse_config = old_timelapse
+                else:
+                    delattr(fenetre_module, "timelapse_config")
+
+            self.assertEqual(current_size, 500)
+            self.assertFalse(os.path.exists(snapshot))
+            self.assertTrue(os.path.exists(daily))
+
     def test_global_storage_limit_prunes_old_launch_recordings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             launches_dir = os.path.join(tmpdir, "launches")

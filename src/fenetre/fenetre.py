@@ -3836,24 +3836,69 @@ def _prune_daily_timelapses(
     return current_size_bytes
 
 
+def _storage_slugify_camera_name(value: str) -> str:
+    value = (value or "").strip()
+    value = re.sub(r"[^A-Za-z0-9_-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value
+
+
+def _camera_storage_dirs(pic_dir: str, camera_name: str) -> List[str]:
+    if not pic_dir:
+        return []
+    matches = []
+    exact_dir = os.path.join(pic_dir, camera_name)
+    if os.path.isdir(exact_dir):
+        matches.append(exact_dir)
+    if not os.path.isdir(pic_dir):
+        return matches
+
+    expected = {
+        camera_name.casefold(),
+        _storage_slugify_camera_name(camera_name).casefold(),
+    }
+    for entry in os.scandir(pic_dir):
+        if not entry.is_dir():
+            continue
+        if entry.path in matches:
+            continue
+        if entry.name.casefold() in expected:
+            matches.append(entry.path)
+    return matches
+
+
+def _effective_camera_storage_limit_gb(
+    camera_limit_gb: int | float | None, global_limit_gb: int | float | None
+) -> int | float | None:
+    if camera_limit_gb is None:
+        return None
+    if global_limit_gb is None:
+        return camera_limit_gb
+    return min(camera_limit_gb, global_limit_gb)
+
+
 def enforce_camera_storage_limit(
     camera_name: str,
     camera_config: Dict,
     storage_management_config: Dict,
     dry_run: bool,
 ) -> int:
-    camera_limit_gb = camera_config.get(
+    configured_camera_limit_gb = camera_config.get(
         "work_dir_max_size_GB", storage_management_config.get("camera_max_size_GB")
+    )
+    camera_limit_gb = _effective_camera_storage_limit_gb(
+        configured_camera_limit_gb,
+        storage_management_config.get("work_dir_max_size_GB"),
     )
     if camera_limit_gb is None:
         return 0
 
-    camera_dir = os.path.join(global_config["pic_dir"], camera_name)
-    if not os.path.isdir(camera_dir):
+    camera_dirs = _camera_storage_dirs(global_config.get("pic_dir"), camera_name)
+    if not camera_dirs:
         metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(0)
         return 0
 
-    current_size_bytes = get_dir_size(camera_dir)
+    current_size_bytes = sum(get_dir_size(camera_dir) for camera_dir in camera_dirs)
     metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(
         current_size_bytes
     )
@@ -3870,18 +3915,24 @@ def enforce_camera_storage_limit(
     )
 
     if storage_management_config.get("prune_snapshots_first", True):
-        current_size_bytes = _prune_snapshots_keep_daily_timelapse(
-            camera_dir, current_size_bytes, limit_bytes, dry_run
-        )
+        for camera_dir in camera_dirs:
+            if current_size_bytes <= limit_bytes:
+                break
+            current_size_bytes = _prune_snapshots_keep_daily_timelapse(
+                camera_dir, current_size_bytes, limit_bytes, dry_run
+            )
 
     if current_size_bytes > limit_bytes:
         logger.info(
             "Camera %s is still over limit after snapshot pruning; trimming oldest daily timelapses.",
             camera_name,
         )
-        current_size_bytes = _prune_daily_timelapses(
-            camera_dir, current_size_bytes, limit_bytes, dry_run
-        )
+        for camera_dir in camera_dirs:
+            if current_size_bytes <= limit_bytes:
+                break
+            current_size_bytes = _prune_daily_timelapses(
+                camera_dir, current_size_bytes, limit_bytes, dry_run
+            )
 
     metric_camera_directory_size_bytes.labels(camera_name=camera_name).set(
         current_size_bytes
@@ -3933,8 +3984,9 @@ def disk_management_loop():
 
                     all_day_dirs = []
                     for camera_name in cameras_config:
-                        camera_dir = os.path.join(global_config["pic_dir"], camera_name)
-                        if os.path.isdir(camera_dir):
+                        for camera_dir in _camera_storage_dirs(
+                            global_config.get("pic_dir"), camera_name
+                        ):
                             all_day_dirs.extend(
                                 [
                                     d.path

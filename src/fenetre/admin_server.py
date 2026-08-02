@@ -1256,6 +1256,16 @@ def _format_bytes(value: int) -> str:
         size /= 1024
 
 
+def _effective_camera_storage_limit_gb(
+    camera_limit_gb: int | float | None, global_limit_gb: int | float | None
+) -> int | float | None:
+    if camera_limit_gb is None:
+        return None
+    if global_limit_gb is None:
+        return camera_limit_gb
+    return min(camera_limit_gb, global_limit_gb)
+
+
 @app.route("/metrics")
 def metrics():
     return Response(generate_latest(REGISTRY), mimetype="text/plain")
@@ -1293,6 +1303,7 @@ def storage_summary():
         ) or {}
         photos_dir = os.path.join(work_dir, "photos") if work_dir else None
         total_bytes = _dir_size(work_dir) if work_dir else 0
+        global_limit_gb = storage_config.get("work_dir_max_size_GB")
 
         cameras = []
         for name, camera_cfg in (config.get("cameras") or {}).items():
@@ -1301,23 +1312,27 @@ def storage_summary():
             limit_gb = camera_cfg.get(
                 "work_dir_max_size_GB", storage_config.get("camera_max_size_GB")
             )
+            effective_limit_gb = _effective_camera_storage_limit_gb(
+                limit_gb, global_limit_gb
+            )
             cameras.append(
                 {
                     "name": name,
                     "bytes": size_bytes,
                     "display": _format_bytes(size_bytes),
                     "limit_GB": limit_gb,
+                    "effective_limit_GB": effective_limit_gb,
                     "media_dirs": media_dirs,
                 }
             )
-        cameras.sort(key=lambda item: item["bytes"], reverse=True)
+        cameras.sort(key=lambda item: str(item["name"]).casefold())
 
         return jsonify(
             {
                 "work_dir": work_dir,
                 "bytes": total_bytes,
                 "display": _format_bytes(total_bytes),
-                "limit_GB": storage_config.get("work_dir_max_size_GB"),
+                "limit_GB": global_limit_gb,
                 "enabled": bool(storage_config.get("enabled", False)),
                 "dry_run": bool(storage_config.get("dry_run", True)),
                 "cameras": cameras,

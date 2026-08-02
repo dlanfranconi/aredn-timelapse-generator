@@ -412,6 +412,17 @@ curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
   -d '{"camera":"Reolink-PTZ","profile":"launch","dry_run":true}'
 ```
 
+## Storage Management
+
+Storage limits are enforced in two passes when `global.storage_management.enabled` is true:
+
+- Per-camera cap: `camera.work_dir_max_size_GB`, or `global.storage_management.camera_max_size_GB` when the camera does not set its own value. This prunes only that camera's `work_dir/photos/<camera>` media folders.
+- Global cap: `global.storage_management.work_dir_max_size_GB`. This is the final ceiling for the whole `work_dir`, including all camera photos, timelapses, launch recordings, generated JSON, and other runtime files.
+
+When both a per-camera cap and a global cap are configured, Fenetre uses the lower value as that camera's effective cap. The global cap still runs after per-camera pruning, so the whole work directory is kept under the overall limit even when the sum of configured camera caps is larger than the global cap.
+
+The admin Storage panel reads `/api/storage/summary` and lists every configured camera, including new cameras with `0 B` of media. It also counts case-changed or slug-matched media folders so renamed cameras do not disappear from the storage view while old folders are being migrated.
+
 ## Rocket Launch Timer
 
 Rocket-launch automation is optional and disabled by default. When disabled, Fenetre behaves like a normal camera/timelapse server and the launch dashboard link is hidden on the public page.

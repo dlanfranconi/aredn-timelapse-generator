@@ -381,18 +381,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = data.enabled
             ? (data.dry_run ? 'enabled in dry run' : 'enabled')
             : 'disabled';
-        const cameraRows = (data.cameras || []).slice(0, 8).map(camera => {
-            const cameraLimit = camera.limit_GB ? `${camera.limit_GB} GB` : 'not set';
-            return `<li><span>${escapeHtml(camera.name)}</span><strong>${escapeHtml(camera.display)}</strong><small>limit ${escapeHtml(cameraLimit)}</small></li>`;
+        const cameras = data.cameras || [];
+        const cameraRows = cameras.map(camera => {
+            const effectiveLimit = camera.effective_limit_GB ?? camera.limit_GB;
+            const cameraLimit = effectiveLimit ? `${effectiveLimit} GB` : 'not set';
+            const configuredLimit = camera.limit_GB && camera.limit_GB !== effectiveLimit
+                ? `, configured ${camera.limit_GB} GB`
+                : '';
+            return `<li><span>${escapeHtml(camera.name)}</span><strong>${escapeHtml(camera.display)}</strong><small>limit ${escapeHtml(cameraLimit)}${escapeHtml(configuredLimit)}</small></li>`;
         }).join('');
         storageSummary.innerHTML = `
             <div class="storage-total">
                 <strong>${escapeHtml(data.display)}</strong>
                 <span>of ${escapeHtml(limit)} global limit</span>
                 <span class="storage-badge">${escapeHtml(status)}</span>
+                <span>${escapeHtml(cameras.length)} camera${cameras.length === 1 ? '' : 's'}</span>
             </div>
             <div class="storage-path">${escapeHtml(data.work_dir || 'No work_dir configured')}</div>
-            <ul class="storage-camera-list">${cameraRows}</ul>
+            <ul class="storage-camera-list">${cameraRows || '<li><span>No configured cameras</span></li>'}</ul>
         `;
     }
 
