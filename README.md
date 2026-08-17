@@ -29,6 +29,8 @@ The current deployment path is Docker or Portainer with persistent host-mounted 
 
 Expose `8888` as the viewer-facing site. Do not expose a separate static nginx server directly over `/srv/fenetre/data`; that bypasses private-site login and per-camera visibility controls.
 
+**Only forward `8888` beyond a trusted network.** `1984` (go2rtc), `8889` (admin), and `8554`/`8555` (go2rtc RTSP/WebRTC) have no tie to Fenetre's own login or per-camera visibility rules — go2rtc is a separate service with no authentication of its own, so anyone who can reach `1984` gets a live view of every camera published to it (cameras marked `visibility: hidden` are excluded, but `public` and `authenticated` cameras are not). Keep those four ports on a trusted LAN/mesh/VPN only; if you need remote access, put a reverse proxy or tunnel in front of `8888` alone.
+
 ## Quick Start With Docker
 
 Build locally:
@@ -146,16 +148,24 @@ If you lock yourself out, reset the default admin user from the container:
 docker exec -it fenetre fenetre-user --config /srv/fenetre/config.yaml reset-admin
 ```
 
+### Upgrading From An Older, Root-Only Image
+
+The container now runs as a fixed non-root user. On the first start after upgrading, the entrypoint takes ownership of `/srv/fenetre/data`, `/srv/fenetre/logs`, and `config.yaml` (a one-time recursive `chown`, tracked with a marker file so it doesn't repeat on later restarts) before dropping privileges — no action needed on your part, but expect that first restart to take longer than usual if you have a large existing photo/video archive, and watch `docker logs` if you want to see progress. If your `/srv/fenetre/data` or `/srv/fenetre/logs` mount is an NFS export with root-squash enabled, that `chown` will fail because the container's root can't actually change ownership on the server; disable root-squash for that export or pre-chown the paths to uid/gid `10000` from the host instead.
+
 ## Users And Roles
 
 - `superadmin`: full admin access, can edit users, set other users' passwords, assign PTZ cameras, and control every PTZ camera.
-- `admin`: admin dashboard access and camera control only for cameras assigned by a superadmin.
+- `admin`: admin dashboard access and camera control only for cameras assigned by a superadmin (via that user's PTZ camera list).
 - `operator`: public dashboard access plus assigned PTZ control; no admin dashboard.
 - `viewer`: view-only public dashboard access; no admin dashboard.
 
-Public-dashboard users can change their own password from the callsign/account menu in the top-right corner. Admin-dashboard users can also change their own password from the admin menu. Only a `superadmin` can set another user's password.
+An `admin` account is scoped by the assigned-cameras list for PTZ lock/unlock and for triggering (non-dry-run) image-profile actions; only `superadmin` can set or change a camera's `local_command`/`unavailable_command` (these run as an OS command on the server, so this is a real privilege boundary, not just a UI convenience), manage other users, or change the media storage location.
+
+Public-dashboard users can change their own password from the callsign/account menu in the top-right corner. Admin-dashboard users can also change their own password from the admin menu. Only a `superadmin` can set another user's password, and the last enabled `superadmin` account can't be deleted or demoted — promote another user first.
 
 Browsers are told not to save login and camera-secret fields by default. Some browsers may still offer password management, but the form hints are set to avoid automatic saving.
+
+Failed admin logins are throttled per username+source IP (10 attempts per 15 minutes) to slow down guessing against the default `admin`/`admin` bootstrap credentials; change that password immediately after first login. This is in-memory and resets on restart.
 
 ## Website Access And Camera Visibility
 
@@ -245,6 +255,8 @@ go2rtc starts automatically when:
 - `global.go2rtc.enabled: true`
 - at least one camera has `rtsp_url` or `ptz_rtsp_url`
 - `FENETRE_GO2RTC` is `auto`, `on`, `true`, or unset
+
+go2rtc has no authentication of its own and no tie to Fenetre's login/visibility rules. Cameras marked `visibility: hidden` are never published to it, but `public` and `authenticated` cameras are, so anyone who can reach port `1984` can view them directly — see [Ports](#ports) for why that port should stay off any network reachable by untrusted viewers.
 
 Recommended defaults:
 
@@ -422,6 +434,30 @@ Dry-run an image profile from the admin API:
 curl -u admin:password -X POST http://HOST:8889/api/camera/image_profile \
   -H 'Content-Type: application/json' \
   -d '{"camera":"Reolink-PTZ","profile":"launch","dry_run":true}'
+```
+
+## MQTT
+
+Optional per-camera online/offline state publishing, with Home Assistant MQTT discovery. Disabled by default.
+
+```yaml
+global:
+  mqtt:
+    enabled: true
+    host: mqtt.local
+    port: 8883
+    username: fenetre
+    password: CHANGE_ME
+    # Enable for a remote broker; without it, credentials and camera state
+    # travel in cleartext.
+    tls: true
+    # Optional: path to a custom CA bundle, e.g. for a self-signed broker.
+    # ca_certs: /srv/fenetre/mqtt-ca.pem
+    # Skips hostname verification against the broker's certificate; only
+    # use this for a self-signed cert on a network you trust.
+    tls_insecure: false
+    base_topic: fenetre/HOME
+    discovery_prefix: homeassistant
 ```
 
 ## Storage Management
@@ -733,3 +769,9 @@ http://HOST:1984/
 If direct camera RTSP playback is stable but go2rtc pauses or buffers after a few seconds, inspect `/tmp/fenetre-go2rtc.yaml`. Current Fenetre defaults should generate stream sources like `ffmpeg:rtsp://...#video=copy#timeout=30`. On lossy mesh paths, test `go2rtc_rtsp_transport: udp` for the affected camera; the generated source should become `ffmpeg:rtsp://...#video=copy#input=rtsp/udp#timeout=30`. If the low-resolution aiming stream is black, test `go2rtc_video_mode: h264` on that camera. If a source still starts with plain `rtsp://`, reload/save the camera settings so the go2rtc runtime is synced, or set `global.go2rtc.source_mode: ffmpeg`.
 
 If ONVIF PTZ fails while RTSP works, test the ONVIF host and port separately from the RTSP URL. A `405 Method Not Allowed` response to a plain browser or curl GET on `/onvif/device_service` can still mean the ONVIF service is present, because ONVIF expects SOAP POST requests.
+
+A `403 Cross-origin request rejected` from the admin API means the request's `Origin`/`Referer` header names a different host than the one being requested — the admin API rejects that as a CSRF-protection measure. This normally only happens from a script/browser context making requests to the wrong hostname; a request with neither header (e.g. plain `curl`) is unaffected.
+
+A `429 Too many failed login attempts` means 10+ failed Basic Auth attempts happened for that username+source IP within the last 15 minutes; wait for the window to age out. This resets if the container restarts.
+
+If camera captures or timelapse generation report permission errors right after upgrading to a non-root image, see [Upgrading From An Older, Root-Only Image](#upgrading-from-an-older-root-only-image).
