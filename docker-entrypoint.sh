@@ -46,6 +46,30 @@ if [[ "$(id -u)" == "0" ]]; then
     take_ownership_once "/srv/fenetre/data"
     take_ownership_once "/srv/fenetre/logs"
 
+    # If global.media_dir is configured (see README: Media Storage Location),
+    # work_dir/photos and work_dir/launches are symlinks into it -- a
+    # separate host mount the entrypoint otherwise has no way to know about.
+    # Peek at the raw config (best-effort; any parse error just skips this,
+    # the app's own config loader will surface real problems) so that mount
+    # gets the same one-time ownership treatment.
+    media_dir="$(python - "$config_path" <<'PYEOF'
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1]) as f:
+        raw = yaml.safe_load(f) or {}
+    cfg = raw.get("config") if isinstance(raw.get("config"), dict) else raw
+    global_cfg = (cfg or {}).get("global") or {}
+    print(global_cfg.get("media_dir") or "")
+except Exception:
+    print("")
+PYEOF
+    )"
+    if [[ -n "$media_dir" ]]; then
+        take_ownership_once "$media_dir"
+    fi
+
     # config.yaml is normally a single-file bind mount; its containing
     # directory is baked into the image as fenetre-owned already (see
     # Dockerfile), so writing timestamped backups next to it just works once
