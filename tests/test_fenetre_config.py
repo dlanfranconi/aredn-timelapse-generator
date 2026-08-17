@@ -99,6 +99,43 @@ class FenetreConfigTestCase(unittest.TestCase):
         self.assertEqual(cameras_conf["cam1"]["url"], "http://cam1")
         self.assertTrue(admin_server_conf["enabled"])
 
+    def test_mqtt_tls_options_are_validated(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "mqtt": {
+                    "enabled": True,
+                    "tls": True,
+                    "tls_insecure": True,
+                    "ca_certs": "/etc/ssl/custom-ca.pem",
+                },
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        self.assertTrue(global_conf["mqtt"]["tls"])
+        self.assertTrue(global_conf["mqtt"]["tls_insecure"])
+        self.assertEqual(global_conf["mqtt"]["ca_certs"], "/etc/ssl/custom-ca.pem")
+
+    def test_mqtt_tls_defaults_to_disabled(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "mqtt": {"enabled": True},
+            },
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        self.assertFalse(global_conf["mqtt"]["tls"])
+        self.assertFalse(global_conf["mqtt"]["tls_insecure"])
+        self.assertNotIn("ca_certs", global_conf["mqtt"])
+
     def test_config_diff_logs_redact_camera_credentials(self):
         test_data = {
             "global": {

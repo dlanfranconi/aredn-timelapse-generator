@@ -682,6 +682,9 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "password",
             "base_topic",
             "discovery_prefix",
+            "tls",
+            "tls_insecure",
+            "ca_certs",
         },
     )
     mqtt_out["enabled"] = _bool(
@@ -719,6 +722,19 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default="homeassistant",
     )
+    mqtt_out["tls"] = _bool(
+        mqtt_cfg.get("tls"), "global.mqtt.tls", errors, default=False
+    )
+    mqtt_out["tls_insecure"] = _bool(
+        mqtt_cfg.get("tls_insecure"),
+        "global.mqtt.tls_insecure",
+        errors,
+        default=False,
+    )
+    if mqtt_cfg.get("ca_certs") is not None:
+        mqtt_out["ca_certs"] = _str(
+            mqtt_cfg.get("ca_certs"), "global.mqtt.ca_certs", errors
+        )
     out["mqtt"] = mqtt_out
 
     profiler_cfg = _dict(cfg.get("profiler"), "global.profiler", errors)
