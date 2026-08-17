@@ -11,6 +11,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from io import BytesIO
+from urllib.parse import urlsplit
 
 import requests
 import yaml
@@ -291,12 +292,41 @@ def _current_user_can_set_user_password(target_username: str) -> bool:
     return user.get("username") == target_username
 
 
+_CSRF_PROTECTED_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def _same_origin_request() -> bool:
+    """Best-effort CSRF mitigation for the Basic-Auth-protected admin API.
+
+    Basic Auth credentials are cached by the browser per origin and are
+    attached automatically to cross-origin requests -- unlike cookie auth,
+    there's no SameSite attribute to lean on here, and this API has no
+    session/CSRF token. So for state-changing requests, reject any request
+    whose Origin or Referer header names a different host than the one being
+    requested: that's exactly what a cross-site form/fetch CSRF attempt
+    looks like. Requests with neither header (non-browser API clients, e.g.
+    curl-based automation) are allowed through unchanged, since they can't
+    be a browser-driven cross-site attack.
+    """
+    host = request.host
+    origin = request.headers.get("Origin")
+    if origin:
+        return urlsplit(origin).netloc == host
+    referer = request.headers.get("Referer")
+    if referer:
+        return urlsplit(referer).netloc == host
+    return True
+
+
 @app.before_request
 def require_admin_auth():
     if request.path == "/logout":
         return None
     if not _admin_auth_enabled():
         return None
+
+    if request.method in _CSRF_PROTECTED_METHODS and not _same_origin_request():
+        return jsonify({"error": "Cross-origin request rejected."}), 403
 
     auth = request.authorization
     if not auth:

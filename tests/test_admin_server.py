@@ -96,6 +96,47 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml, new_config_data_json)
 
+    def test_cross_origin_state_changing_request_is_rejected(self):
+        # Basic Auth credentials are cached by the browser per-origin and
+        # attach automatically to cross-origin requests, so a state-changing
+        # request whose Origin names a different host than the one being
+        # requested looks exactly like a cross-site CSRF attempt and must be
+        # rejected regardless of whether valid Basic Auth is also present.
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        flask_app.config["FENETRE_ADMIN_USERNAME"] = "admin"
+        flask_app.config["FENETRE_ADMIN_PASSWORD"] = "adminpw"
+        token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps({"global": {"setting": "value"}, "cameras": {}}),
+            content_type="application/json",
+            headers={
+                "Authorization": f"Basic {token}",
+                "Origin": "https://evil.example",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_same_origin_state_changing_request_is_allowed(self):
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        flask_app.config["FENETRE_ADMIN_USERNAME"] = "admin"
+        flask_app.config["FENETRE_ADMIN_PASSWORD"] = "adminpw"
+        token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps({"global": {"setting": "value"}, "cameras": {}}),
+            content_type="application/json",
+            headers={
+                "Authorization": f"Basic {token}",
+                "Origin": "http://localhost",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_update_config_preserves_dotted_go2rtc_base_url_hosts(self):
         new_config_data_json = {
             "global": {
