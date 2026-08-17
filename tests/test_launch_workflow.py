@@ -8,6 +8,7 @@ from fenetre.launch_workflow import (
     due_launch_actions,
     execute_launch_action,
     list_past_launch_recordings,
+    normalize_launch_event,
     preview_launch_workflow,
     run_due_launch_actions,
 )
@@ -459,3 +460,48 @@ class LaunchWorkflowTestCase(unittest.TestCase):
         self.assertEqual(result["downloads"][0]["download_path"], download_path)
         self.assertEqual(mock_request.call_args_list[0].args[0], "POST")
         self.assertEqual(mock_request.call_args_list[1].args[0], "GET")
+
+
+class NormalizeLaunchEventSecurityTests(unittest.TestCase):
+    """Regression tests: event["id"] is templated into hook download_path/
+    command values and used directly as a filesystem directory name, and
+    comes from an external, potentially spoofable schedule source. It must
+    always be slugified so it can't be used for path traversal."""
+
+    def test_malicious_launch_id_is_slugified(self):
+        event = normalize_launch_event(
+            {
+                "id": "../../../../etc/cron.d/pwn",
+                "name": "Test Launch",
+                "net": "2026-07-21T12:00:00Z",
+            }
+        )
+        self.assertIsNotNone(event)
+        self.assertNotIn("..", event["id"])
+        self.assertNotIn("/", event["id"])
+
+    def test_malicious_launch_slug_is_slugified(self):
+        event = normalize_launch_event(
+            {
+                "slug": "../../etc/passwd",
+                "name": "Test Launch",
+                "net": "2026-07-21T12:00:00Z",
+            }
+        )
+        self.assertIsNotNone(event)
+        self.assertNotIn("..", event["id"])
+        self.assertNotIn("/", event["id"])
+
+    def test_normal_uuid_launch_id_is_preserved(self):
+        event = normalize_launch_event(
+            {
+                "id": "5c4c1ee1-e5e9-4c1a-b7b2-abcdef123456",
+                "name": "Test Launch",
+                "net": "2026-07-21T12:00:00Z",
+            }
+        )
+        self.assertEqual(event["id"], "5c4c1ee1-e5e9-4c1a-b7b2-abcdef123456")
+
+
+if __name__ == "__main__":
+    unittest.main()

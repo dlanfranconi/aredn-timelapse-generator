@@ -100,9 +100,14 @@ def _go2rtc_player_mode(config: Dict[str, Any]) -> str:
 
 
 def _go2rtc_preview_mode(config: Dict[str, Any]) -> str:
-    return str(
-        config.get("preview_mode") or config.get("player_mode") or _DEFAULT_PREVIEW_MODE
-    ).strip() or _DEFAULT_PREVIEW_MODE
+    return (
+        str(
+            config.get("preview_mode")
+            or config.get("player_mode")
+            or _DEFAULT_PREVIEW_MODE
+        ).strip()
+        or _DEFAULT_PREVIEW_MODE
+    )
 
 
 def _stream_url_from_template(
@@ -359,6 +364,12 @@ def build_go2rtc_runtime_config(
     if not config.get("enabled"):
         return None
 
+    # Local import: cameras_metadata imports build_go2rtc_metadata from this
+    # module at module load time, so a top-level import here would be
+    # circular. camera_visibility is resolved lazily instead, by which point
+    # both modules are fully initialized.
+    from fenetre.cameras_metadata import camera_visibility
+
     cameras = raw_config.get("cameras") or {}
     streams = {}
     preload = {}
@@ -368,6 +379,13 @@ def build_go2rtc_runtime_config(
             if not isinstance(camera_config, dict):
                 continue
             if camera_config.get("go2rtc_enabled") is False:
+                continue
+            if camera_visibility(camera_config) == "hidden":
+                # "hidden" cameras are documented as fully removed from the
+                # site (config/admin only); go2rtc has no tie to Fenetre's
+                # own auth/visibility rules, so anyone who can reach the
+                # go2rtc port would otherwise get a live feed of a camera
+                # the rest of the app treats as not existing.
                 continue
             alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
                 "rtsp_url"

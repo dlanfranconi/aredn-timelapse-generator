@@ -182,7 +182,14 @@ def normalize_launch_event(
     if isinstance(status, dict):
         status = status.get("name") or status.get("abbrev")
     name = raw.get("name") or _nested(raw, "mission", "name") or f"Launch {index + 1}"
-    event_id = str(raw.get("id") or raw.get("slug") or _slug(name)).strip()
+    # event_id is templated into hook download_path/command values (see
+    # _action_context) and used directly as a filesystem directory name
+    # (list_past_launch_recordings, _default_launch_download_path). It comes
+    # from an external, potentially spoofable schedule_url/schedule_file
+    # source, so it's slugified unconditionally -- not just on the "name"
+    # fallback -- to rule out path traversal via a crafted "id"/"slug" value
+    # like "../../../etc/cron.d/x".
+    event_id = _slug(str(raw.get("id") or raw.get("slug") or name).strip())
     return {
         "id": event_id,
         "name": str(name),

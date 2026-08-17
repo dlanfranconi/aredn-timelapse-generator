@@ -968,6 +968,36 @@ class FenetreConfigTestCase(unittest.TestCase):
         )
         self.assertNotIn("preload", runtime_config)
 
+    def test_go2rtc_runtime_config_excludes_hidden_cameras(self):
+        # "hidden" cameras are documented as fully removed from the site;
+        # go2rtc has no tie to Fenetre's own auth/visibility rules, so a
+        # hidden camera's RTSP feed must never be published as a go2rtc
+        # stream, or anyone who can reach the go2rtc port gets a live view of
+        # a camera the rest of the app treats as not existing.
+        runtime_config = build_go2rtc_runtime_config(
+            {
+                "global": {"go2rtc": {"enabled": True}},
+                "cameras": {
+                    "Public Camera": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/public",
+                        "visibility": "public",
+                    },
+                    "Hidden Camera": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/hidden",
+                        "visibility": "hidden",
+                    },
+                    "Legacy Hidden Camera": {
+                        "rtsp_url": "rtsp://admin:secret@example.test/legacy",
+                        "hidden": True,
+                    },
+                },
+            }
+        )
+
+        self.assertIn("fenetre_Public_Camera", runtime_config["streams"])
+        self.assertNotIn("fenetre_Hidden_Camera", runtime_config["streams"])
+        self.assertNotIn("fenetre_Legacy_Hidden_Camera", runtime_config["streams"])
+
     def test_go2rtc_runtime_config_preloads_low_res_ptz_stream_by_default(self):
         runtime_config = build_go2rtc_runtime_config(
             {
