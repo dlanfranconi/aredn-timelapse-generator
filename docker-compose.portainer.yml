@@ -38,6 +38,12 @@ services:
       # Persistent logs.
       - /srv/fenetre/logs:/srv/fenetre/logs
 
+      # Optional: mount a separate volume (e.g. a NAS share) here and set
+      # global.media_dir to /srv/fenetre/media from the admin Storage panel to
+      # keep photos/timelapses/launch recordings off the local disk while
+      # config.yaml, logs, and app state stay in /srv/fenetre/data above.
+      # - /mnt/nas/fenetre-media:/srv/fenetre/media
+
     # Optional: enable this only if you want Intel VAAPI/QSV hardware encoding
     # and the host has /dev/dri available.
     # devices:

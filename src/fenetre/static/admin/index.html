@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fenetre Configuration</title>
-    <link rel="stylesheet" href="/static/admin/style.css?v=20260731-launch-recording-tests">
+    <link rel="stylesheet" href="/static/admin/style.css?v=20260816-media-storage-location">
 </head>
 <body>
     <div class="container">
@@ -46,6 +46,24 @@
                 <button id="refreshStorageBtn" type="button">Refresh</button>
             </div>
             <div id="storageSummary" class="storage-summary-body">Loading storage usage...</div>
+
+            <div class="media-location">
+                <label for="mediaDirInput">Media storage location</label>
+                <input id="mediaDirInput" type="text" autocomplete="off" placeholder="/srv/fenetre/media (leave blank to keep photos/launches inside work_dir)">
+                <p class="field-hint">
+                    Stores all camera photos, timelapses, and launch recordings under this
+                    directory instead of inside <code>work_dir</code> &mdash; useful for pointing
+                    media at a NAS or other external mount while keeping config.yaml, logs, and
+                    app state local. Mount the extra volume in your Docker/Portainer stack first
+                    (see README: "Media Storage Location"), then set the path here. Existing files
+                    are moved into the new location automatically.
+                </p>
+                <div class="media-location-actions">
+                    <button id="previewMediaDirBtn" type="button">Preview changes</button>
+                    <button id="relocateMediaDirBtn" type="button" disabled>Relocate media storage</button>
+                </div>
+                <div id="mediaLocationStatus" class="media-location-status"></div>
+            </div>
         </section>
 
         <section class="quick-settings camera-editor">
@@ -447,6 +465,6 @@
         </div>
     </div>
 
-    <script src="/static/admin/app.js?v=20260731-reolink-manual-toggle"></script>
+    <script src="/static/admin/app.js?v=20260816-media-storage-location"></script>
 </body>
 </html>

@@ -33,6 +33,7 @@ from fenetre.go2rtc import build_go2rtc_runtime_config, go2rtc_browser_port
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.image_profiles import ImageProfileError, apply_image_profile
 from fenetre.log_sanitizer import sanitize_text_for_logs
+from fenetre.media_storage import describe_media_location, relocate_media_storage
 from fenetre.launch_workflow import (
     preview_launch_workflow,
     run_due_launch_actions,
@@ -193,6 +194,15 @@ def _current_user_can_manage_users(config: dict) -> bool:
     # superadmin until one exists, then reserve user permission edits for
     # superadmins.
     return role == "admin" and not _has_superadmin(config.get("users") or {})
+
+
+def _current_user_can_manage_storage_location() -> bool:
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    return effective_user_role(user) == "superadmin"
 
 
 def _current_user_can_set_user_password(target_username: str) -> bool:
@@ -358,9 +368,7 @@ def _fenetre_reload_signal_result() -> tuple[dict, int]:
         return {"message": f"Reload signal sent to process {pid}.", "pid": pid}, 200
     except ProcessLookupError:
         return (
-            {
-                "error": f"Process with PID read from {fenetre_pid_file_path} not found."
-            },
+            {"error": f"Process with PID read from {fenetre_pid_file_path} not found."},
             500,
         )
     except ValueError:
@@ -1215,7 +1223,9 @@ def _dir_size(path: str) -> int:
     total = 0
     if not path or not os.path.exists(path):
         return 0
-    for dirpath, _, filenames in os.walk(path):
+    # followlinks=True so a relocated media_dir (photos/launches symlinked out of
+    # work_dir, see media_storage.py) is still counted in storage totals.
+    for dirpath, _, filenames in os.walk(path, followlinks=True):
         for filename in filenames:
             full_path = os.path.join(dirpath, filename)
             if not os.path.islink(full_path):
@@ -1340,6 +1350,75 @@ def storage_summary():
         )
     except Exception as e:
         return jsonify({"error": f"Failed to calculate storage summary: {str(e)}"}), 500
+
+
+@app.route("/api/storage/media_location", methods=["GET"])
+def get_media_location():
+    try:
+        _, config = _load_effective_config_with_raw()
+        global_config = config.get("global") or {}
+        status = describe_media_location(global_config)
+        status["can_manage"] = _current_user_can_manage_storage_location()
+        return jsonify(status)
+    except Exception as e:
+        return (
+            jsonify({"error": f"Failed to read media storage location: {str(e)}"}),
+            500,
+        )
+
+
+@app.route("/api/storage/media_location", methods=["POST"])
+def set_media_location():
+    try:
+        if not _current_user_can_manage_storage_location():
+            return (
+                jsonify({"error": "Only superadmins can relocate media storage."}),
+                403,
+            )
+        payload = request.get_json(force=True) or {}
+        media_dir = (payload.get("media_dir") or "").strip()
+        dry_run = bool(payload.get("dry_run", False))
+        if not media_dir:
+            return jsonify({"error": "media_dir is required."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        global_config = config.get("global") or {}
+        if not isinstance(global_config, dict) or not global_config.get("work_dir"):
+            return jsonify({"error": "global.work_dir is not configured."}), 400
+
+        report = relocate_media_storage(global_config, media_dir, dry_run=dry_run)
+        if dry_run or not report.get("ok"):
+            return jsonify(report), 200 if report.get("ok") else 500
+
+        config.setdefault("global", {})
+        config["global"]["media_dir"] = report["media_dir"]
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        runtime_reload = _reload_after_config_write()
+        message = "Media storage relocated and global.media_dir saved."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "relocation": report,
+                    "runtime_reload": runtime_reload,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to relocate media storage: {str(e)}"}), 500
 
 
 @app.route("/api/users", methods=["GET"])

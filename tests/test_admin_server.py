@@ -1244,6 +1244,86 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["limit_GB"], 15)
         self.assertEqual(camera["effective_limit_GB"], 10)
 
+    def test_media_location_preview_and_relocate(self):
+        work_dir = tempfile.mkdtemp()
+        photo_path = os.path.join(work_dir, "photos", "cam1", "frame.jpg")
+        os.makedirs(os.path.dirname(photo_path))
+        with open(photo_path, "wb") as f:
+            f.write(b"x" * 100)
+        media_dir = tempfile.mkdtemp()
+        self.test_config_data["global"] = {"work_dir": work_dir}
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+
+        status = self.app.get("/api/storage/media_location")
+        self.assertEqual(status.status_code, 200)
+        self.assertIsNone(status.json["media_dir"])
+        self.assertFalse(status.json["dirs"]["photos"]["is_symlink"])
+
+        preview = self.app.post(
+            "/api/storage/media_location",
+            data=json.dumps({"media_dir": media_dir, "dry_run": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.json["ok"])
+        self.assertTrue(os.path.isfile(photo_path))
+        self.assertFalse(os.path.islink(os.path.join(work_dir, "photos")))
+
+        relocate = self.app.post(
+            "/api/storage/media_location",
+            data=json.dumps({"media_dir": media_dir}),
+            content_type="application/json",
+        )
+        self.assertEqual(relocate.status_code, 200)
+        self.assertTrue(relocate.json["relocation"]["ok"])
+        self.assertTrue(os.path.islink(os.path.join(work_dir, "photos")))
+        self.assertTrue(
+            os.path.isfile(os.path.join(media_dir, "photos", "cam1", "frame.jpg"))
+        )
+
+        with open(self.temp_config_file.name) as f:
+            saved = yaml.safe_load(f)
+        self.assertEqual(saved["global"]["media_dir"], media_dir)
+
+    def test_media_location_requires_superadmin_when_auth_enabled(self):
+        work_dir = tempfile.mkdtemp()
+        self.test_config_data["global"] = {"work_dir": work_dir}
+        self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        media_dir = tempfile.mkdtemp()
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        denied = self.app.post(
+            "/api/storage/media_location",
+            data=json.dumps({"media_dir": media_dir, "dry_run": True}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        root_token = base64.b64encode(b"root:rootpw").decode("ascii")
+        allowed = self.app.post(
+            "/api/storage/media_location",
+            data=json.dumps({"media_dir": media_dir, "dry_run": True}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {root_token}"},
+        )
+        self.assertEqual(allowed.status_code, 200)
+
     def test_user_management_crud(self):
         self.test_config_data["cameras"]["cam1"]["ptz"] = {"enabled": True}
         self.test_config_data["cameras"]["fixed-cam"] = {"url": "http://fixed"}

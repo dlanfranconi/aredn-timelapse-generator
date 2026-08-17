@@ -64,6 +64,15 @@ docker run --rm \
   fenetre:local
 ```
 
+To keep photos/videos on a separate volume (for example a NAS mount) while
+config, logs, and app state stay local, add one more mount and set the media
+location from the admin Storage panel; see [Media Storage
+Location](#media-storage-location) below:
+
+```bash
+  -v /mnt/nas/fenetre-media:/srv/fenetre/media \
+```
+
 Open:
 
 - Camera dashboard: `http://HOST:8888/`
@@ -106,6 +115,9 @@ services:
       - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
       - /srv/fenetre/data:/srv/fenetre/data
       - /srv/fenetre/logs:/srv/fenetre/logs
+      # Optional: separate volume for photos/videos, e.g. a NAS mount. See
+      # Media Storage Location below.
+      # - /mnt/nas/fenetre-media:/srv/fenetre/media
 
     # Optional AMD64 Intel VAAPI/QuickSync acceleration.
     # devices:
@@ -422,6 +434,25 @@ Storage limits are enforced in two passes when `global.storage_management.enable
 When both a per-camera cap and a global cap are configured, Fenetre uses the lower value as that camera's effective cap. The global cap still runs after per-camera pruning, so the whole work directory is kept under the overall limit even when the sum of configured camera caps is larger than the global cap.
 
 The admin Storage panel reads `/api/storage/summary` and lists every configured camera, including new cameras with `0 B` of media. It also counts case-changed or slug-matched media folders so renamed cameras do not disappear from the storage view while old folders are being migrated.
+
+## Media Storage Location
+
+By default photos, timelapses, and launch recordings live under `work_dir` (`/srv/fenetre/data/photos` and `/srv/fenetre/data/launches`) alongside config-adjacent state such as `cameras.json`. To keep that fast-growing media on separate storage (a NAS share, USB drive, or any other mount) while `config.yaml`, logs, and app state stay local:
+
+1. Mount an extra volume into the container, for example:
+
+   ```yaml
+   volumes:
+     - /mnt/nas/fenetre-media:/srv/fenetre/media
+   ```
+
+2. In the admin dashboard's **Storage** panel, enter the in-container path (`/srv/fenetre/media`) under **Media storage location**.
+3. Click **Preview changes** to see what would move without touching anything.
+4. Click **Relocate media storage** to move existing photos/timelapses/launch recordings into that path and save `global.media_dir` to `config.yaml`.
+
+Under the hood, Fenetre keeps `work_dir/photos` and `work_dir/launches` as the paths every camera and timelapse job uses; relocating just moves the real folders under `media_dir` and replaces `work_dir/photos`/`work_dir/launches` with symlinks pointing there, so nothing else needs to change. Only a `superadmin` can change the media storage location, since it moves files on disk. Re-running relocation with a different path migrates data again to the new location; leaving the field blank keeps media inside `work_dir` as before.
+
+You can also set `global.media_dir` directly in `config.yaml`, but the actual move only happens through the admin Storage panel (or by moving the files yourself and symlinking `work_dir/photos`/`work_dir/launches` to `media_dir/photos`/`media_dir/launches` before restarting).
 
 ## Rocket Launch Timer
 

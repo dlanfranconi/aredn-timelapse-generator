@@ -116,6 +116,7 @@ from fenetre.cameras_metadata import (
     write_cameras_metadata,
 )
 from fenetre.mqtt import MQTTManager
+from fenetre.media_storage import ensure_media_storage_layout, RELOCATE_LOCK
 from fenetre import profiler
 
 mimetypes.add_type("application/vnd.apple.mpegurl", ".m3u8")
@@ -976,19 +977,22 @@ def snap(camera_name, camera_config: Dict):
     while not exit_event.is_set():
         if not current_config_matches_snap_thread():
             return
-        # Immediately save the previous pic to disk.
-        write_pic_to_disk(
-            previous_pic,
-            previous_pic_fullpath,
-            camera_config.get("mozjpeg_optimize", False),
-            previous_exif_bytes,
-        )
+        # Immediately save the previous pic to disk. Held under RELOCATE_LOCK so
+        # an admin-triggered media_dir relocation cannot swap the photos/launches
+        # symlink out from under an in-progress write.
+        with RELOCATE_LOCK:
+            write_pic_to_disk(
+                previous_pic,
+                previous_pic_fullpath,
+                camera_config.get("mozjpeg_optimize", False),
+                previous_exif_bytes,
+            )
 
-        # Read EXIF data that will be used for metrics
-        from .postprocess import get_exif_dict
+            # Read EXIF data that will be used for metrics
+            from .postprocess import get_exif_dict
 
-        with profiler.timed(f"camera.{camera_name}.exif_read"):
-            previous_exif = get_exif_dict(previous_pic_fullpath)
+            with profiler.timed(f"camera.{camera_name}.exif_read"):
+                previous_exif = get_exif_dict(previous_pic_fullpath)
 
         # Gather and publish metrics after we have succesfully written the picture on disk
         # TODO: We should only do that if the admin server is enabled.
@@ -1009,24 +1013,31 @@ def snap(camera_name, camera_config: Dict):
             mqtt_manager.publish_camera_state(camera_name, True)
 
         # Now we update the links for the frontend/UI
-        update_latest_link(previous_pic_fullpath)
-        metadata = {
-            "last_picture_url": os.path.relpath(
-                previous_pic_fullpath,
-                os.path.join(previous_pic_fullpath, os.path.pardir, os.path.pardir),
-            ),
-            "iso": previous_exif.get("iso"),
-            "shutter_speed": format_shutter_speed(previous_exif.get("exposure_time")),
-        }
-        if picamera2_capture is not None:
-            exposure_state = picamera2_capture.get_exposure_control_state()
-            if exposure_state.get("modes"):
-                metadata["picamera2_exposure_control"] = exposure_state
-        metadata_path = os.path.join(previous_pic_dir, os.path.pardir, "metadata.json")
-        with profiler.timed(f"camera.{camera_name}.metadata_write"):
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=4)
-                logger.debug(f"{camera_name}: Updated metadata file {metadata_path}")
+        with RELOCATE_LOCK:
+            update_latest_link(previous_pic_fullpath)
+            metadata = {
+                "last_picture_url": os.path.relpath(
+                    previous_pic_fullpath,
+                    os.path.join(previous_pic_fullpath, os.path.pardir, os.path.pardir),
+                ),
+                "iso": previous_exif.get("iso"),
+                "shutter_speed": format_shutter_speed(
+                    previous_exif.get("exposure_time")
+                ),
+            }
+            if picamera2_capture is not None:
+                exposure_state = picamera2_capture.get_exposure_control_state()
+                if exposure_state.get("modes"):
+                    metadata["picamera2_exposure_control"] = exposure_state
+            metadata_path = os.path.join(
+                previous_pic_dir, os.path.pardir, "metadata.json"
+            )
+            with profiler.timed(f"camera.{camera_name}.metadata_write"):
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata, f, indent=4)
+                    logger.debug(
+                        f"{camera_name}: Updated metadata file {metadata_path}"
+                    )
 
         current_mode = get_day_night_from_exif(
             previous_exif, camera_config, previous_mode, previous_pic_fullpath
@@ -2557,14 +2568,11 @@ def create_and_start_and_watch_thread(
             if camera_name_for_management
             else None
         )
-        if (
-            camera_name_for_management
-            and (
-                current_camera_config is None
-                or (
-                    managed_camera_config is not None
-                    and current_camera_config != managed_camera_config
-                )
+        if camera_name_for_management and (
+            current_camera_config is None
+            or (
+                managed_camera_config is not None
+                and current_camera_config != managed_camera_config
             )
         ):
             logger.info(
@@ -2919,6 +2927,7 @@ def load_and_apply_configuration(initial_load=False, config_file_override=None):
     # Update cameras_config and manage camera threads
     cameras_config = new_cameras_config
     if global_config.get("work_dir"):
+        ensure_media_storage_layout(global_config)
         update_cameras_metadata(cameras_config, global_config["work_dir"])
         copy_public_html_files(global_config["work_dir"], global_config)
     else:
@@ -2951,11 +2960,7 @@ def manage_camera_threads():
             current_camera_config and current_camera_config.get("disabled", False)
         )
         if cam_name not in current_camera_names or disabled or config_changed:
-            reason = (
-                "changed"
-                if config_changed
-                else "removed or disabled"
-            )
+            reason = "changed" if config_changed else "removed or disabled"
             logger.info(f"Camera {cam_name} {reason}. Stopping its threads.")
             request_camera_capture(cam_name, "config reload")
             if (
@@ -3531,7 +3536,9 @@ def daylight_loop():
 
 def get_dir_size(path="."):
     total_size = 0
-    for dirpath, dirnames, filenames in os.walk(path):
+    # followlinks=True so a relocated media_dir (photos/launches symlinked out of
+    # work_dir, see media_storage.py) is still counted towards work_dir's size.
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=True):
         for f in filenames:
             fp = os.path.join(dirpath, f)
             # skip if it is symbolic link

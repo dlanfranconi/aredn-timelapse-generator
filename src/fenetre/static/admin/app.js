@@ -92,6 +92,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveCameraOrderBtn = document.getElementById('saveCameraOrderBtn');
     const refreshStorageBtn = document.getElementById('refreshStorageBtn');
     const storageSummary = document.getElementById('storageSummary');
+    const mediaDirInput = document.getElementById('mediaDirInput');
+    const previewMediaDirBtn = document.getElementById('previewMediaDirBtn');
+    const relocateMediaDirBtn = document.getElementById('relocateMediaDirBtn');
+    const mediaLocationStatus = document.getElementById('mediaLocationStatus');
+    let canManageMediaLocation = false;
+    let mediaLocationBusy = false;
     const launchWorkflowEnabled = document.getElementById('launchWorkflowEnabled');
     const launchWorkflowDetails = document.getElementById('launchWorkflowDetails');
     const launchWorkflowDryRun = document.getElementById('launchWorkflowDryRun');
@@ -294,6 +300,8 @@ document.addEventListener('DOMContentLoaded', () => {
     closeUserModalBtn.addEventListener('click', () => hideModal(userModal));
     closePasswordModalBtn.addEventListener('click', () => hideModal(passwordModal));
     refreshStorageBtn.addEventListener('click', loadStorageSummary);
+    previewMediaDirBtn.addEventListener('click', () => submitMediaLocation(true));
+    relocateMediaDirBtn.addEventListener('click', () => submitMediaLocation(false));
     previewLaunchWorkflowBtn.addEventListener('click', previewLaunchWorkflow);
     saveLaunchWorkflowBtn.addEventListener('click', saveLaunchWorkflow);
     launchWorkflowEnabled.addEventListener('change', syncLaunchWorkflowEnabledState);
@@ -496,6 +504,101 @@ document.addEventListener('DOMContentLoaded', () => {
             renderStorageSummary(data);
         } catch (error) {
             storageSummary.textContent = `Storage summary unavailable: ${error.message}`;
+        }
+    }
+
+    function describeMediaAction(action) {
+        const labels = {
+            already_linked: 'already linked, nothing to do',
+            moved: action.dry_run ? 'would move existing files here' : 'moved existing files here',
+            relinked: action.dry_run ? 'would re-link to the new location' : 're-linked to the new location',
+            created: action.dry_run ? 'would create an empty directory here' : 'created an empty directory here',
+            error: `failed: ${action.error || 'unknown error'}`
+        };
+        const label = labels[action.status] || action.status || 'unknown';
+        return `${action.subdir}: ${label} (${action.source} -> ${action.target})`;
+    }
+
+    function renderMediaLocationResult(payload, dryRun) {
+        mediaLocationStatus.classList.remove('error', 'success');
+        if (payload.error) {
+            mediaLocationStatus.classList.add('error');
+            mediaLocationStatus.textContent = payload.error;
+            return;
+        }
+        const relocation = payload.relocation || payload;
+        const lines = (relocation.actions || []).map(describeMediaAction);
+        mediaLocationStatus.classList.add(relocation.ok === false ? 'error' : 'success');
+        const heading = dryRun
+            ? 'Preview only, nothing was moved yet:'
+            : (payload.message || 'Media storage relocated.');
+        mediaLocationStatus.textContent = [heading, ...lines].join('\n');
+    }
+
+    async function loadMediaLocation() {
+        try {
+            const response = await fetch('/api/storage/media_location');
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }
+            canManageMediaLocation = data.can_manage !== false;
+            mediaDirInput.value = data.media_dir || '';
+            mediaDirInput.disabled = !canManageMediaLocation;
+            previewMediaDirBtn.disabled = !canManageMediaLocation;
+            relocateMediaDirBtn.disabled = !canManageMediaLocation;
+            mediaLocationStatus.classList.remove('error', 'success');
+            mediaLocationStatus.textContent = canManageMediaLocation
+                ? ''
+                : 'Only superadmins can change the media storage location.';
+        } catch (error) {
+            mediaLocationStatus.classList.add('error');
+            mediaLocationStatus.textContent = `Media storage location unavailable: ${error.message}`;
+        }
+    }
+
+    async function submitMediaLocation(dryRun) {
+        if (mediaLocationBusy || !canManageMediaLocation) {
+            return;
+        }
+        const mediaDir = mediaDirInput.value.trim();
+        if (!mediaDir) {
+            mediaLocationStatus.classList.add('error');
+            mediaLocationStatus.textContent = 'Enter a directory path first (e.g. /srv/fenetre/media).';
+            return;
+        }
+        if (!dryRun && !window.confirm(
+            `This moves existing photos and launch recordings into ${mediaDir}. Make sure that ` +
+            'path is mounted into the container and has enough space. Continue?'
+        )) {
+            return;
+        }
+        mediaLocationBusy = true;
+        previewMediaDirBtn.disabled = true;
+        relocateMediaDirBtn.disabled = true;
+        mediaLocationStatus.classList.remove('error', 'success');
+        mediaLocationStatus.textContent = dryRun ? 'Checking planned changes...' : 'Relocating media storage...';
+        try {
+            const response = await fetch('/api/storage/media_location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ media_dir: mediaDir, dry_run: dryRun })
+            });
+            const data = await response.json();
+            if (!response.ok && !data.relocation && !data.actions) {
+                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+            }
+            renderMediaLocationResult(data, dryRun);
+            if (!dryRun && response.ok) {
+                await loadStorageSummary();
+            }
+        } catch (error) {
+            mediaLocationStatus.classList.add('error');
+            mediaLocationStatus.textContent = `Media storage relocation failed: ${error.message}`;
+        } finally {
+            mediaLocationBusy = false;
+            previewMediaDirBtn.disabled = !canManageMediaLocation;
+            relocateMediaDirBtn.disabled = !canManageMediaLocation;
         }
     }
 
@@ -3115,6 +3218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Automatically load the configuration when the page loads
     fetchAndDisplayConfig();
     loadStorageSummary();
+    loadMediaLocation();
 
     function handleAddCamera() {
         resetCameraForm();

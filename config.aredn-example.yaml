@@ -4,6 +4,11 @@
 
 global:
   work_dir: /srv/fenetre/data
+  # Optional: store photos/timelapses/launch recordings on a separate mounted
+  # volume (e.g. a NAS) instead of inside work_dir. Set this from the admin
+  # Storage panel so existing files get migrated automatically; see README
+  # "Media Storage Location".
+  # media_dir: /srv/fenetre/media
   log_dir: /srv/fenetre/logs
   timezone: America/Los_Angeles
   logging_level: INFO

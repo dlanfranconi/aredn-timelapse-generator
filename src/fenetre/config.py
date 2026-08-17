@@ -186,6 +186,7 @@ def _warn_unknown_keys(section_name: str, got: Dict, allowed_keys: set):
 def _validate_global(cfg: Dict, errors) -> Dict:
     allowed = {
         "work_dir",
+        "media_dir",
         "log_dir",
         "logging_level",
         "logging_levels",
@@ -211,6 +212,12 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors.append("global.work_dir: required string is missing")
     else:
         out["work_dir"] = os.path.abspath(work_dir)
+
+    media_dir = cfg.get("media_dir")
+    if media_dir is not None:
+        media_dir = _str(media_dir, "global.media_dir", errors)
+        if media_dir:
+            out["media_dir"] = os.path.abspath(media_dir)
 
     log_dir = cfg.get("log_dir")
     if log_dir is not None:

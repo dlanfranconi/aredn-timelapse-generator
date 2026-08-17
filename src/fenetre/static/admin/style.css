@@ -377,6 +377,57 @@ h1 {
     color: #666;
 }
 
+.field-hint {
+    color: #555;
+    font-size: 0.85rem;
+    font-weight: normal;
+    line-height: 1.4;
+    margin: 6px 0 0;
+    max-width: 640px;
+}
+
+.media-location {
+    border-top: 1px solid #ddd;
+    margin-top: 14px;
+    padding-top: 14px;
+}
+
+.media-location label {
+    display: block;
+    margin-bottom: 6px;
+}
+
+.media-location input {
+    width: 100%;
+    max-width: 480px;
+    box-sizing: border-box;
+}
+
+.media-location-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.media-location-status {
+    color: #374151;
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.media-location-status.error {
+    color: #b00020;
+}
+
+.media-location-status.success {
+    color: #0a7d32;
+}
+
 .quick-settings button,
 .reveal-field-btn {
     padding: 8px 10px;
