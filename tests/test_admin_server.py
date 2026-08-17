@@ -20,7 +20,11 @@ from fenetre.auth import (
     hash_password,
     reset_admin_user,
 )
-from fenetre.admin_server import _sync_go2rtc_runtime, app as flask_app
+from fenetre.admin_server import (
+    _sync_go2rtc_runtime,
+    app as flask_app,
+    reset_login_throttle_state,
+)
 from fenetre.ptz import set_lock
 
 
@@ -29,6 +33,7 @@ class ConfigServerTestCase(unittest.TestCase):
     def setUp(self):
         self.app = flask_app.test_client()
         self.app.testing = True
+        reset_login_throttle_state()
 
         # Create a temporary config file
         self.temp_config_file = tempfile.NamedTemporaryFile(
@@ -1855,6 +1860,30 @@ class ConfigServerTestCase(unittest.TestCase):
         good_token = base64.b64encode(b"admin:admin").decode("ascii")
         good = self.app.get("/config", headers={"Authorization": f"Basic {good_token}"})
         self.assertEqual(good.status_code, 200)
+
+    def test_admin_login_is_throttled_after_repeated_failures(self):
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        bad_token = base64.b64encode(b"admin:wrong").decode("ascii")
+
+        for _ in range(10):
+            response = self.app.get(
+                "/config", headers={"Authorization": f"Basic {bad_token}"}
+            )
+            self.assertEqual(response.status_code, 401)
+
+        throttled = self.app.get(
+            "/config", headers={"Authorization": f"Basic {bad_token}"}
+        )
+        self.assertEqual(throttled.status_code, 429)
+
+        # The correct password is also throttled once the limit is hit for
+        # this username -- the point is to slow down a guesser, not to only
+        # block guesses that happen to keep missing.
+        good_token = base64.b64encode(b"admin:admin").decode("ascii")
+        still_throttled = self.app.get(
+            "/config", headers={"Authorization": f"Basic {good_token}"}
+        )
+        self.assertEqual(still_throttled.status_code, 429)
 
     def test_admin_auth_uses_changed_config_password(self):
         ensure_default_admin_user(self.temp_config_file.name)

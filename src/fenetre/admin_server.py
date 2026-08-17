@@ -8,6 +8,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from io import BytesIO
@@ -315,6 +316,59 @@ def _current_user_can_set_user_password(target_username: str) -> bool:
     return user.get("username") == target_username
 
 
+# Best-effort brute-force mitigation on admin login. This is in-process,
+# in-memory state: it resets on restart and (with multiple worker
+# processes) only covers whichever worker handled a given attempt. Good
+# enough to slow down an unattended online guesser against a fresh
+# deployment's default admin/admin bootstrap credentials without needing
+# external infrastructure; not a substitute for a real rate limiter in a
+# multi-process/multi-instance deployment.
+_FAILED_LOGIN_WINDOW_S = 900
+_FAILED_LOGIN_MAX_ATTEMPTS = 10
+_failed_login_lock = threading.Lock()
+_failed_login_attempts: dict[tuple[str, str], list[float]] = {}
+
+
+def _login_throttle_key() -> tuple[str, str]:
+    auth = request.authorization
+    username = (auth.username if auth else "") or ""
+    return (username, request.remote_addr or "unknown")
+
+
+def _prune_login_attempts(attempts: list[float], now: float) -> list[float]:
+    return [t for t in attempts if now - t < _FAILED_LOGIN_WINDOW_S]
+
+
+def _is_login_throttled() -> bool:
+    key = _login_throttle_key()
+    now = time.time()
+    with _failed_login_lock:
+        attempts = _prune_login_attempts(_failed_login_attempts.get(key, []), now)
+        _failed_login_attempts[key] = attempts
+        return len(attempts) >= _FAILED_LOGIN_MAX_ATTEMPTS
+
+
+def _record_failed_login() -> None:
+    key = _login_throttle_key()
+    now = time.time()
+    with _failed_login_lock:
+        attempts = _prune_login_attempts(_failed_login_attempts.get(key, []), now)
+        attempts.append(now)
+        _failed_login_attempts[key] = attempts
+
+
+def _clear_failed_login() -> None:
+    key = _login_throttle_key()
+    with _failed_login_lock:
+        _failed_login_attempts.pop(key, None)
+
+
+def reset_login_throttle_state() -> None:
+    """Test-only helper to reset in-memory login-throttle state between tests."""
+    with _failed_login_lock:
+        _failed_login_attempts.clear()
+
+
 _CSRF_PROTECTED_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 
 
@@ -355,6 +409,17 @@ def require_admin_auth():
     if not auth:
         return _auth_failed_response()
 
+    if _is_login_throttled():
+        response = jsonify(
+            {
+                "error": "Too many failed login attempts for this account. "
+                "Try again later."
+            }
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(_FAILED_LOGIN_WINDOW_S)
+        return response
+
     config_file_path = app.config.get("FENETRE_CONFIG_FILE")
     if config_file_path:
         ensure_default_admin_user(config_file_path)
@@ -362,6 +427,7 @@ def require_admin_auth():
             config_file_path, auth.username or "", auth.password or ""
         )
         if user and effective_user_role(user) in ADMIN_ROLES:
+            _clear_failed_login()
             request.fenetre_admin_user = user
             return None
 
@@ -372,11 +438,14 @@ def require_admin_auth():
         "FENETRE_ADMIN_PASSWORD"
     )
     if expected_username is None or expected_password is None:
+        _record_failed_login()
         return _auth_failed_response()
     username_ok = hmac.compare_digest(auth.username or "", str(expected_username))
     password_ok = hmac.compare_digest(auth.password or "", str(expected_password))
     if not (username_ok and password_ok):
+        _record_failed_login()
         return _auth_failed_response()
+    _clear_failed_login()
     request.fenetre_admin_user = {
         "username": auth.username or "env-admin",
         "role": "superadmin",
