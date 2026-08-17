@@ -228,6 +228,27 @@ def _current_user_can_act_on_camera(camera_name: str) -> bool:
     return camera_name in allowed_cameras
 
 
+def _would_remove_last_superadmin(
+    users: dict, username: str, new_user: dict | None
+) -> bool:
+    """True if replacing `username` with new_user (None means deleted) would
+    leave the deployment with no enabled superadmin account -- which, absent
+    host access to run `fenetre-user reset-admin`, would lock every admin
+    out of user management permanently.
+
+    Only applies when a superadmin currently exists: if none does yet (e.g.
+    users configured entirely by hand, or before the admin/admin bootstrap
+    has run), there's nothing to protect and normal user management
+    shouldn't be blocked waiting for one to appear.
+    """
+    if not _has_superadmin(users or {}):
+        return False
+    remaining = {name: user for name, user in (users or {}).items() if name != username}
+    if new_user is not None:
+        remaining[username] = new_user
+    return not _has_superadmin(remaining)
+
+
 def _current_user_can_manage_storage_location() -> bool:
     if not _admin_auth_enabled():
         return True
@@ -1722,6 +1743,18 @@ def upsert_user():
                 if camera_name in ptz_cameras
             ]
         username, user = _normalize_user(payload, users.get(payload.get("username")))
+        if _would_remove_last_superadmin(users, username, user):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "This would leave no enabled superadmin account. "
+                            "Promote another user to superadmin first."
+                        )
+                    }
+                ),
+                400,
+            )
         users[username] = user
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
@@ -1816,6 +1849,18 @@ def delete_user(username):
         users = config.setdefault("users", {})
         if username not in users:
             return jsonify({"error": f"User '{username}' was not found."}), 404
+        if _would_remove_last_superadmin(users, username, None):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Cannot remove the last enabled superadmin account. "
+                            "Promote another user to superadmin first."
+                        )
+                    }
+                ),
+                400,
+            )
         users.pop(username)
         config_to_write = _merge_effective_config(raw_config, config)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)

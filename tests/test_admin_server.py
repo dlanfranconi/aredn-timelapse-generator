@@ -1569,6 +1569,48 @@ class ConfigServerTestCase(unittest.TestCase):
         listed_again = self.app.get("/api/users")
         self.assertEqual(listed_again.json["users"], [])
 
+    def test_cannot_delete_last_superadmin(self):
+        ensure_default_admin_user(self.temp_config_file.name)
+
+        response = self.app.delete("/api/users/admin")
+
+        self.assertEqual(response.status_code, 400)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("admin", updated_data_yaml["users"])
+
+    def test_can_delete_superadmin_when_another_one_remains(self):
+        ensure_default_admin_user(self.temp_config_file.name)
+        self.app.post(
+            "/api/users",
+            data=json.dumps(
+                {
+                    "username": "root2",
+                    "password": "secretsecret",
+                    "role": "superadmin",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        response = self.app.delete("/api/users/admin")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_cannot_demote_last_superadmin(self):
+        ensure_default_admin_user(self.temp_config_file.name)
+
+        response = self.app.post(
+            "/api/users",
+            data=json.dumps({"username": "admin", "role": "admin"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(updated_data_yaml["users"]["admin"]["role"], "superadmin")
+
     def test_list_users_only_returns_ptz_capable_cameras(self):
         self.test_config_data["cameras"] = {
             "fixed-cam": {"url": "http://fixed"},
@@ -1893,7 +1935,7 @@ class ConfigServerTestCase(unittest.TestCase):
                 {
                     "username": "admin",
                     "password": "changed",
-                    "role": "admin",
+                    "role": "superadmin",
                     "disabled": False,
                     "ptz_access": "admin",
                     "ptz_cameras": [],
