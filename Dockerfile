@@ -29,6 +29,11 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 FROM ubuntu:26.04
 
+# go2rtc doesn't publish a checksums file, so the sha256 for each
+# architecture's release binary is pinned below and verified at build time.
+# Bumping GO2RTC_VERSION requires updating those hashes too (fetch the new
+# release asset and `sha256sum` it) -- the build fails closed if they don't
+# match rather than skipping verification.
 ARG GO2RTC_VERSION=1.9.14
 ARG TARGETARCH
 
@@ -55,14 +60,15 @@ RUN apt-get update && \
             vainfo; \
     fi && \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
-        amd64) go2rtc_arch="amd64";; \
-        arm64) go2rtc_arch="arm64";; \
-        arm) go2rtc_arch="arm";; \
+        amd64) go2rtc_arch="amd64"; go2rtc_sha256="32d616af226bd731678ffde328b94cfb94e30339bfefc469cfb76323144615a6";; \
+        arm64) go2rtc_arch="arm64"; go2rtc_sha256="359fabade8a7a51e81a55fe6df6b0ef81764a5e1d63179577534eaaa71904b50";; \
+        arm) go2rtc_arch="arm"; go2rtc_sha256="4d7e1639af5a2722a28e864468fd8099b3c1682565446c798bf9e3b38fde12e4";; \
         *) echo "Unsupported go2rtc architecture: ${TARGETARCH:-$(dpkg --print-architecture)}" >&2; exit 1;; \
     esac && \
     curl -fsSL \
         "https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/go2rtc_linux_${go2rtc_arch}" \
         -o /usr/local/bin/go2rtc && \
+    echo "${go2rtc_sha256}  /usr/local/bin/go2rtc" | sha256sum -c - && \
     chmod 0755 /usr/local/bin/go2rtc && \
     rm -rf /var/lib/apt/lists/*
 
