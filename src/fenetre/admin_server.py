@@ -204,6 +204,29 @@ def _current_user_can_manage_users(config: dict) -> bool:
     return role == "admin" and not _has_superadmin(config.get("users") or {})
 
 
+def _current_user_can_act_on_camera(camera_name: str) -> bool:
+    """Scope admin-role camera actions to the cameras a superadmin assigned.
+
+    README documents "admin" as camera control only for cameras assigned by
+    a superadmin, but there's no dedicated assignment list in the data
+    model beyond a user's ptz_cameras (used for the public site's PTZ
+    access). Reusing it here is a bounded fix for endpoints -- PTZ lock,
+    image profile actions -- that otherwise let any admin-role account act
+    on any camera, not just ones assigned to them, contradicting that
+    documented model. superadmin is unrestricted, as is every other
+    endpoint when admin auth is disabled entirely.
+    """
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    if effective_user_role(user) == "superadmin":
+        return True
+    allowed_cameras = user.get("ptz_cameras") or []
+    return camera_name in allowed_cameras
+
+
 def _current_user_can_manage_storage_location() -> bool:
     if not _admin_auth_enabled():
         return True
@@ -1748,6 +1771,13 @@ def update_ptz_lock():
         _, config = _load_effective_config_with_raw()
         if camera_name not in (config.get("cameras") or {}):
             return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
         status = set_lock(
             camera_name,
             bool(payload.get("locked", False)),
@@ -2128,12 +2158,24 @@ def apply_camera_image_profile():
         camera_config = (config.get("cameras") or {}).get(camera_name)
         if not isinstance(camera_config, dict):
             return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        dry_run = payload.get("dry_run", True) is not False
+        # A dry run never contacts the camera (see apply_image_profile), so
+        # it's harmless for any admin to preview; only a real action -- which
+        # makes an outbound HTTP request to the camera and can change its
+        # settings -- is scoped to cameras assigned to this admin.
+        if not dry_run and not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
         result = apply_image_profile(
             camera_name,
             camera_config,
             profile_name=(payload.get("profile") or "").strip() or None,
             mode=(payload.get("mode") or "").strip() or None,
-            dry_run=payload.get("dry_run", True) is not False,
+            dry_run=dry_run,
         )
         return jsonify(result)
     except ImageProfileError as exc:

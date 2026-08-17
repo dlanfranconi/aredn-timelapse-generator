@@ -1771,6 +1771,76 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertTrue(response.json["lock"]["locked"])
         self.assertEqual(response.json["lock"]["reason"], "Launch framing")
 
+    def test_admin_role_cannot_lock_unassigned_camera(self):
+        self.test_config_data["cameras"]["cam2"] = {"url": "http://localhost/cam2"}
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        assigned = self.app.post(
+            "/api/ptz/lock",
+            data=json.dumps({"camera": "cam1", "locked": True}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(assigned.status_code, 200)
+
+        unassigned = self.app.post(
+            "/api/ptz/lock",
+            data=json.dumps({"camera": "cam2", "locked": True}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(unassigned.status_code, 403)
+
+    def test_admin_role_can_dry_run_image_profile_on_unassigned_camera(self):
+        self.test_config_data["cameras"]["cam1"]["image_profiles"] = {
+            "enabled": True,
+            "host": "camera.local",
+            "profiles": {
+                "launch": {
+                    "actions": [{"url": "http://{host}/image/launch", "method": "POST"}]
+                }
+            },
+        }
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        dry_run = self.app.post(
+            "/api/camera/image_profile",
+            data=json.dumps({"camera": "cam1", "profile": "launch", "dry_run": True}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(dry_run.status_code, 200)
+
+        real_run = self.app.post(
+            "/api/camera/image_profile",
+            data=json.dumps({"camera": "cam1", "profile": "launch", "dry_run": False}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+        self.assertEqual(real_run.status_code, 403)
+
     def test_admin_auth_requires_basic_credentials(self):
         flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
 
