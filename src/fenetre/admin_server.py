@@ -41,7 +41,11 @@ from fenetre.launch_workflow import (
     test_reolink_recording_action,
 )
 from fenetre.ptz import discover_presets, set_lock
-from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
+from fenetre.rtsp_capture import (
+    camera_local_command,
+    is_fenetre_generated_rtsp_snapshot_command,
+    rtsp_snapshot_command,
+)
 from fenetre.ui_utils import copy_public_html_files
 
 logger = logging.getLogger(__name__)
@@ -206,6 +210,74 @@ def _current_user_can_manage_storage_location() -> bool:
     if not user:
         return False
     return effective_user_role(user) == "superadmin"
+
+
+# local_command and unavailable_command run as an OS command on the server
+# (see fenetre.py get_pic_from_local_command / run_camera_unavailable_command)
+# with no sandboxing, in a container that runs as root. README documents the
+# "admin" role as scoped to "camera control only for cameras assigned by a
+# superadmin" -- letting that role set or change either to a free-form value
+# is an unsandboxed-command-execution privilege escalation to root, so doing
+# so is restricted to superadmin regardless of which endpoint is used.
+#
+# The Fenetre-generated RTSP snapshot command (a fixed ffmpeg argv template
+# with a shlex-quoted rtsp_url, see rtsp_capture.py) is exempted: it's safe,
+# and every ordinary RTSP-only camera gets one auto-derived from rtsp_url, so
+# gating that on superadmin would block the common case of an "admin" role
+# managing a plain RTSP camera, not just the actually-dangerous case of a
+# free-form custom command.
+
+
+def _is_custom_local_command(value: str | None) -> bool:
+    value = (value or "").strip()
+    if not value:
+        return False
+    return not is_fenetre_generated_rtsp_snapshot_command(value)
+
+
+def _camera_command_fields_changed(
+    old_camera: dict | None, new_camera: dict | None
+) -> bool:
+    old_camera = old_camera or {}
+    new_camera = new_camera or {}
+
+    old_unavailable = str(old_camera.get("unavailable_command") or "").strip()
+    new_unavailable = str(new_camera.get("unavailable_command") or "").strip()
+    if new_unavailable and new_unavailable != old_unavailable:
+        return True
+
+    old_local = str(old_camera.get("local_command") or "").strip()
+    new_local = str(new_camera.get("local_command") or "").strip()
+    if new_local != old_local and _is_custom_local_command(new_local):
+        return True
+
+    return False
+
+
+def _current_user_can_set_camera_command_fields() -> bool:
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    return effective_user_role(user) == "superadmin"
+
+
+def _cameras_with_changed_command_fields(
+    existing_cameras: dict | None, new_cameras: dict | None
+) -> list[str]:
+    existing_cameras = existing_cameras if isinstance(existing_cameras, dict) else {}
+    new_cameras = new_cameras if isinstance(new_cameras, dict) else {}
+    changed = []
+    for name in set(existing_cameras) | set(new_cameras):
+        old_camera = existing_cameras.get(name)
+        new_camera = new_cameras.get(name)
+        if _camera_command_fields_changed(
+            old_camera if isinstance(old_camera, dict) else {},
+            new_camera if isinstance(new_camera, dict) else {},
+        ):
+            changed.append(str(name))
+    return sorted(changed)
 
 
 def _current_user_can_set_user_password(target_username: str) -> bool:
@@ -1682,6 +1754,26 @@ def update_config():
         raw_config = _load_raw_config()
         existing_config = _get_effective_config(raw_config)
         previous_config = yaml.safe_load(yaml.safe_dump(existing_config)) or {}
+        changed_command_cameras = _cameras_with_changed_command_fields(
+            existing_config.get("cameras"), new_config_json.get("cameras")
+        )
+        if (
+            changed_command_cameras
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Only superadmins can change local_command or "
+                            "unavailable_command; they run as an OS command on the "
+                            "server. Affected camera(s): "
+                            + ", ".join(changed_command_cameras)
+                        )
+                    }
+                ),
+                403,
+            )
         rejected_new_users = _merge_persistent_users(new_config_json, existing_config)
         user_access_removed = _cleanup_user_camera_access(new_config_json)
         config_to_write = _merge_effective_config(raw_config, new_config_json)
@@ -1868,6 +1960,19 @@ def test_snapshot_url():
         rtsp_url = (payload.get("rtsp_url") or "").strip()
         ptz_rtsp_url = (payload.get("ptz_rtsp_url") or "").strip()
         local_command = (payload.get("local_command") or "").strip()
+        if (
+            _is_custom_local_command(local_command)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can run a local_command test; it "
+                        "runs as an OS command on the server."
+                    }
+                ),
+                403,
+            )
         capture_source = payload.get("capture_source") or (
             "rtsp" if local_command and not url else "snapshot"
         )
@@ -2078,6 +2183,19 @@ def add_camera():
         name, camera = _build_camera_config(payload)
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        if (
+            _camera_command_fields_changed(None, camera)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can set local_command or "
+                        "unavailable_command; they run as an OS command on the server."
+                    }
+                ),
+                403,
+            )
         previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         if payload.get("require_test", True):
             if camera.get("local_command"):
@@ -2135,6 +2253,20 @@ def update_camera(camera_name):
         name, camera = _build_camera_config(payload, existing_camera=old_camera)
         if name != camera_name and name in cameras:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        updated_camera = _merge_guided_camera_update(old_camera, camera)
+        if (
+            _camera_command_fields_changed(old_camera, updated_camera)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can set local_command or "
+                        "unavailable_command; they run as an OS command on the server."
+                    }
+                ),
+                403,
+            )
         if payload.get("require_test", False):
             if camera.get("local_command"):
                 _fetch_local_command_bytes(
@@ -2148,7 +2280,6 @@ def update_camera(camera_name):
                     camera_config=camera,
                 )
 
-        updated_camera = _merge_guided_camera_update(old_camera, camera)
         rename_changes = {}
         media_move_result = {"moved": False}
         if name != camera_name:

