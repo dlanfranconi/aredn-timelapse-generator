@@ -169,6 +169,9 @@ class ServerIntegrationTest(unittest.TestCase):
         launches_listing = requests.get(f"{base}/launches/")
         self.assertEqual(launches_listing.status_code, 404)
 
+        ptz_status_response = requests.get(f"{base}/api/ptz/status?camera=HiddenCam")
+        self.assertEqual(ptz_status_response.status_code, 404)
+
     def test_http_server_serves_incremental_hls_timelapse(self):
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             self.skipTest("ffmpeg and ffprobe are required for HLS integration tests")

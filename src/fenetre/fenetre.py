@@ -2030,6 +2030,14 @@ window.location.replace({json.dumps(next_url)});
         if camera_name not in cameras_config:
             self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
             return
+        # Unlike the PTZ control endpoints below, this is a read-only status
+        # query with no _user_can_control_ptz check, so it needs its own
+        # visibility gate: without one, an anonymous caller could enumerate
+        # hidden/private cameras and read their lock/tour/owner state.
+        user = self._public_session_user()
+        if not self._camera_visible_to_public_user(camera_name, user):
+            self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
+            return
         self._send_json(200, ptz_status(camera_name))
 
     def _handle_ptz_preset_api(self):
