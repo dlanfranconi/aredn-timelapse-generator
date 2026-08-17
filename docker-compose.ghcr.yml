@@ -35,6 +35,11 @@ services:
       # config.yaml, logs, and app state stay in /srv/fenetre/data above.
       # - /mnt/nas/fenetre-media:/srv/fenetre/media
 
-    # Uncomment for Intel QuickSync / VAAPI hardware encoding.
+    # Uncomment for Intel QuickSync / VAAPI hardware encoding. The app runs
+    # as a fixed non-root user inside the container, so it also needs the
+    # host GID that owns /dev/dri/renderD128 (find it with
+    # `stat -c '%g' /dev/dri/renderD128`) added via group_add.
     # devices:
     #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "109"

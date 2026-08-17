@@ -45,6 +45,11 @@ services:
       # - /mnt/nas/fenetre-media:/srv/fenetre/media
 
     # Optional: enable this only if you want Intel VAAPI/QSV hardware encoding
-    # and the host has /dev/dri available.
+    # and the host has /dev/dri available. The app runs as a fixed non-root
+    # user inside the container, so it also needs the host GID that owns
+    # /dev/dri/renderD128 (find it with `stat -c '%g' /dev/dri/renderD128`)
+    # added via group_add.
     # devices:
     #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "109"

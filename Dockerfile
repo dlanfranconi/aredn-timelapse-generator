@@ -36,9 +36,14 @@ FROM ubuntu:26.04
 # match rather than skipping verification.
 ARG GO2RTC_VERSION=1.9.14
 ARG TARGETARCH
+# Fixed, non-root uid:gid the app and go2rtc run as (see
+# docker-entrypoint.sh for how it takes ownership of host-mounted paths on
+# first start). Used for both uid and gid.
+ARG FENETRE_UID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/srv/fenetre/venv \
     PATH=/srv/fenetre/venv/bin:$PATH
 
@@ -70,11 +75,21 @@ RUN apt-get update && \
         -o /usr/local/bin/go2rtc && \
     echo "${go2rtc_sha256}  /usr/local/bin/go2rtc" | sha256sum -c - && \
     chmod 0755 /usr/local/bin/go2rtc && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd -g "${FENETRE_UID}" fenetre && \
+    useradd -u "${FENETRE_UID}" -g "${FENETRE_UID}" -M -d /srv/fenetre -s /usr/sbin/nologin fenetre
 
 COPY --from=builder /srv/fenetre/venv /srv/fenetre/venv
 COPY --from=builder /srv/fenetre/app /srv/fenetre/app
 COPY docker-entrypoint.sh /usr/local/bin/fenetre-docker-entrypoint
+
+# Bake in ownership of the app/venv (not a live bind mount, so this is fast
+# and has no bearing on host data). The container still starts as root --
+# ENTRYPOINT has no USER switch -- because it needs root once at startup to
+# take ownership of the host-mounted config/data/logs paths (which may
+# predate this non-root image) before dropping privileges to fenetre; see
+# docker-entrypoint.sh.
+RUN chown -R fenetre:fenetre /srv/fenetre
 
 WORKDIR /srv/fenetre/app
 

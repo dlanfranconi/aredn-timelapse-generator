@@ -27,6 +27,11 @@ services:
       FENETRE_GO2RTC: auto
     devices:
       - /dev/dri:/dev/dri
+    # The app runs as a fixed non-root user inside the container. For it to
+    # use /dev/dri, add its host GID here -- find it with:
+    #   stat -c '%g' /dev/dri/renderD128
+    # group_add:
+    #   - "109"
     volumes:
       # Mount the local config.yaml to the container's config path
       - ./config.yaml:/srv/fenetre/config.yaml
