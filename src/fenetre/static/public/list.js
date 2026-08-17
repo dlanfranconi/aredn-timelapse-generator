@@ -92,27 +92,30 @@ function mutedGo2rtcPlayerUrl(rawUrl, mode = '') {
     if (!rawUrl) {
         return rawUrl;
     }
+    // global.go2rtc.base_url/base_urls/*_url_template are free-form
+    // admin-settable strings (see config.py), and this URL is loaded into
+    // an <iframe src>. Only ever navigate to http(s) targets -- anything
+    // else (e.g. a javascript: URL) is rejected outright rather than passed
+    // through, whether or not it happens to look like a stream.html/
+    // webrtc.html link.
+    let url;
     try {
-        const url = new URL(rawUrl, window.location.href);
-        const page = url.pathname.split('/').pop();
-        if (page === 'stream.html' || page === 'webrtc.html') {
-            if (page === 'stream.html' && mode && !url.searchParams.has('mode')) {
-                url.searchParams.set('mode', mode);
-            }
-            url.searchParams.set('media', 'video');
-            url.searchParams.set('muted', '1');
-            return url.href;
-        }
+        url = new URL(rawUrl, window.location.href);
     } catch (error) {
-        if (/(^|\/)(stream|webrtc)\.html(?:\?|$)/.test(rawUrl)) {
-            const separator = rawUrl.includes('?') ? '&' : '?';
-            const modeParam = mode && /(^|[?&])mode=/.test(rawUrl) === false
-                ? `mode=${encodeURIComponent(mode)}&`
-                : '';
-            return `${rawUrl}${separator}${modeParam}media=video&muted=1`;
-        }
+        return '';
     }
-    return rawUrl;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return '';
+    }
+    const page = url.pathname.split('/').pop();
+    if (page === 'stream.html' || page === 'webrtc.html') {
+        if (page === 'stream.html' && mode && !url.searchParams.has('mode')) {
+            url.searchParams.set('mode', mode);
+        }
+        url.searchParams.set('media', 'video');
+        url.searchParams.set('muted', '1');
+    }
+    return url.href;
 }
 
 function sameHostGo2rtcBaseUrl(go2rtc) {
@@ -681,12 +684,29 @@ function updateCameraMap(cameras) {
     }
 }
 
+function isSafeHttpUrl(rawUrl) {
+    if (!rawUrl) {
+        return false;
+    }
+    try {
+        const url = new URL(rawUrl, window.location.href);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch (error) {
+        return false;
+    }
+}
+
 function updateHeaderLinks(uiConfig) {
     const mainWebsiteLink = document.getElementById('main-website-link');
     const githubLink = document.getElementById('github-link');
 
     if (mainWebsiteLink) {
-        mainWebsiteLink.href = uiConfig.main_website_url || 'https://fenetre.cam';
+        // global.ui.main_website_url is a free-form admin-settable string
+        // (see config.py) assigned straight to an <a href>; only ever allow
+        // an http(s) target so it can't become a javascript: URL.
+        const configuredUrl = uiConfig.main_website_url;
+        mainWebsiteLink.href = isSafeHttpUrl(configuredUrl) ? configuredUrl : 'https://fenetre.cam';
+        mainWebsiteLink.rel = 'noopener noreferrer';
         mainWebsiteLink.style.display = uiConfig.show_main_website_icon === false ? 'none' : 'flex';
     }
 
@@ -950,16 +970,16 @@ function createCameraListItem(camera) {
             <div class="status"></div>
         </div>
         <div class="camera-details">
-            <a class="fullscreen-image-link" href="#" target="_blank">
+            <a class="fullscreen-image-link" href="#" target="_blank" rel="noopener noreferrer">
                 <img src="" alt="Full image for ${escapedDisplayName}">
             </a>
             <a class="filename" href="#" download></a>
             <div class="links">
-                <a class="link-fullscreen" href="#" target="_blank">Fullscreen</a>
-                <a class="link-today" href="#" target="_blank">Today's Pictures</a>
-                <a class="link-timelapse-today" href="#" target="_blank">Today's Timelapse</a>
+                <a class="link-fullscreen" href="#" target="_blank" rel="noopener noreferrer">Fullscreen</a>
+                <a class="link-today" href="#" target="_blank" rel="noopener noreferrer">Today's Pictures</a>
+                <a class="link-timelapse-today" href="#" target="_blank" rel="noopener noreferrer">Today's Timelapse</a>
                 <select class="select-timelapse-archive" aria-label="Timelapse archive"></select>
-                <a class="link-history" href="#" target="_blank">History</a>
+                <a class="link-history" href="#" target="_blank" rel="noopener noreferrer">History</a>
             </div>
             <div class="ptz-presets" hidden>
                 <select class="select-ptz-preset" aria-label="PTZ preset"></select>

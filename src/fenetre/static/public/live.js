@@ -42,27 +42,31 @@
         if (!rawUrl) {
             return rawUrl;
         }
+        // global.go2rtc.base_url/base_urls/*_url_template are free-form
+        // admin-settable strings (see config.py), and this URL is loaded
+        // into an <iframe src> that fires automatically on page load. Only
+        // ever navigate to http(s) targets -- anything else (e.g. a
+        // javascript: URL) is rejected outright rather than passed through,
+        // whether or not it happens to look like a stream.html/webrtc.html
+        // link.
+        let url;
         try {
-            const url = new URL(rawUrl, window.location.href);
-            const page = url.pathname.split('/').pop();
-            if (page === 'stream.html' || page === 'webrtc.html') {
-                if (page === 'stream.html' && mode && !url.searchParams.has('mode')) {
-                    url.searchParams.set('mode', mode);
-                }
-                url.searchParams.set('media', 'video');
-                url.searchParams.set('muted', '1');
-                return url.href;
-            }
+            url = new URL(rawUrl, window.location.href);
         } catch (error) {
-            if (/(^|\/)(stream|webrtc)\.html(?:\?|$)/.test(rawUrl)) {
-                const separator = rawUrl.includes('?') ? '&' : '?';
-                const modeParam = mode && /(^|[?&])mode=/.test(rawUrl) === false
-                    ? `mode=${encodeURIComponent(mode)}&`
-                    : '';
-                return `${rawUrl}${separator}${modeParam}media=video&muted=1`;
-            }
+            return '';
         }
-        return rawUrl;
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            return '';
+        }
+        const page = url.pathname.split('/').pop();
+        if (page === 'stream.html' || page === 'webrtc.html') {
+            if (page === 'stream.html' && mode && !url.searchParams.has('mode')) {
+                url.searchParams.set('mode', mode);
+            }
+            url.searchParams.set('media', 'video');
+            url.searchParams.set('muted', '1');
+        }
+        return url.href;
     }
 
     function sameHostGo2rtcBaseUrl(go2rtc) {
