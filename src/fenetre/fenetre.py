@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -81,6 +82,7 @@ from fenetre.camera_utils import (
 from fenetre.config import config_load
 from fenetre.daylight import observe_daylight_frame, run_end_of_day
 from fenetre.launch_workflow import (
+    camera_name_for_recording_path,
     list_past_launch_recordings,
     preview_launch_workflow,
     run_due_launch_actions,
@@ -1370,6 +1372,23 @@ def camera_name_from_day_dir(day_dir: str) -> str:
     return os.path.basename(os.path.dirname(os.path.normpath(day_dir)))
 
 
+def canonical_request_path(path: str) -> str:
+    """Decode percent-encoding and normalize a request path the same way
+    SimpleHTTPRequestHandler.translate_path resolves it on disk (unquote the
+    whole path first, *then* split/normalize) so every visibility/permission
+    check runs against the exact path that will actually be served. Checking
+    against the raw, still-encoded path let a request like
+    /photos%2fHiddenCam/... slip past camera-name detection (the literal "/"
+    never appeared before unquoting) while translate_path still resolved and
+    served the real file underneath work_dir/photos/HiddenCam/...
+    """
+    decoded = unquote(path)
+    normalized = posixpath.normpath(decoded)
+    if not normalized.startswith("/"):
+        normalized = "/" + normalized
+    return normalized
+
+
 class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _cache_control_header(self):
         parsed = urlparse(self.path)
@@ -1448,11 +1467,26 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _path_camera_name(self, path: str) -> Optional[str]:
-        parts = [unquote(part) for part in path.split("/") if part]
+    def _path_camera_name(self, canonical_path: str) -> Optional[str]:
+        # canonical_path must already be decoded+normalized via
+        # canonical_request_path(); do not pass a raw, still-encoded path in.
+        parts = [part for part in canonical_path.split("/") if part]
         if len(parts) >= 2 and parts[0] == "photos":
             return parts[1]
         return None
+
+    def _launches_recording_camera_name(self, canonical_path: str) -> Optional[str]:
+        # canonical_path must already be decoded+normalized via
+        # canonical_request_path().
+        parts = [part for part in canonical_path.split("/") if part]
+        if len(parts) < 3 or parts[0] != "launches":
+            return None
+        launch_id, filename = parts[1], parts[-1]
+        current_cameras_config, _, _ = load_public_config_snapshot()
+        camera_name = camera_name_for_recording_path(
+            {"cameras": current_cameras_config}, launch_id, filename
+        )
+        return camera_name or None
 
     def _camera_timelapse_enabled(self, camera_config: Dict) -> bool:
         if camera_config.get("disabled", False):
@@ -2355,18 +2389,42 @@ window.location.replace({json.dumps(next_url)});
         ):
             self._send_public_auth_required()
             return
+
+        # Decode+normalize once and run every check below against that same
+        # canonical form, matching what translate_path will actually resolve
+        # on disk (see canonical_request_path's docstring for why this
+        # matters: checking the raw, still-encoded path let %2f-style
+        # requests bypass camera-visibility checks entirely).
+        canonical_path = canonical_request_path(parsed_url.path)
+
         if (
-            parsed_url.path.startswith("/launches/")
+            canonical_path.startswith("/launches/")
             and not self._site_is_public()
             and not user
         ):
             self._send_public_auth_required()
             return
-        camera_name = self._path_camera_name(parsed_url.path)
+        camera_name = self._path_camera_name(canonical_path)
         if camera_name and not self._camera_visible_to_public_user(camera_name, user):
             self.send_error(404, "File not found")
             return
+        if canonical_path.startswith("/launches/"):
+            recording_camera = self._launches_recording_camera_name(canonical_path)
+            if recording_camera and not self._camera_visible_to_public_user(
+                recording_camera, user
+            ):
+                self.send_error(404, "File not found")
+                return
         super().do_GET()
+
+    def list_directory(self, path):
+        # Directory listings would enumerate camera/launch names (including
+        # ones marked hidden/authenticated-only) and internal file layout.
+        # Nothing in the app links to or relies on them: the site root always
+        # serves a generated index.html, and camera/timelapse listings go
+        # through the JSON APIs above, which already apply visibility rules.
+        self.send_error(404, "File not found")
+        return None
 
     def do_POST(self):
         parsed_url = urlparse(self.path)

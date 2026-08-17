@@ -1818,6 +1818,48 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml["users"]["operator"]["ptz_cameras"], [])
 
+    def test_update_config_cannot_inject_new_superadmin_user(self):
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": [],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "global": self.test_config_data["global"],
+                    "cameras": self.test_config_data["cameras"],
+                    "users": {
+                        "admin": {
+                            "role": "admin",
+                            "password_hash": hash_password("adminpw"),
+                        },
+                        "backdoor": {
+                            "role": "superadmin",
+                            "password": "hunter2",
+                        },
+                    },
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["rejected_new_users"], ["backdoor"])
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("backdoor", updated_data_yaml["users"])
+
     @patch("os.kill")
     def test_reload_config_success(self, mock_kill):
         # Ensure PID file exists and has a valid PID

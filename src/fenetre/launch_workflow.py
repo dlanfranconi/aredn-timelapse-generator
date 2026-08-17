@@ -893,13 +893,10 @@ def _reolink_check_json(command: str, payload: Any) -> Any:
             error = item.get("error") if isinstance(item.get("error"), dict) else {}
             detail = str(error.get("detail") or "").strip()
             rsp_code = error.get("rspCode")
-            if (
-                command == "SetManualRec"
-                and (
-                    detail == "not support"
-                    or rsp_code in {-9, -17}
-                    or item.get("cmd") == "Unknown"
-                )
+            if command == "SetManualRec" and (
+                detail == "not support"
+                or rsp_code in {-9, -17}
+                or item.get("cmd") == "Unknown"
             ):
                 raise LaunchWorkflowError(
                     "This Reolink camera does not support SetManualRec. In Launch "
@@ -1053,6 +1050,23 @@ def _camera_name_for_recording(
         camera_slug = camera_slug[len(prefix) :]
     camera_slug = re.sub(r"-\d{2}$", "", camera_slug)
     return camera_slug_map.get(camera_slug.casefold(), camera_slug)
+
+
+def camera_name_for_recording_path(
+    config: Dict[str, Any], launch_id: str, filename: str
+) -> str:
+    """Map a launch recording's filename back to its configured camera name.
+
+    Used by the public HTTP handler to enforce the same per-camera
+    visibility rules on raw launch recording files as on the launch history
+    API, since the on-disk filename is the only place that association is
+    recorded once a recording exists.
+    """
+    camera_slug_map = {
+        _slug(str(camera_name)).casefold(): str(camera_name)
+        for camera_name in (config.get("cameras") or {}).keys()
+    }
+    return _camera_name_for_recording(launch_id, filename, camera_slug_map)
 
 
 def list_past_launch_recordings(

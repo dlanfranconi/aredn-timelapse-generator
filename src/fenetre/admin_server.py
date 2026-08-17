@@ -1,6 +1,7 @@
 import base64
 import hmac
 import json
+import logging
 import os
 import re
 import shlex
@@ -42,6 +43,8 @@ from fenetre.launch_workflow import (
 from fenetre.ptz import discover_presets, set_lock
 from fenetre.rtsp_capture import camera_local_command, rtsp_snapshot_command
 from fenetre.ui_utils import copy_public_html_files
+
+logger = logging.getLogger(__name__)
 
 go2rtc_spawned_process = None
 
@@ -650,24 +653,51 @@ def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
     go2rtc_config["enabled"] = True
 
 
-def _merge_persistent_users(new_config: dict, existing_config: dict) -> None:
+def _merge_persistent_users(new_config: dict, existing_config: dict) -> list[str]:
+    """Preserve the existing users block across a raw /config PUT.
+
+    A full-config PUT is reachable by any admin-role account (not just
+    superadmin) and its payload never goes through _normalize_user's
+    role/username validation or password hashing. Previously, a username not
+    already present in config.yaml was merged in verbatim, letting an
+    "admin"-role account inject an unvalidated, unhashed-password
+    "superadmin" account straight into config.yaml. To close that off,
+    existing usernames are always preserved unchanged (as before), and any
+    *new* username in the submitted payload is dropped rather than created;
+    new users must be created through /api/users, which validates and hashes
+    properly. Returns the list of usernames that were dropped this way.
+    """
     existing_users = existing_config.get("users")
-    if not isinstance(existing_users, dict):
-        return
+    had_existing_users_key = isinstance(existing_users, dict)
+    if not had_existing_users_key:
+        existing_users = {}
 
     submitted_users = new_config.get("users")
-    if not isinstance(submitted_users, dict):
-        new_config["users"] = yaml.safe_load(yaml.safe_dump(existing_users)) or {}
-        return
-
     merged_users = yaml.safe_load(yaml.safe_dump(existing_users)) or {}
-    for username, submitted_user in submitted_users.items():
-        if not isinstance(submitted_user, dict):
-            continue
-        if not isinstance(merged_users.get(username), dict):
-            merged_users[username] = submitted_user
+    rejected_new_usernames: list[str] = []
+    if isinstance(submitted_users, dict):
+        for username, submitted_user in submitted_users.items():
+            if not isinstance(submitted_user, dict):
+                continue
+            if not isinstance(merged_users.get(username), dict):
+                rejected_new_usernames.append(str(username))
 
-    new_config["users"] = merged_users
+    if had_existing_users_key or merged_users:
+        new_config["users"] = merged_users
+    elif "users" in new_config:
+        # No users were ever configured and nothing survived validation;
+        # don't introduce an empty users block that wasn't there before, so
+        # the first-run admin/admin bootstrap (which triggers on a missing
+        # "users" key) still fires normally.
+        del new_config["users"]
+
+    if rejected_new_usernames:
+        logger.warning(
+            "Ignored new user(s) %s submitted via raw /config PUT; create users "
+            "through Manage Users (/api/users) instead.",
+            rejected_new_usernames,
+        )
+    return rejected_new_usernames
 
 
 def _cleanup_user_camera_access(config: dict) -> dict:
@@ -1652,7 +1682,7 @@ def update_config():
         raw_config = _load_raw_config()
         existing_config = _get_effective_config(raw_config)
         previous_config = yaml.safe_load(yaml.safe_dump(existing_config)) or {}
-        _merge_persistent_users(new_config_json, existing_config)
+        rejected_new_users = _merge_persistent_users(new_config_json, existing_config)
         user_access_removed = _cleanup_user_camera_access(new_config_json)
         config_to_write = _merge_effective_config(raw_config, new_config_json)
         backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
@@ -1662,6 +1692,11 @@ def update_config():
         message = "Configuration updated successfully (saved as YAML). Public UI files and cameras.json were updated."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
+        if rejected_new_users:
+            message += (
+                f" New user(s) {', '.join(rejected_new_users)} were NOT created; "
+                "use Manage Users to add users."
+            )
         return (
             jsonify(
                 {
@@ -1670,6 +1705,7 @@ def update_config():
                     **publish_result,
                     "runtime_reload": runtime_reload,
                     "user_camera_access_removed": user_access_removed,
+                    "rejected_new_users": rejected_new_users,
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
