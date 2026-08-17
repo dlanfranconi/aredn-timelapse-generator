@@ -38,8 +38,10 @@ ARG GO2RTC_VERSION=1.9.14
 ARG TARGETARCH
 # Fixed, non-root uid:gid the app and go2rtc run as (see
 # docker-entrypoint.sh for how it takes ownership of host-mounted paths on
-# first start). Used for both uid and gid.
-ARG FENETRE_UID=1000
+# first start). Used for both uid and gid. 10000 rather than the more usual
+# 1000: recent Ubuntu base images (24.04+) already ship a cloud-init
+# "ubuntu" account at 1000, which collides with groupadd/useradd here.
+ARG FENETRE_UID=10000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
