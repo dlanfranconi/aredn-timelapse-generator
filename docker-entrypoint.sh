@@ -29,6 +29,7 @@ done
 if [[ "$(id -u)" == "0" ]]; then
     target_uid="$(id -u fenetre)"
     target_gid="$(id -g fenetre)"
+    target_home="$(getent passwd fenetre | cut -d: -f6)"
 
     take_ownership_once() {
         local path="$1"
@@ -82,6 +83,17 @@ PYEOF
         pid_dir="$(dirname "$FENETRE_PID_FILE")"
         [[ -d "$pid_dir" ]] && chown "${target_uid}:${target_gid}" "$pid_dir" 2>/dev/null || true
     fi
+
+    # setpriv only changes uid/gid/groups -- it does not touch the
+    # environment, so HOME/USER/LOGNAME would otherwise stay whatever root's
+    # shell had (typically HOME=/root). Anything that caches under $HOME
+    # (e.g. onvif-zeep/zeep's parsed-WSDL cache for ONVIF PTZ) would then try
+    # to write to /root, which the fenetre user can't do, and fail with a
+    # confusing "Permission denied: '/root/.cache'" from deep inside a
+    # library rather than anything obviously about the user switch.
+    export HOME="${target_home:-/srv/fenetre}"
+    export USER=fenetre
+    export LOGNAME=fenetre
 
     exec setpriv --reuid=fenetre --regid=fenetre --init-groups "$0" "$@"
 fi
