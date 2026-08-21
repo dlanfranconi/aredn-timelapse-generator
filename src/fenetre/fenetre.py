@@ -2060,23 +2060,44 @@ window.location.replace({json.dumps(next_url)});
                 logger.warning("PTZ preset denied camera=%s", camera_name)
                 self._send_json(403, {"error": "PTZ presets are not allowed"})
                 return
+            focus_settle_s = float(ptz_config.get("post_preset_capture_delay_s") or 5.0)
+            move_status_timeout_s = float(
+                ptz_config.get("move_status_timeout_s") or 10.0
+            )
+
+            def _on_move_settled(idle: Optional[bool]) -> None:
+                # idle is True once GetStatus confirms the pan/tilt/zoom has
+                # actually stopped, False if it gave up waiting (camera
+                # still reports MOVING after move_status_timeout_s), or None
+                # if this camera doesn't expose MoveStatus at all. Either
+                # way, focus_settle_s still runs afterwards -- MoveStatus
+                # only covers physical motion, not autofocus, which ONVIF
+                # doesn't expose a readiness signal for.
+                request_camera_capture(
+                    camera_name,
+                    f"ptz preset {preset_id}",
+                    delay_s=focus_settle_s,
+                )
+
             result = goto_preset(
                 camera_name,
                 camera_config,
                 preset_id,
                 owner=self._ptz_owner(),
                 duration_s=int(ptz_config.get("session_duration_s") or 60),
+                on_move_settled=_on_move_settled,
+                move_status_timeout_s=move_status_timeout_s,
             )
             tour_status = self._mark_ptz_tour_paused_after_control(
                 camera_name, ptz_config, self._ptz_owner()
             )
             if tour_status:
                 result["tour_status"] = tour_status
-            result["capture"] = request_camera_capture(
-                camera_name,
-                f"ptz preset {preset_id}",
-                delay_s=float(ptz_config.get("post_preset_capture_delay_s") or 5.0),
-            )
+            result["capture"] = {
+                "requested": True,
+                "reason": f"ptz preset {preset_id}",
+                "delay_s": focus_settle_s,
+            }
             self._send_json(200, result)
         except PTZBackendUnavailable as exc:
             self._send_json(501, {"error": str(exc)})

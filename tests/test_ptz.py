@@ -1,3 +1,4 @@
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,7 @@ from fenetre.ptz import (
     set_lock,
     set_tour_state,
     stop_move,
+    wait_for_ptz_idle,
     _endpoint_failure_backoffs,
     _profile_token_cache,
     _sessions,
@@ -202,6 +204,109 @@ class PTZTestCase(unittest.TestCase):
                 "Could not connect to ONVIF service at 10.1.64.69:8899",
             ):
                 goto_preset("cam1", camera_config, "home")
+
+    def test_wait_for_ptz_idle_returns_true_once_status_reports_idle(self):
+        ptz_service = MagicMock()
+        status = MagicMock()
+        status.MoveStatus.PanTilt = "IDLE"
+        status.MoveStatus.Zoom = "IDLE"
+        ptz_service.GetStatus.return_value = status
+
+        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+
+        self.assertTrue(result)
+        ptz_service.GetStatus.assert_called_once()
+
+    def test_wait_for_ptz_idle_polls_until_no_longer_moving(self):
+        ptz_service = MagicMock()
+        moving = MagicMock()
+        moving.MoveStatus.PanTilt = "MOVING"
+        moving.MoveStatus.Zoom = "IDLE"
+        idle = MagicMock()
+        idle.MoveStatus.PanTilt = "IDLE"
+        idle.MoveStatus.Zoom = "IDLE"
+        ptz_service.GetStatus.side_effect = [moving, moving, idle]
+
+        result = wait_for_ptz_idle(
+            {}, ptz_service, "profile-1", timeout_s=5, poll_interval_s=0.01
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(ptz_service.GetStatus.call_count, 3)
+
+    def test_wait_for_ptz_idle_gives_up_after_timeout_while_still_moving(self):
+        ptz_service = MagicMock()
+        moving = MagicMock()
+        moving.MoveStatus.PanTilt = "MOVING"
+        moving.MoveStatus.Zoom = "IDLE"
+        ptz_service.GetStatus.return_value = moving
+
+        result = wait_for_ptz_idle(
+            {}, ptz_service, "profile-1", timeout_s=0.05, poll_interval_s=0.01
+        )
+
+        self.assertFalse(result)
+
+    def test_wait_for_ptz_idle_returns_none_when_camera_omits_move_status(self):
+        ptz_service = MagicMock()
+        status = MagicMock(spec=[])
+        ptz_service.GetStatus.return_value = status
+
+        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+
+        self.assertIsNone(result)
+
+    def test_wait_for_ptz_idle_returns_none_when_get_status_fails(self):
+        ptz_service = MagicMock()
+        ptz_service.GetStatus.side_effect = RuntimeError("boom")
+
+        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+
+        self.assertIsNone(result)
+
+    def test_goto_preset_reports_move_settled_once_status_confirms_idle(self):
+        media = MagicMock()
+        media.GetProfiles.return_value = [MagicMock(token="profile-1")]
+        ptz = MagicMock()
+        ptz.create_type.return_value = MagicMock()
+        status = MagicMock()
+        status.MoveStatus.PanTilt = "IDLE"
+        status.MoveStatus.Zoom = "IDLE"
+        ptz.GetStatus.return_value = status
+        camera = MagicMock()
+        camera.create_media_service.return_value = media
+        camera.create_ptz_service.return_value = ptz
+        onvif_module = MagicMock()
+        onvif_module.ONVIFCamera.return_value = camera
+        camera_config = {
+            "ptz": {
+                "enabled": True,
+                "host": "192.0.2.10",
+                "port": 8899,
+                "username": "operator",
+                "password": "secret",
+                "presets": [{"id": "home", "name": "Home", "token": "1"}],
+            }
+        }
+
+        settled = threading.Event()
+        received = {}
+
+        def on_move_settled(idle):
+            received["idle"] = idle
+            settled.set()
+
+        with patch.dict("sys.modules", {"onvif": onvif_module}):
+            goto_preset(
+                "cam1",
+                camera_config,
+                "home",
+                on_move_settled=on_move_settled,
+                move_status_timeout_s=2,
+            )
+
+        self.assertTrue(settled.wait(timeout=2), "on_move_settled was never called")
+        self.assertTrue(received["idle"])
 
     def test_discover_presets_reads_onvif_presets(self):
         media = MagicMock()

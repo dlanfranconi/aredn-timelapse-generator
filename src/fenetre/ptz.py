@@ -1,8 +1,8 @@
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from threading import RLock
-from typing import Any, Dict, List, Optional
+from threading import RLock, Thread
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
@@ -376,6 +376,72 @@ def _call_ptz_operation(ptz_config: Dict[str, Any], description: str, call):
     return result
 
 
+def _ptz_status(ptz_config: Dict[str, Any], ptz_service, profile_token: str):
+    request = ptz_service.create_type("GetStatus")
+    request.ProfileToken = profile_token
+    return _call_ptz_operation(
+        ptz_config, "get status", lambda: ptz_service.GetStatus(request)
+    )
+
+
+def _move_status_idle(status: Any) -> Optional[bool]:
+    """True/False if the camera reports MoveStatus, None if it doesn't.
+
+    ONVIF's GetStatus.MoveStatus has separate PanTilt/Zoom fields, each one
+    of IDLE/MOVING/UNKNOWN. Not every camera populates this (some just omit
+    the field), so a missing MoveStatus -- rather than an IDLE/MOVING value
+    -- is the signal that this camera can't be used for move-completion
+    detection at all.
+    """
+    move_status = getattr(status, "MoveStatus", None)
+    if move_status is None and isinstance(status, dict):
+        move_status = status.get("MoveStatus")
+    if move_status is None:
+        return None
+
+    def _field(name: str) -> Any:
+        if isinstance(move_status, dict):
+            return move_status.get(name)
+        return getattr(move_status, name, None)
+
+    pan_tilt = _field("PanTilt")
+    zoom = _field("Zoom")
+    if pan_tilt is None and zoom is None:
+        return None
+    return all(
+        value is None or str(value).strip().upper() == "IDLE"
+        for value in (pan_tilt, zoom)
+    )
+
+
+def wait_for_ptz_idle(
+    ptz_config: Dict[str, Any],
+    ptz_service,
+    profile_token: str,
+    timeout_s: float,
+    poll_interval_s: float = 0.3,
+) -> Optional[bool]:
+    """Poll ONVIF GetStatus until MoveStatus reports the camera idle.
+
+    Returns True once confirmed idle, False if it's still reported moving
+    once timeout_s elapses, or None if this camera/profile doesn't expose
+    MoveStatus at all (or GetStatus itself fails) -- callers should fall
+    back to a fixed delay in that case, same as before this existed.
+    """
+    deadline = _now() + max(0.0, timeout_s)
+    while True:
+        try:
+            status = _ptz_status(ptz_config, ptz_service, profile_token)
+            idle = _move_status_idle(status)
+        except Exception:
+            return None
+        if idle is None or idle:
+            return idle
+        if _now() >= deadline:
+            return False
+        time.sleep(poll_interval_s)
+
+
 def _onvif_camera(ptz_config: Dict[str, Any]):
     try:
         from onvif import ONVIFCamera
@@ -564,17 +630,13 @@ def _send_focus_move(
     request = imaging_service.create_type("Move")
     request.VideoSourceToken = source_token
     request.Focus = {"Continuous": {"Speed": speed}}
-    _call_ptz_operation(
-        ptz_config, "focus move", lambda: imaging_service.Move(request)
-    )
+    _call_ptz_operation(ptz_config, "focus move", lambda: imaging_service.Move(request))
 
 
 def _send_focus_stop(ptz_config: Dict[str, Any], imaging_service, source_token: str):
     request = imaging_service.create_type("Stop")
     request.VideoSourceToken = source_token
-    _call_ptz_operation(
-        ptz_config, "focus stop", lambda: imaging_service.Stop(request)
-    )
+    _call_ptz_operation(ptz_config, "focus stop", lambda: imaging_service.Stop(request))
 
 
 def _tour_token(tour_config: Dict[str, Any]) -> str:
@@ -691,6 +753,8 @@ def goto_preset(
     preset_id: str,
     owner: str = "public",
     duration_s: int = 60,
+    on_move_settled: Optional[Callable[[Optional[bool]], None]] = None,
+    move_status_timeout_s: float = 10.0,
 ) -> Dict[str, Any]:
     ptz_config = camera_config.get("ptz") or {}
     if not ptz_configured(ptz_config):
@@ -714,6 +778,24 @@ def goto_preset(
         _call_ptz_operation(
             ptz_config, "preset", lambda: ptz_service.GotoPreset(request)
         )
+
+    if on_move_settled is not None:
+        # Runs off the request thread: cameras with a large pan/tilt/zoom
+        # sweep to do can take several seconds to physically get there, and
+        # blocking the HTTP response on that would make the preset button
+        # feel unresponsive for no benefit (the frontend already polls for
+        # the refreshed snapshot on its own). Reporting when motion is
+        # actually confirmed done -- rather than the caller guessing off a
+        # fixed timer that has to double as "time to move" and "time to
+        # focus" -- is exactly what this is for.
+        def _settle_worker():
+            idle = wait_for_ptz_idle(
+                ptz_config, ptz_service, profile_token, move_status_timeout_s
+            )
+            on_move_settled(idle)
+
+        Thread(target=_settle_worker, daemon=True).start()
+
     result = {
         "ok": True,
         "camera": camera_name,

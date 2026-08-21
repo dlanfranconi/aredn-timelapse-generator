@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import ANY, patch, MagicMock
 from PIL import Image
 from io import BytesIO
 import sys
@@ -318,19 +318,33 @@ class TestFenetre(unittest.TestCase):
                 },
             ) as mock_capture:
                 handler._handle_ptz_preset_api()
+
+                self.assertEqual(responses[0][0], 200)
+                self.assertEqual(responses[0][1]["capture"]["requested"], True)
+                mock_goto.assert_called_once_with(
+                    "cam1",
+                    {"ptz": {"session_duration_s": 30}},
+                    "home",
+                    owner="operator",
+                    duration_s=30,
+                    on_move_settled=ANY,
+                    move_status_timeout_s=10.0,
+                )
+                # The actual capture is no longer requested synchronously --
+                # it's deferred until goto_preset confirms (via ONVIF
+                # GetStatus) that the physical move has settled, or gives up
+                # waiting. Simulate that by invoking the callback goto_preset
+                # was given, the same way the real background settle-thread
+                # would (must happen inside this `with` block, while
+                # request_camera_capture is still patched).
+                mock_capture.assert_not_called()
+                on_move_settled = mock_goto.call_args.kwargs["on_move_settled"]
+                on_move_settled(True)
+                mock_capture.assert_called_once_with(
+                    "cam1", "ptz preset home", delay_s=5.0
+                )
         finally:
             fenetre_module.cameras_config = old_cameras_config
-
-        self.assertEqual(responses[0][0], 200)
-        self.assertEqual(responses[0][1]["capture"]["requested"], True)
-        mock_goto.assert_called_once_with(
-            "cam1",
-            {"ptz": {"session_duration_s": 30}},
-            "home",
-            owner="operator",
-            duration_s=30,
-        )
-        mock_capture.assert_called_once_with("cam1", "ptz preset home", delay_s=5.0)
 
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()

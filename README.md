@@ -401,6 +401,18 @@ When enabled, authorized manual-PTZ users see context-aware Start Tour, Stop Tou
 
 For legacy cameras that crash on ONVIF or RTSP sessions, keep the camera as snapshot-only or RTSP-capture-only and set `ptz.enabled: false` and `go2rtc_enabled: false`. That keeps the deployment clean without adding vendor-specific crash workarounds to the normal path.
 
+### Snapshot Timing After A Preset Move
+
+After a preset move, Fenetre asks the camera's ONVIF `GetStatus` for `MoveStatus` and polls it (every 0.3s, for up to `ptz.move_status_timeout_s` seconds, default `10`) until pan/tilt/zoom report idle, then waits `ptz.post_preset_capture_delay_s` seconds (default `5`) before capturing, to give autofocus a chance to settle -- ONVIF has no standard "focus is done" signal, so this part is still a fixed wait. If a camera doesn't expose `MoveStatus` at all, or `GetStatus` fails, capture falls back to firing `post_preset_capture_delay_s` seconds after the move command is sent, same as before this existed.
+
+```yaml
+ptz:
+  post_preset_capture_delay_s: 5
+  move_status_timeout_s: 10
+```
+
+If snapshots still come out mid-move or out of focus (this is more likely at night, when autofocus and slew both take longer), raise `post_preset_capture_delay_s` for that camera. Raise `move_status_timeout_s` too if the camera has presets with a long pan/tilt/zoom sweep.
+
 ## Image Profiles
 
 Image profiles are optional HTTP/API hooks for camera image tuning. They are not RTSP stream profiles. Use them for day, sunset, night, or launch-specific camera settings such as exposure, brightness, contrast, IR/white light, WDR, or other vendor image controls.
