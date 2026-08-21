@@ -8,7 +8,7 @@ import errno
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import requests
 import yaml
@@ -23,8 +23,13 @@ from fenetre.auth import (
 from fenetre.admin_server import (
     _sync_go2rtc_runtime,
     app as flask_app,
+    ptz_warm_streams,
+    release_ptz_stream,
     reset_login_throttle_state,
+    warm_ptz_camera_names,
+    warm_ptz_stream,
 )
+from fenetre.launch_workflow import _local_rtsp_recorders
 from fenetre.ptz import set_lock
 
 
@@ -2257,6 +2262,124 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("Invalid PID found", response.json["error"])
         mock_kill.assert_not_called()
+
+
+class PtzWarmStreamTests(unittest.TestCase):
+    """Regression tests for the on-demand PTZ stream warm-up feature: warm
+    when a user expands a camera's PTZ controls, release when they collapse
+    it (or after the idle sweep notices they're gone), unless a local_rtsp
+    recording is using the camera right then.
+
+    go2rtc's PUT /api/preload is not idempotent -- re-adding an
+    already-preloaded stream tears down and reopens the connection -- so
+    warm_ptz_stream/release_ptz_stream must only call it on a genuine state
+    transition. That's what most of these pin down.
+    """
+
+    def setUp(self):
+        ptz_warm_streams.clear()
+        _local_rtsp_recorders.clear()
+
+    def tearDown(self):
+        ptz_warm_streams.clear()
+        _local_rtsp_recorders.clear()
+
+    def _config(self):
+        return {
+            "global": {"go2rtc": {"enabled": True, "api_listen": ":1984"}},
+            "cameras": {
+                "cam1": {"ptz_rtsp_url": "rtsp://admin:secret@camera/ptz"},
+            },
+        }
+
+    @patch("fenetre.admin_server.requests.put")
+    def test_warm_calls_go2rtc_preload_api(self, mock_put):
+        mock_put.return_value.status_code = 200
+        mock_put.return_value.raise_for_status.return_value = None
+
+        result = warm_ptz_stream(self._config(), "cam1")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("cam1", warm_ptz_camera_names())
+        mock_put.assert_called_once()
+        self.assertEqual(
+            mock_put.call_args.args[0], "http://127.0.0.1:1984/api/preload"
+        )
+        self.assertEqual(
+            mock_put.call_args.kwargs["params"],
+            {"src": "fenetre_cam1", "video": ""},
+        )
+
+    @patch("fenetre.admin_server.requests.put")
+    def test_warm_is_a_noop_when_already_warm(self, mock_put):
+        mock_put.return_value.status_code = 200
+        mock_put.return_value.raise_for_status.return_value = None
+
+        warm_ptz_stream(self._config(), "cam1")
+        result = warm_ptz_stream(self._config(), "cam1")
+
+        self.assertTrue(result.get("already_warm"))
+        mock_put.assert_called_once()
+
+    @patch("fenetre.admin_server.requests.put")
+    def test_warm_skipped_when_go2rtc_disabled(self, mock_put):
+        config = self._config()
+        config["global"]["go2rtc"]["enabled"] = False
+
+        result = warm_ptz_stream(config, "cam1")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "go2rtc_disabled")
+        mock_put.assert_not_called()
+
+    @patch("fenetre.admin_server.requests.delete")
+    @patch("fenetre.admin_server.requests.put")
+    def test_release_calls_go2rtc_preload_delete(self, mock_put, mock_delete):
+        mock_put.return_value.status_code = 200
+        mock_put.return_value.raise_for_status.return_value = None
+        mock_delete.return_value.status_code = 200
+        warm_ptz_stream(self._config(), "cam1")
+
+        result = release_ptz_stream(self._config(), "cam1")
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("cam1", warm_ptz_camera_names())
+        mock_delete.assert_called_once()
+        self.assertEqual(
+            mock_delete.call_args.args[0], "http://127.0.0.1:1984/api/preload"
+        )
+        self.assertEqual(
+            mock_delete.call_args.kwargs["params"], {"src": "fenetre_cam1"}
+        )
+
+    def test_release_is_a_noop_when_not_warm(self):
+        result = release_ptz_stream(self._config(), "cam1")
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result.get("already_released"))
+
+    @patch("fenetre.admin_server.requests.delete")
+    @patch("fenetre.admin_server.requests.put")
+    def test_release_skips_while_local_rtsp_recording_is_active(
+        self, mock_put, mock_delete
+    ):
+        mock_put.return_value.status_code = 200
+        mock_put.return_value.raise_for_status.return_value = None
+        warm_ptz_stream(self._config(), "cam1")
+        running_process = MagicMock()
+        running_process.poll.return_value = None
+        _local_rtsp_recorders["evt:plan:cam1"] = {
+            "process": running_process,
+            "camera": "cam1",
+        }
+
+        result = release_ptz_stream(self._config(), "cam1")
+
+        self.assertEqual(result.get("skipped"), "recording_in_progress")
+        mock_delete.assert_not_called()
+        # Still tracked as warm -- the sweep loop will retry once recording
+        # actually finishes rather than losing track of it here.
+        self.assertIn("cam1", warm_ptz_camera_names())
 
 
 if __name__ == "__main__":

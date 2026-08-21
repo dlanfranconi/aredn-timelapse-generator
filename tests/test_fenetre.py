@@ -346,6 +346,89 @@ class TestFenetre(unittest.TestCase):
         finally:
             fenetre_module.cameras_config = old_cameras_config
 
+    def test_live_view_heartbeat_warms_and_releases_ptz_preload(self):
+        # The public page's PTZ dropdown sends "ptz_warm" heartbeats purely
+        # to signal "I might use PTZ soon"; the handler should translate a
+        # 0->1 active-viewer transition into warm_ptz_stream, and a 1->0
+        # transition (e.g. the dropdown collapsing) into release_ptz_stream
+        # -- but only for that stream name, not the normal "full"/"preview"
+        # live-view heartbeats used elsewhere.
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._public_session_user = lambda: {"username": "operator"}
+        handler._send_json = lambda status, payload: responses.append((status, payload))
+        handler._camera_visible_to_public_user = lambda camera, user: True
+        fenetre_module.live_view_sessions.clear()
+        config = {"global": {"go2rtc": {"enabled": True}}, "cameras": {"cam1": {}}}
+
+        try:
+            with patch.object(
+                fenetre_module,
+                "load_public_config_snapshot",
+                return_value=({"cam1": {}}, {"go2rtc": {"enabled": True}}, {}),
+            ), patch.object(
+                fenetre_module, "warm_ptz_stream", return_value={"ok": True}
+            ) as mock_warm, patch.object(
+                fenetre_module, "release_ptz_stream", return_value={"ok": True}
+            ) as mock_release:
+                handler._read_json_body = lambda: {
+                    "camera": "cam1",
+                    "session_id": "session-1",
+                    "stream": "ptz_warm",
+                    "active": True,
+                }
+                handler._handle_live_view_heartbeat_api()
+                mock_warm.assert_called_once_with(config, "cam1")
+                mock_release.assert_not_called()
+
+                # A second heartbeat while still active is not a transition
+                # -- must not re-warm (go2rtc's preload PUT tears down and
+                # reopens an existing connection, so calling it again would
+                # actually be harmful, not just redundant).
+                handler._handle_live_view_heartbeat_api()
+                mock_warm.assert_called_once()
+
+                handler._read_json_body = lambda: {
+                    "camera": "cam1",
+                    "session_id": "session-1",
+                    "stream": "ptz_warm",
+                    "active": False,
+                }
+                handler._handle_live_view_heartbeat_api()
+                mock_release.assert_called_once_with(config, "cam1")
+        finally:
+            fenetre_module.live_view_sessions.clear()
+
+    def test_live_view_heartbeat_ignores_other_streams_for_ptz_preload(self):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        responses = []
+        handler._public_session_user = lambda: {"username": "operator"}
+        handler._send_json = lambda status, payload: responses.append((status, payload))
+        handler._camera_visible_to_public_user = lambda camera, user: True
+        handler._read_json_body = lambda: {
+            "camera": "cam1",
+            "session_id": "session-1",
+            "stream": "full",
+            "active": True,
+        }
+        fenetre_module.live_view_sessions.clear()
+
+        try:
+            with patch.object(
+                fenetre_module,
+                "load_public_config_snapshot",
+                return_value=({"cam1": {}}, {"go2rtc": {"enabled": True}}, {}),
+            ), patch.object(
+                fenetre_module, "warm_ptz_stream"
+            ) as mock_warm, patch.object(
+                fenetre_module, "release_ptz_stream"
+            ) as mock_release:
+                handler._handle_live_view_heartbeat_api()
+                mock_warm.assert_not_called()
+                mock_release.assert_not_called()
+        finally:
+            fenetre_module.live_view_sessions.clear()
+
     def test_live_view_heartbeat_tracks_and_expires_sessions(self):
         fenetre_module.live_view_sessions.clear()
 

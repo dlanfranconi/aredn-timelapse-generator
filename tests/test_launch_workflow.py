@@ -2,15 +2,17 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fenetre.launch_workflow import (
     due_launch_actions,
     execute_launch_action,
     list_past_launch_recordings,
+    local_rtsp_recording_active,
     normalize_launch_event,
     preview_launch_workflow,
     run_due_launch_actions,
+    _local_rtsp_recorders,
 )
 
 
@@ -501,6 +503,38 @@ class NormalizeLaunchEventSecurityTests(unittest.TestCase):
             }
         )
         self.assertEqual(event["id"], "5c4c1ee1-e5e9-4c1a-b7b2-abcdef123456")
+
+
+class LocalRtspRecordingActiveTests(unittest.TestCase):
+    """Regression tests for the go2rtc PTZ warm-preload feature's recording
+    guard: it must not release a preloaded stream while a Sunba-style
+    local_rtsp recording (no camera-side recording API, so it's a direct
+    ffmpeg RTSP session) is in progress for that camera."""
+
+    def tearDown(self):
+        _local_rtsp_recorders.clear()
+
+    def test_false_when_no_recorders(self):
+        self.assertFalse(local_rtsp_recording_active("cam1"))
+
+    def test_true_while_process_is_running(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        _local_rtsp_recorders["event:plan:cam1"] = {
+            "process": process,
+            "camera": "cam1",
+        }
+        self.assertTrue(local_rtsp_recording_active("cam1"))
+        self.assertFalse(local_rtsp_recording_active("cam2"))
+
+    def test_false_once_process_has_exited(self):
+        process = MagicMock()
+        process.poll.return_value = 0
+        _local_rtsp_recorders["event:plan:cam1"] = {
+            "process": process,
+            "camera": "cam1",
+        }
+        self.assertFalse(local_rtsp_recording_active("cam1"))
 
 
 if __name__ == "__main__":

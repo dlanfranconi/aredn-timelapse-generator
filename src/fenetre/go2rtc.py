@@ -48,6 +48,20 @@ def go2rtc_stream_name(camera_name: str, global_config: Dict[str, Any]) -> str:
     return f"{prefix}{sanitize_stream_name(camera_name)}"
 
 
+def go2rtc_preload_query_params(preload_query: str) -> Dict[str, str]:
+    """Turn a preload_query value (e.g. "video", or "video=1&audio=0") into
+    query params for go2rtc's live PUT /api/preload endpoint. Mirrors how
+    go2rtc itself treats the same string as a raw query when read from the
+    static preload: YAML key, so a live-triggered preload behaves like the
+    startup-time one.
+    """
+    text = str(preload_query or "").strip()
+    pairs = parse_qsl(text, keep_blank_values=True)
+    if pairs:
+        return {key: value for key, value in pairs}
+    return {text: ""} if text else {}
+
+
 def go2rtc_full_stream_name(camera_name: str, global_config: Dict[str, Any]) -> str:
     return f"{go2rtc_stream_name(camera_name, global_config)}_full"
 

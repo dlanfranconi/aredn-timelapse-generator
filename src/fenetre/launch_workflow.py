@@ -34,6 +34,23 @@ LOCAL_RTSP_RECORDING_VENDORS = {"local_rtsp", "local-rtsp", "sunba", "sunba_loca
 _local_rtsp_recorders: Dict[str, Dict[str, Any]] = {}
 
 
+def local_rtsp_recording_active(camera_name: str) -> bool:
+    """True if a local_rtsp launch recording's ffmpeg process is currently
+    running for this camera. Cameras with no recording API (e.g. Sunba)
+    record via a direct ffmpeg RTSP session started by
+    _execute_local_rtsp_record_action rather than through go2rtc, so this is
+    used to avoid tearing down/reopening go2rtc's own RTSP connection to the
+    same camera while that's in progress.
+    """
+    for recorder in list(_local_rtsp_recorders.values()):
+        if not isinstance(recorder, dict) or recorder.get("camera") != camera_name:
+            continue
+        process = recorder.get("process")
+        if process is not None and process.poll() is None:
+            return True
+    return False
+
+
 def _sanitize_url_for_logs(url: str) -> str:
     try:
         parsed = urlsplit(str(url))
@@ -1455,6 +1472,7 @@ def _execute_local_rtsp_record_action(
             "path": output_path,
             "command": result["command"],
             "started_at": time.time(),
+            "camera": action["camera"],
         }
         result["pid"] = process.pid
         return result

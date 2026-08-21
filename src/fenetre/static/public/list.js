@@ -294,7 +294,7 @@ function newClientSessionId() {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function sendLiveViewHeartbeat(camera, stream, sessionId, active = true) {
+async function sendLiveViewHeartbeat(camera, stream, sessionId, active = true, ttlS = 45) {
     if (!camera || !sessionId || !authToken) {
         return null;
     }
@@ -306,7 +306,7 @@ async function sendLiveViewHeartbeat(camera, stream, sessionId, active = true) {
             camera,
             stream,
             session_id: sessionId,
-            ttl_s: 45,
+            ttl_s: ttlS,
             active
         })
     });
@@ -315,6 +315,64 @@ async function sendLiveViewHeartbeat(camera, stream, sessionId, active = true) {
         throw new Error(result.error || `Live-view heartbeat failed: ${response.status}`);
     }
     return response.json().catch(() => null);
+}
+
+// "ptz_warm" is a synthetic live-view stream name: expanding a camera's PTZ
+// controls sends heartbeats under it purely to tell the server "I might use
+// PTZ soon", so it can ask go2rtc to open the aim-stream's RTSP connection
+// ahead of time instead of paying that handshake the first time someone
+// actually opens the aiming preview or moves the camera. Collapsing the
+// panel sends one final active:false heartbeat for an immediate release;
+// the 5-minute ttl_s is just the backstop for a closed tab or lost
+// connection that never gets to send that.
+const PTZ_WARM_STREAM = 'ptz_warm';
+const PTZ_WARM_HEARTBEAT_INTERVAL_MS = 60000;
+const PTZ_WARM_TTL_S = 300;
+
+function startPtzWarmHeartbeat(listItem) {
+    if (!authToken) {
+        return;
+    }
+    if (!listItem._ptzWarmSessionId) {
+        listItem._ptzWarmSessionId = newClientSessionId();
+    }
+    sendLiveViewHeartbeat(
+        listItem._ptzWarmCameraId, PTZ_WARM_STREAM, listItem._ptzWarmSessionId, true, PTZ_WARM_TTL_S
+    ).catch(() => {});
+    if (!listItem._ptzWarmHeartbeatTimer) {
+        listItem._ptzWarmHeartbeatTimer = setInterval(() => {
+            if (!listItem._ptzWarmSessionId) {
+                return;
+            }
+            sendLiveViewHeartbeat(
+                listItem._ptzWarmCameraId, PTZ_WARM_STREAM, listItem._ptzWarmSessionId, true, PTZ_WARM_TTL_S
+            ).catch(() => {});
+        }, PTZ_WARM_HEARTBEAT_INTERVAL_MS);
+    }
+}
+
+function stopPtzWarmHeartbeat(listItem) {
+    if (listItem._ptzWarmHeartbeatTimer) {
+        clearInterval(listItem._ptzWarmHeartbeatTimer);
+        listItem._ptzWarmHeartbeatTimer = null;
+    }
+    if (listItem._ptzWarmSessionId) {
+        sendLiveViewHeartbeat(
+            listItem._ptzWarmCameraId, PTZ_WARM_STREAM, listItem._ptzWarmSessionId, false
+        ).catch(() => {});
+        listItem._ptzWarmSessionId = '';
+    }
+}
+
+function handlePtzWarmToggle(listItem, expanded) {
+    if (!listItem._ptzWarmEligible || !listItem._ptzWarmCameraId) {
+        return;
+    }
+    if (expanded) {
+        startPtzWarmHeartbeat(listItem);
+    } else {
+        stopPtzWarmHeartbeat(listItem);
+    }
 }
 
 function storeAuthToken(token) {
@@ -1057,9 +1115,14 @@ function createCameraListItem(camera) {
 
     listItem.querySelector('.camera-header').addEventListener('click', () => {
         const details = listItem.querySelector('.camera-details');
+        const wasActive = details.classList.contains('active');
         details.classList.toggle('active');
+        const isActive = details.classList.contains('active');
         if (mapVisible) {
             focusCameraLayer(cameraMarkers[id]);
+        }
+        if (isActive !== wasActive) {
+            handlePtzWarmToggle(listItem, isActive);
         }
     });
 
@@ -1092,6 +1155,14 @@ function configurePtzPresets(camera, listItem) {
     const userAllowedCamera = authUser && (
         ['superadmin', 'superuser'].includes(authUser.role) || userCameras.includes(id)
     );
+    listItem._ptzWarmCameraId = id;
+    listItem._ptzWarmEligible = ptz.enabled === true && Boolean(userAllowedCamera);
+    if (!listItem._ptzWarmEligible && listItem._ptzWarmSessionId) {
+        // Access was revoked (or PTZ disabled) while the panel happened to
+        // be open and warmed -- release it rather than leaving it warm
+        // until the idle sweep eventually notices.
+        stopPtzWarmHeartbeat(listItem);
+    }
     const go2rtc = camera.go2rtc || {};
     const capabilities = ptz.capabilities || {};
     const supportsPan = capabilities.pan !== false;

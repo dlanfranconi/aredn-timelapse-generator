@@ -62,6 +62,9 @@ from fenetre.admin_server import (
     metric_work_directory_size_bytes,
     _go2rtc_runtime_status,
     _sync_go2rtc_runtime,
+    release_ptz_stream,
+    warm_ptz_camera_names,
+    warm_ptz_stream,
 )
 from fenetre.archive import (
     archive_daydir,
@@ -1903,13 +1906,27 @@ window.location.replace({json.dumps(next_url)});
             if not camera_name or not session_id:
                 self._send_json(400, {"error": "camera and session_id are required"})
                 return
-            current_cameras_config, _, _ = load_public_config_snapshot()
+            current_cameras_config, current_global_config, _ = (
+                load_public_config_snapshot()
+            )
             if camera_name not in current_cameras_config:
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
                 return
             if not self._camera_visible_to_public_user(camera_name, user):
                 self._send_json(404, {"error": f"Camera '{camera_name}' was not found"})
                 return
+            # "ptz_warm" is a synthetic stream name: the PTZ dropdown on the
+            # public page sends heartbeats under it purely to signal "I might
+            # use PTZ soon", not to track an actual viewer. Piggyback on the
+            # existing live-view session bookkeeping (presence tracking,
+            # TTL-based expiry) rather than building a second copy of it, and
+            # translate a 0<->1 active-viewer transition into a live
+            # warm/release call against go2rtc's own preload API.
+            previous_count = (
+                active_live_view_count(camera_name, stream_name)
+                if stream_name == "ptz_warm"
+                else None
+            )
             result = record_live_view_heartbeat(
                 camera_name,
                 stream_name,
@@ -1918,6 +1935,16 @@ window.location.replace({json.dumps(next_url)});
                 ttl_s=ttl_s,
                 active=active,
             )
+            if stream_name == "ptz_warm":
+                new_count = result.get("active_count", 0)
+                config = {
+                    "global": current_global_config or {},
+                    "cameras": current_cameras_config or {},
+                }
+                if previous_count == 0 and new_count > 0:
+                    result["ptz_warm"] = warm_ptz_stream(config, camera_name)
+                elif previous_count and not new_count:
+                    result["ptz_warm"] = release_ptz_stream(config, camera_name)
             self._send_json(200, result)
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json(400, {"error": str(exc)})
@@ -2842,6 +2869,12 @@ def main(argv):
     )
     disk_management_thread_global.start()
     logger.info(f"Starting thread {disk_management_thread_global.name}")
+
+    ptz_warm_sweep_thread_global = Thread(
+        target=ptz_warm_sweep_loop, daemon=True, name="ptz_warm_sweep_loop"
+    )
+    ptz_warm_sweep_thread_global.start()
+    logger.info(f"Starting thread {ptz_warm_sweep_thread_global.name}")
 
     logger.info("Archive thread will start in 10s...")
     interruptible_sleep(10, exit_event)
@@ -4032,6 +4065,42 @@ def enforce_camera_storage_limit(
         current_size_bytes
     )
     return current_size_bytes
+
+
+def ptz_warm_sweep_loop():
+    """Safety net for warm_ptz_stream/release_ptz_stream.
+
+    The normal release path is instant: the public page sends a "ptz_warm"
+    heartbeat with active=false the moment a PTZ dropdown collapses. This
+    loop only matters when that never happens -- a closed tab, a crashed
+    browser, a lost mesh link -- where the heartbeat session just expires by
+    TTL with nothing to react to it. Runs frequently enough that "released
+    after about 5 minutes idle" holds even in that case.
+    """
+    while not exit_event.is_set():
+        interruptible_sleep(30, exit_event)
+        if exit_event.is_set():
+            return
+        for camera_name in warm_ptz_camera_names():
+            if active_live_view_count(camera_name, "ptz_warm") > 0:
+                continue
+            try:
+                current_cameras_config, current_global_config, _ = (
+                    load_public_config_snapshot()
+                )
+                release_ptz_stream(
+                    {
+                        "global": current_global_config or {},
+                        "cameras": current_cameras_config or {},
+                    },
+                    camera_name,
+                )
+            except Exception:
+                logger.warning(
+                    "Error releasing idle PTZ preload for %s.",
+                    camera_name,
+                    exc_info=True,
+                )
 
 
 def disk_management_loop():

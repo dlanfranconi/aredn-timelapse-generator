@@ -32,12 +32,18 @@ from fenetre.auth import (
 )
 from fenetre.cameras_metadata import write_cameras_metadata
 from fenetre.gopro import GoPro
-from fenetre.go2rtc import build_go2rtc_runtime_config, go2rtc_browser_port
+from fenetre.go2rtc import (
+    build_go2rtc_runtime_config,
+    go2rtc_browser_port,
+    go2rtc_preload_query_params,
+    go2rtc_stream_name,
+)
 from fenetre.http_auth import auth_from_camera_config
 from fenetre.image_profiles import ImageProfileError, apply_image_profile
 from fenetre.log_sanitizer import sanitize_text_for_logs
 from fenetre.media_storage import describe_media_location, relocate_media_storage
 from fenetre.launch_workflow import (
+    local_rtsp_recording_active,
     preview_launch_workflow,
     run_due_launch_actions,
     test_reolink_recording_action,
@@ -53,6 +59,15 @@ from fenetre.ui_utils import copy_public_html_files
 logger = logging.getLogger(__name__)
 
 go2rtc_spawned_process = None
+
+# Cameras whose PTZ/aim go2rtc stream we've explicitly warmed via
+# warm_ptz_stream and haven't released yet. go2rtc's own PUT /api/preload
+# is not idempotent -- re-adding an already-preloaded stream tears down and
+# reopens the consumer -- so this local bookkeeping is what lets
+# warm_ptz_stream/release_ptz_stream only call the live API on a genuine
+# state transition instead of on every heartbeat.
+ptz_warm_streams: set = set()
+ptz_warm_streams_lock = threading.Lock()
 
 metric_pictures_taken_total = Counter(
     "pictures_taken_total", "Total number of pictures taken", ["camera_name"]
@@ -724,6 +739,107 @@ def _sync_go2rtc_api(
         )
         if response.status_code not in {200, 204, 404}:
             response.raise_for_status()
+
+
+def _set_go2rtc_preload(api_base: str, stream_name: str, preload_query: str) -> None:
+    params = {"src": stream_name}
+    params.update(go2rtc_preload_query_params(preload_query))
+    response = requests.put(f"{api_base}/api/preload", params=params, timeout=3)
+    response.raise_for_status()
+
+
+def _clear_go2rtc_preload(api_base: str, stream_name: str) -> None:
+    response = requests.delete(
+        f"{api_base}/api/preload", params={"src": stream_name}, timeout=3
+    )
+    if response.status_code in {200, 204}:
+        return
+    # go2rtc returns 500 ("preload not found") if nothing was preloaded for
+    # this stream -- that's already the state we want, not a real failure.
+    if response.status_code != 500:
+        response.raise_for_status()
+
+
+def warm_ptz_stream(config: dict, camera_name: str) -> dict:
+    """Best-effort: ask the already-running go2rtc process to open a
+    persistent preload connection for this camera's PTZ/aim stream, so the
+    aiming preview doesn't pay a fresh RTSP handshake the first time someone
+    actually opens it. Called when a user expands a camera's PTZ controls,
+    on the theory that they might use them. Never raises -- a failure here
+    just leaves the stream cold, same as before this existed.
+    """
+    global_config = config.get("global") or {}
+    go2rtc_config = (
+        global_config.get("go2rtc") if isinstance(global_config, dict) else {}
+    )
+    if not isinstance(go2rtc_config, dict) or not go2rtc_config.get("enabled"):
+        return {"ok": False, "reason": "go2rtc_disabled"}
+    camera_config = (config.get("cameras") or {}).get(camera_name)
+    if not isinstance(camera_config, dict):
+        return {"ok": False, "reason": "camera_not_found"}
+    alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
+        "rtsp_url"
+    )
+    if not alignment_source:
+        return {"ok": False, "reason": "no_rtsp_source"}
+
+    with ptz_warm_streams_lock:
+        if camera_name in ptz_warm_streams:
+            return {"ok": True, "already_warm": True}
+        runtime_config = build_go2rtc_runtime_config(config)
+        api_base = _local_go2rtc_api_base(runtime_config)
+        if not api_base:
+            return {"ok": False, "reason": "api_unreachable"}
+        stream_name = go2rtc_stream_name(camera_name, global_config)
+        preload_query = (
+            str(go2rtc_config.get("preload_query") or "video").strip() or "video"
+        )
+        try:
+            _set_go2rtc_preload(api_base, stream_name, preload_query)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Could not warm go2rtc preload for %s: %s",
+                camera_name,
+                sanitize_text_for_logs(str(exc)),
+            )
+            return {"ok": False, "reason": "request_failed"}
+        ptz_warm_streams.add(camera_name)
+    return {"ok": True, "stream": stream_name}
+
+
+def release_ptz_stream(config: dict, camera_name: str) -> dict:
+    """Best-effort counterpart to warm_ptz_stream. Skips the release while a
+    local_rtsp launch recording is in progress for this camera -- Sunba has
+    no recording API, so that recording is a direct ffmpeg RTSP session to
+    the camera, and tearing down/reopening go2rtc's own RTSP connection to
+    the same camera mid-recording risks tripping a low concurrent-session
+    limit right when it matters most.
+    """
+    with ptz_warm_streams_lock:
+        if camera_name not in ptz_warm_streams:
+            return {"ok": True, "already_released": True}
+        if local_rtsp_recording_active(camera_name):
+            return {"ok": True, "skipped": "recording_in_progress"}
+        global_config = config.get("global") or {}
+        runtime_config = build_go2rtc_runtime_config(config)
+        api_base = _local_go2rtc_api_base(runtime_config)
+        stream_name = go2rtc_stream_name(camera_name, global_config)
+        if api_base:
+            try:
+                _clear_go2rtc_preload(api_base, stream_name)
+            except requests.RequestException as exc:
+                logger.warning(
+                    "Could not release go2rtc preload for %s: %s",
+                    camera_name,
+                    sanitize_text_for_logs(str(exc)),
+                )
+        ptz_warm_streams.discard(camera_name)
+    return {"ok": True, "stream": stream_name}
+
+
+def warm_ptz_camera_names() -> set:
+    with ptz_warm_streams_lock:
+        return set(ptz_warm_streams)
 
 
 def _sync_go2rtc_runtime(
