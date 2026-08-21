@@ -214,8 +214,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'sunba-cgi-legacy', label: 'Sunba legacy CGI', url: 'http://CAMERA_IP:HTTP_PORT/cgi-bin/snapshot.cgi?chn=0&u=USERNAME&p=PASSWORD', auth: 'basic' }
             ],
             rtsp: [
-                { id: 'sunba-11', label: 'Main stream /11', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/11' },
-                { id: 'sunba-12', label: 'Sub stream /12', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/12' }
+                { id: 'sunba-video1', label: 'Main stream /media/video1', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/media/video1' },
+                { id: 'sunba-video2', label: 'Sub stream /media/video2', url: 'rtsp://USERNAME:PASSWORD@CAMERA_IP:554/media/video2' }
             ]
         },
         hikvision: {

@@ -863,6 +863,21 @@ function applyCameraMetadata(camera, listItem, metadata, options = {}) {
     const basePath = camera.dynamic_metadata.substring(0, camera.dynamic_metadata.lastIndexOf('/'));
     const fullImageUrl = `/${basePath}/${lastPictureUrl}`;
     const filename = lastPictureUrl.substring(lastPictureUrl.lastIndexOf('/') + 1);
+    const imageDate = parseTimestampFromFilename(filename);
+
+    // Two independent code paths call this: the 60s background refresh
+    // (updateAllCameras) and a PTZ-move-triggered poll (pollCameraSnapshot-
+    // Refresh). Both are plain fetch() calls with no cancellation, so over a
+    // higher-latency/lossy link (e.g. an AREDN mesh hop) an older, slower
+    // request can resolve *after* a newer, faster one -- and would
+    // otherwise silently overwrite a just-applied fresh picture with a
+    // stale one, which looks exactly like "it says refreshed but the image
+    // didn't change". Guard by the picture's own timestamp, not request
+    // order, so a late-arriving stale response can never step backwards.
+    const previousImageDate = listItem._fenetreLastImageDate;
+    if (imageDate && previousImageDate && imageDate.getTime() < previousImageDate.getTime()) {
+        return listItem.dataset.lastPictureUrl || fullImageUrl;
+    }
 
     const imageSrc = options.cacheBustImages
         ? cacheBustedImageUrl(fullImageUrl)
@@ -870,10 +885,12 @@ function applyCameraMetadata(camera, listItem, metadata, options = {}) {
     thumbImg.src = imageSrc;
     detailsImg.src = imageSrc;
     listItem.dataset.lastPictureUrl = fullImageUrl;
+    if (imageDate) {
+        listItem._fenetreLastImageDate = imageDate;
+    }
     filenameLink.textContent = `Download: ${filename}`;
     filenameLink.href = fullImageUrl;
 
-    const imageDate = parseTimestampFromFilename(filename);
     if (imageDate) {
         lastPictureTime.textContent = `Last picture: ${imageDate.toLocaleString()}`;
         status.className = `status ${(new Date() - imageDate) < 180000 ? 'online' : 'offline'}`;

@@ -237,7 +237,7 @@ class ConfigServerTestCase(unittest.TestCase):
             "display_name": "Ridge Cam",
             "template_vendor": "sunba",
             "snapshot_template": "sunba-images",
-            "rtsp_template": "sunba-12",
+            "rtsp_template": "sunba-video2",
             "description": "Ridge view across the valley",
             "url": "http://camera/snapshot.jpg",
             "timeout_s": 12,
@@ -312,7 +312,7 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(camera["display_name"], "Ridge Cam")
         self.assertEqual(camera["template_vendor"], "sunba")
         self.assertEqual(camera["snapshot_template"], "sunba-images")
-        self.assertEqual(camera["rtsp_template"], "sunba-12")
+        self.assertEqual(camera["rtsp_template"], "sunba-video2")
         self.assertEqual(camera["description"], "Ridge view across the valley")
         self.assertFalse(camera["public"])
         self.assertEqual(camera["visibility"], "authenticated")
