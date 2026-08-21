@@ -1547,7 +1547,10 @@ function updateCamera(camera, cameraData) {
         });
 }
 
+let lastAutoRefreshAt = 0;
+
 function updateAllCameras() {
+    lastAutoRefreshAt = Date.now();
     updatePrivateLanding();
     if (!siteIsPublic && !authUser) {
         return;
@@ -1600,3 +1603,18 @@ function updateAllCameras() {
 
 loadAuthStatus().then(updateAllCameras);
 setInterval(updateAllCameras, 60000);
+
+// Chromium-family browsers (Brave included) throttle timers in background
+// tabs -- both this 60s interval and an in-progress PTZ poll's 1.5s
+// setTimeout chain can stall while the tab is hidden or the phone screen is
+// locked. That reads as "the snapshot sometimes just doesn't refresh" even
+// though the fix on the server/poll side is working; the fetch simply never
+// ran while backgrounded. Force one immediate refresh the moment the tab
+// becomes visible again so the display is never more than one stalled cycle
+// behind reality. Throttled to avoid piling on if visibilitychange fires in
+// quick succession (e.g. rapid tab switching).
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastAutoRefreshAt > 5000) {
+        updateAllCameras();
+    }
+});
