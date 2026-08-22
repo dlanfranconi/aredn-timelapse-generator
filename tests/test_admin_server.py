@@ -2025,6 +2025,86 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertIn("Request body must be JSON", response.json["error"])
 
+    def test_get_config_includes_config_version(self):
+        response = self.app.get("/config")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.json.get("config_version"))
+
+    def test_update_config_accepts_matching_config_version(self):
+        current_version = self.app.get("/config").json["config_version"]
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "config_version": current_version,
+                    "config": {
+                        "global": {"setting": "new_value"},
+                        "cameras": {"cam1": {"url": "http://localhost"}},
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(updated_data_yaml["global"]["setting"], "new_value")
+
+    def test_update_config_rejects_stale_config_version(self):
+        stale_version = self.app.get("/config").json["config_version"]
+
+        # Simulate a concurrent save (e.g. a PTZ preset edit from another
+        # admin tab) landing on disk after this client's snapshot was taken.
+        concurrent_data = dict(self.test_config_data)
+        concurrent_data["cameras"] = {
+            "cam1": {
+                "url": "http://localhost",
+                "ptz": {"enabled": True, "presets": [{"id": "1", "name": "Home"}]},
+            }
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(concurrent_data, f)
+
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "config_version": stale_version,
+                    "config": {
+                        "global": {"setting": "new_value_from_stale_form"},
+                        "cameras": {"cam1": {"url": "http://localhost"}},
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(response.json.get("conflict"))
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        # The concurrent preset save must survive; the stale PUT must not
+        # have overwritten config.yaml at all.
+        self.assertEqual(
+            updated_data_yaml["cameras"]["cam1"]["ptz"]["presets"],
+            [{"id": "1", "name": "Home"}],
+        )
+        self.assertEqual(updated_data_yaml["global"]["setting"], "value")
+
+    def test_update_config_without_config_version_is_not_blocked(self):
+        # Backward compatibility: callers that don't send config_version
+        # (or older cached admin pages) keep working as before.
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "global": {"setting": "new_value"},
+                    "cameras": {"cam1": {"url": "http://localhost"}},
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
     def test_update_config_preserves_users_when_omitted(self):
         self.test_config_data["users"] = {
             "operator": {

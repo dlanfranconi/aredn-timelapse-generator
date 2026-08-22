@@ -180,6 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const configFormContainer = document.getElementById('configFormContainer');
     const statusMessage = document.getElementById('statusMessage');
     let loadedConfigData = null;
+    let loadedConfigVersion = null;
     let newCameraLastTest = null;
     let usersPayload = { users: [], cameras: [] };
     let cameraFormMode = 'add';
@@ -1314,9 +1315,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/config', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(configData),
+                body: JSON.stringify({ config_version: loadedConfigVersion, config: configData }),
             });
             const result = await response.json();
+            if (response.status === 409) {
+                setStatus(result.error || 'Configuration changed elsewhere; reloading the latest version.', 'error');
+                await fetchAndDisplayConfig();
+                return;
+            }
             if (!response.ok) {
                 throw new Error(result.error || `HTTP error! status: ${response.status}`);
             }
@@ -2099,11 +2105,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const config = await response.json();
             loadedConfigData = config.config || config;
+            loadedConfigVersion = config.config_version || null;
             syncSiteInputsFromConfig(loadedConfigData);
             syncLaunchInputsFromConfig(loadedConfigData);
             saveSiteNameBtn.disabled = false;
             populateCameraEditOptions();
-            renderConfigForm(config, configFormContainer, '');
+            renderConfigForm(loadedConfigData, configFormContainer, '');
             setStatus('Configuration loaded successfully.', 'success');
             saveConfigBtn.disabled = false;
         } catch (error) {
@@ -3107,8 +3114,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(configData),
+                body: JSON.stringify({ config_version: loadedConfigVersion, config: configData }),
             });
+            if (response.status === 409) {
+                const conflictData = await response.json().catch(() => ({}));
+                setStatus(conflictData.error || 'Configuration changed elsewhere; reloading the latest version.', 'error');
+                await fetchAndDisplayConfig();
+                return;
+            }
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);

@@ -538,6 +538,23 @@ def _load_effective_config_with_raw() -> tuple[dict, dict]:
     return raw_config, _get_effective_config(raw_config)
 
 
+def _config_version(config_file_path: str) -> str | None:
+    """Opaque token that changes whenever config.yaml is written.
+
+    The admin UI's "whole config" editors (raw config form, launch workflow
+    form, etc.) hold their own client-side snapshot of the full config and
+    PUT it back wholesale. If config.yaml was written by something else (a
+    different admin tab doing a scoped save, e.g. a PTZ preset edit) after
+    that snapshot was taken, PUTting the stale snapshot back would silently
+    revert the newer change. Callers compare this token to detect that case
+    instead of clobbering it -- see update_config().
+    """
+    try:
+        return str(os.stat(config_file_path).st_mtime_ns)
+    except FileNotFoundError:
+        return None
+
+
 def _backup_config(config_file_path: str) -> str | None:
     if not os.path.exists(config_file_path):
         return None
@@ -1657,7 +1674,15 @@ def go2rtc_status():
 def get_config():
     try:
         raw_config, effective_config = _load_effective_config_with_raw()
-        return jsonify({"config": effective_config}), 200
+        return (
+            jsonify(
+                {
+                    "config": effective_config,
+                    "config_version": _config_version(_config_file_path()),
+                }
+            ),
+            200,
+        )
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as e:
@@ -2032,6 +2057,12 @@ def update_config():
         new_config_json = request.get_json()
         if not new_config_json:
             return jsonify({"error": "Request body is empty or not valid JSON."}), 400
+        submitted_version = None
+        if isinstance(new_config_json, dict) and "config_version" in new_config_json:
+            submitted_version = new_config_json.get("config_version")
+            new_config_json = {
+                k: v for k, v in new_config_json.items() if k != "config_version"
+            }
         if "config" in new_config_json and len(new_config_json.keys()) == 1:
             new_config_json = new_config_json["config"]
         if not isinstance(new_config_json, dict):
@@ -2040,6 +2071,23 @@ def update_config():
                     {"error": "Root element of the configuration must be a dictionary."}
                 ),
                 400,
+            )
+        current_version = _config_version(config_file_path)
+        if submitted_version is not None and submitted_version != current_version:
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Configuration changed on the server since this page was "
+                            "loaded (e.g. a preset or setting was saved elsewhere). "
+                            "Reload the configuration and reapply your change before "
+                            "saving again, or you will overwrite that other change."
+                        ),
+                        "conflict": True,
+                        "current_config_version": current_version,
+                    }
+                ),
+                409,
             )
         raw_config = _load_raw_config()
         existing_config = _get_effective_config(raw_config)
@@ -2088,6 +2136,7 @@ def update_config():
                     "runtime_reload": runtime_reload,
                     "user_camera_access_removed": user_access_removed,
                     "rejected_new_users": rejected_new_users,
+                    "config_version": _config_version(config_file_path),
                     **_config_write_metadata(config_file_path, backup_path),
                 }
             ),
