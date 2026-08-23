@@ -1375,6 +1375,9 @@ def camera_name_from_day_dir(day_dir: str) -> str:
     return os.path.basename(os.path.dirname(os.path.normpath(day_dir)))
 
 
+_PHOTO_DAY_DIRECTORY_PATH = re.compile(r"^/photos/[^/]+/\d{4}-\d{2}-\d{2}$")
+
+
 def canonical_request_path(path: str) -> str:
     """Decode percent-encoding and normalize a request path the same way
     SimpleHTTPRequestHandler.translate_path resolves it on disk (unquote the
@@ -2475,10 +2478,21 @@ window.location.replace({json.dumps(next_url)});
 
     def list_directory(self, path):
         # Directory listings would enumerate camera/launch names (including
-        # ones marked hidden/authenticated-only) and internal file layout.
-        # Nothing in the app links to or relies on them: the site root always
-        # serves a generated index.html, and camera/timelapse listings go
-        # through the JSON APIs above, which already apply visibility rules.
+        # ones marked hidden/authenticated-only) and internal file layout, so
+        # they're blocked by default: camera/timelapse listings go through
+        # the JSON APIs above, which already apply visibility rules.
+        #
+        # The one deliberate exception is a specific camera's specific day
+        # directory under /photos/, e.g. /photos/SomeCam/2026-08-22/ -- both
+        # list.js's "Today's Pictures" link and every per-day link the
+        # generated daylight-browser history page (daylight.py) produces
+        # point straight at that kind of URL, and it doesn't leak anything
+        # the requester doesn't already know: the camera name and date are
+        # already in the URL, and do_GET already enforced this exact path's
+        # camera visibility before super().do_GET() ever reached here.
+        canonical_path = canonical_request_path(urlparse(self.path).path)
+        if _PHOTO_DAY_DIRECTORY_PATH.match(canonical_path):
+            return super().list_directory(path)
         self.send_error(404, "File not found")
         return None
 

@@ -66,6 +66,52 @@ class TestFenetre(unittest.TestCase):
                     "public, max-age=31536000, immutable",
                 )
 
+    def _list_directory_for_path(self, path):
+        handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        handler.path = path
+        handler.send_error = MagicMock()
+        with patch(
+            "http.server.SimpleHTTPRequestHandler.list_directory"
+        ) as mock_super_list:
+            handler.list_directory("/unused/filesystem/path")
+        return handler.send_error, mock_super_list
+
+    def test_list_directory_blocks_camera_and_root_listings(self):
+        # These would enumerate camera/launch names, including hidden ones --
+        # must stay blocked.
+        for path in ("/photos/", "/photos/cam1/", "/photos/cam1", "/launches/"):
+            with self.subTest(path=path):
+                send_error, mock_super_list = self._list_directory_for_path(path)
+                send_error.assert_called_once_with(404, "File not found")
+                mock_super_list.assert_not_called()
+
+    def test_list_directory_allows_specific_camera_day_directory(self):
+        # "Today's Pictures" (list.js) and every per-day link the generated
+        # daylight-browser history page produces (daylight.py) point at
+        # exactly this shape of URL.
+        for path in (
+            "/photos/cam1/2026-08-22/",
+            "/photos/cam1/2026-08-22",
+            "/photos/AK6DM-Home/2026-08-22/",
+        ):
+            with self.subTest(path=path):
+                send_error, mock_super_list = self._list_directory_for_path(path)
+                send_error.assert_not_called()
+                mock_super_list.assert_called_once_with("/unused/filesystem/path")
+
+    def test_list_directory_rejects_lookalike_paths(self):
+        # Not a real YYYY-MM-DD day directory one level under a camera --
+        # must not slip through the allowlist.
+        for path in (
+            "/photos/cam1/2026-08-22/extra/",
+            "/photos/cam1/not-a-date/",
+            "/launches/cam1/2026-08-22/",
+        ):
+            with self.subTest(path=path):
+                send_error, mock_super_list = self._list_directory_for_path(path)
+                send_error.assert_called_once_with(404, "File not found")
+                mock_super_list.assert_not_called()
+
     def test_public_camera_visibility_respects_private_site_and_camera_flags(self):
         handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
         old_global_config = getattr(fenetre_module, "global_config", {})

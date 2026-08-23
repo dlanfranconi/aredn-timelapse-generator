@@ -6,6 +6,7 @@ import errno
 
 # Add project root to allow importing admin_server
 import sys
+import glob
 import shutil
 import tempfile
 import unittest
@@ -106,6 +107,43 @@ class ConfigServerTestCase(unittest.TestCase):
         with open(self.temp_config_file.name, "r") as f:
             updated_data_yaml = yaml.safe_load(f)
         self.assertEqual(updated_data_yaml, new_config_data_json)
+
+    def test_update_config_backup_lands_under_work_dir_not_beside_config_yaml(self):
+        # config.yaml is normally a single-file Docker bind mount
+        # (- /srv/fenetre/config.yaml:/srv/fenetre/config.yaml); a backup
+        # written as its sibling lives only in the container's throwaway
+        # layer and is lost on the next redeploy. work_dir is a real
+        # directory bind mount, so that's where backups need to go instead.
+        work_dir = tempfile.mkdtemp()
+        try:
+            self.test_config_data["global"]["work_dir"] = work_dir
+            with open(self.temp_config_file.name, "w") as f:
+                yaml.safe_dump(self.test_config_data, f)
+
+            response = self.app.put(
+                "/config",
+                data=json.dumps(
+                    {
+                        "global": {"setting": "new_value", "work_dir": work_dir},
+                        "cameras": {"cam1": {"url": "http://localhost"}},
+                    }
+                ),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200)
+
+            sibling_backups = glob.glob(f"{self.temp_config_file.name}.bak.*")
+            self.assertEqual(sibling_backups, [])
+
+            work_dir_backups = glob.glob(
+                os.path.join(work_dir, "config_backups", "config.yaml.bak.*")
+            )
+            self.assertEqual(len(work_dir_backups), 1)
+            with open(work_dir_backups[0]) as f:
+                backed_up = yaml.safe_load(f)
+            self.assertEqual(backed_up["global"]["setting"], "value")
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     def test_cross_origin_state_changing_request_is_rejected(self):
         # Basic Auth credentials are cached by the browser per-origin and

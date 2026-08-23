@@ -561,10 +561,46 @@ def _config_version(config_file_path: str) -> str | None:
         return None
 
 
-def _backup_config(config_file_path: str) -> str | None:
+def _config_backup_dir(config_data: dict) -> str | None:
+    """Where to put config.yaml backups so they actually survive a redeploy.
+
+    The documented docker-compose setup bind-mounts config.yaml as a single
+    file (- /srv/fenetre/config.yaml:/srv/fenetre/config.yaml), not its
+    containing directory. A backup written as a sibling of config.yaml (the
+    old f"{config_file_path}.bak.{ts}" scheme) therefore lands in the
+    container's own writable layer and is silently gone the next time the
+    container is recreated -- these backups have never actually been
+    recoverable under that deployment model. work_dir (typically
+    /srv/fenetre/data) *is* a real directory bind mount, so put them there
+    instead.
+    """
+    effective = (
+        _get_effective_config(config_data) if isinstance(config_data, dict) else {}
+    )
+    global_config = effective.get("global") if isinstance(effective, dict) else None
+    work_dir = (
+        (global_config or {}).get("work_dir")
+        if isinstance(global_config, dict)
+        else None
+    )
+    if not work_dir:
+        return None
+    return os.path.join(str(work_dir), "config_backups")
+
+
+def _backup_config(config_file_path: str, backup_dir: str | None = None) -> str | None:
     if not os.path.exists(config_file_path):
         return None
-    backup_path = f"{config_file_path}.bak.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if backup_dir:
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, f"config.yaml.bak.{timestamp}")
+    else:
+        # Only reached if work_dir isn't configured yet (e.g. very first
+        # boot before any global.work_dir is set) -- not persisted across a
+        # container recreate under the standard single-file bind mount, see
+        # _config_backup_dir above.
+        backup_path = f"{config_file_path}.bak.{timestamp}"
     with open(config_file_path, "rb") as src, open(backup_path, "wb") as dst:
         dst.write(src.read())
     return backup_path
@@ -576,7 +612,7 @@ def _write_yaml_for_bind_mount(config_file_path: str, config_data: dict) -> str 
     os.replace(tmp, config.yaml) can fail with EBUSY on single-file bind mounts, so
     we keep a timestamped backup and then truncate/write/fsync the mounted file.
     """
-    backup_path = _backup_config(config_file_path)
+    backup_path = _backup_config(config_file_path, _config_backup_dir(config_data))
     rendered = yaml.safe_dump(
         config_data, sort_keys=False, default_flow_style=False, indent=2
     )
