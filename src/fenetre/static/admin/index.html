@@ -148,6 +148,29 @@
             </div>
 
             <div id="launchPreviewResult" class="launch-preview-result"></div>
+
+            <div class="section-header subsection-header">
+                <h3>Test Recording</h3>
+            </div>
+            <p class="launch-test-recording-note">
+                Record a short clip straight from a camera's RTSP stream to verify local_rtsp
+                launch recording works, without waiting for a real launch. Useful for cameras
+                whose on-camera recording API doesn't support this (Reolink models that reject
+                SetManualRec, Sunba). Test clips are admin-only and never appear on the public
+                launch dashboard.
+            </p>
+            <div class="form-grid launch-test-recording-grid">
+                <label for="launchTestCamera">Camera</label>
+                <select id="launchTestCamera"></select>
+
+                <label for="launchTestDuration">Duration seconds</label>
+                <input id="launchTestDuration" type="number" min="1" max="120" value="20">
+
+                <span></span>
+                <button id="launchTestRecordBtn" type="button">Start Test Recording</button>
+            </div>
+            <div id="launchTestRecordResult" class="launch-test-recording-result"></div>
+            <div id="launchTestRecordingsList" class="launch-test-recordings-list"></div>
             </div>
         </section>
 

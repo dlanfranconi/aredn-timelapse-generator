@@ -6,6 +6,7 @@ import errno
 
 # Add project root to allow importing admin_server
 import sys
+import shutil
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -2460,6 +2461,97 @@ class PtzWarmStreamTests(unittest.TestCase):
         # Still tracked as warm -- the sweep loop will retry once recording
         # actually finishes rather than losing track of it here.
         self.assertIn("cam1", warm_ptz_camera_names())
+
+
+class ManualRecordingTestEndpointTests(unittest.TestCase):
+    """Admin-only manual local_rtsp test-recording tool: trigger a short
+    clip, list past test clips, stream one back, delete one -- covering the
+    Reolink-SetManualRec-unsupported / Sunba-has-no-recording-API gap where
+    there's otherwise no way to test launch recording without a real launch.
+    """
+
+    def setUp(self):
+        self.app = flask_app.test_client()
+        self.app.testing = True
+        reset_login_throttle_state()
+        self.work_dir = tempfile.mkdtemp()
+
+        self.temp_config_file = tempfile.NamedTemporaryFile(
+            mode="w+", delete=False, suffix=".yaml"
+        )
+        yaml.dump(
+            {
+                "global": {"work_dir": self.work_dir},
+                "cameras": {
+                    "Cam One": {"rtsp_url": "rtsp://user:pass@camera.local:554/main"}
+                },
+            },
+            self.temp_config_file,
+        )
+        self.temp_config_file.close()
+
+        flask_app.config["FENETRE_CONFIG_FILE"] = self.temp_config_file.name
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+
+    def tearDown(self):
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        shutil.rmtree(self.work_dir, ignore_errors=True)
+        os.unlink(self.temp_config_file.name)
+
+    def test_start_requires_camera(self):
+        response = self.app.post("/api/launches/local_rtsp_test", json={})
+        self.assertEqual(response.status_code, 400)
+
+    def test_start_rejects_unknown_camera(self):
+        response = self.app.post(
+            "/api/launches/local_rtsp_test", json={"camera": "nope"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json["ok"])
+
+    @patch("fenetre.launch_workflow.subprocess.run")
+    def test_start_success_then_list_then_file_then_delete(self, mock_run):
+        def fake_run(command, **kwargs):
+            with open(command[-1], "wb") as f:
+                f.write(b"fake video bytes")
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = fake_run
+
+        start = self.app.post(
+            "/api/launches/local_rtsp_test",
+            json={"camera": "Cam One", "duration_s": 5},
+        )
+        self.assertEqual(start.status_code, 200)
+        self.assertTrue(start.json["ok"])
+        filename = start.json["filename"]
+
+        # Must not be reachable under the public launches/ tree.
+        self.assertFalse(
+            os.path.exists(os.path.join(self.work_dir, "launches", filename))
+        )
+
+        listing = self.app.get("/api/launches/local_rtsp_test")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.json["recordings"]), 1)
+        self.assertEqual(listing.json["recordings"][0]["camera"], "Cam One")
+
+        fetched = self.app.get(f"/api/launches/local_rtsp_test/file/{filename}")
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.data, b"fake video bytes")
+
+        deleted = self.app.delete(f"/api/launches/local_rtsp_test/file/{filename}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.json["ok"])
+
+        listing_after = self.app.get("/api/launches/local_rtsp_test")
+        self.assertEqual(listing_after.json["recordings"], [])
+
+    def test_file_endpoint_rejects_path_traversal(self):
+        response = self.app.get(
+            "/api/launches/local_rtsp_test/file/..%2F..%2Fetc%2Fpasswd"
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

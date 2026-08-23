@@ -5,13 +5,18 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from fenetre.launch_workflow import (
+    LaunchWorkflowError,
+    delete_manual_recording_test,
     due_launch_actions,
     execute_launch_action,
+    list_manual_recording_tests,
     list_past_launch_recordings,
     local_rtsp_recording_active,
+    manual_recording_test_file_path,
     normalize_launch_event,
     preview_launch_workflow,
     run_due_launch_actions,
+    run_manual_recording_test,
     _local_rtsp_recorders,
 )
 
@@ -164,6 +169,156 @@ class LaunchWorkflowTestCase(unittest.TestCase):
         recording = history["launches"][0]["recordings"][0]
         self.assertEqual(recording["camera"], "Cam One")
         self.assertEqual(recording["url"], "/launches/falcon-9/falcon-9-cam-one.mp4")
+
+    def test_list_past_launch_recordings_excludes_in_progress_local_rtsp_file(self):
+        _local_rtsp_recorders.clear()
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                launch_dir = os.path.join(temp_dir, "launches", "falcon-9")
+                os.makedirs(launch_dir)
+                finished_path = os.path.join(launch_dir, "falcon-9-cam-one.mp4")
+                with open(finished_path, "wb") as recording_file:
+                    recording_file.write(b"video")
+                in_progress_path = os.path.join(launch_dir, "falcon-9-cam-two.mp4")
+                with open(in_progress_path, "wb") as recording_file:
+                    recording_file.write(b"partial")
+
+                _local_rtsp_recorders["falcon-9:vandenberg:cam-two"] = {
+                    "path": in_progress_path,
+                    "camera": "Cam Two",
+                }
+
+                config = sample_config()
+                config["global"]["work_dir"] = temp_dir
+                config["global"]["storage_management"] = {
+                    "enabled": True,
+                    "work_dir_max_size_GB": 40,
+                }
+                config["cameras"] = {
+                    "Cam One": {"url": "http://camera.local"},
+                    "Cam Two": {"url": "http://camera2.local"},
+                }
+
+                history = list_past_launch_recordings(config)
+        finally:
+            _local_rtsp_recorders.clear()
+
+        self.assertEqual(history["launches"][0]["recording_count"], 1)
+        self.assertEqual(
+            [r["camera"] for r in history["launches"][0]["recordings"]], ["Cam One"]
+        )
+
+    def test_run_manual_recording_test_requires_known_camera(self):
+        config = sample_config()
+        config["cameras"] = {}
+        with self.assertRaises(LaunchWorkflowError):
+            run_manual_recording_test(config, "missing-cam")
+
+    @patch("fenetre.launch_workflow.subprocess.run")
+    def test_run_manual_recording_test_success_writes_outside_launches_dir(
+        self, mock_run
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            config["cameras"] = {
+                "Cam One": {"rtsp_url": "rtsp://user:pass@camera.local:554/main"}
+            }
+
+            def fake_run(command, **kwargs):
+                output_path = command[-1]
+                with open(output_path, "wb") as f:
+                    f.write(b"fake video bytes")
+                return MagicMock(returncode=0, stderr="")
+
+            mock_run.side_effect = fake_run
+
+            result = run_manual_recording_test(config, "Cam One", duration_s=5)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["camera"], "Cam One")
+            self.assertGreater(result["bytes"], 0)
+            self.assertTrue(result["url"].startswith("/api/launches/local_rtsp_test/"))
+            # Must not land under the publicly-served launches/ tree.
+            self.assertFalse(
+                os.path.exists(os.path.join(temp_dir, "launches", result["filename"]))
+            )
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(temp_dir, "launch_tests", result["filename"])
+                )
+            )
+
+    @patch("fenetre.launch_workflow.subprocess.run")
+    def test_run_manual_recording_test_reports_ffmpeg_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="Connection refused")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            config["cameras"] = {
+                "Cam One": {"rtsp_url": "rtsp://user:pass@camera.local:554/main"}
+            }
+            result = run_manual_recording_test(config, "Cam One", duration_s=5)
+        self.assertFalse(result["ok"])
+        self.assertIn("Connection refused", result["error"])
+
+    def test_run_manual_recording_test_duration_is_clamped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            config["cameras"] = {
+                "Cam One": {"rtsp_url": "rtsp://user:pass@camera.local:554/main"}
+            }
+            with patch("fenetre.launch_workflow.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=1, stderr="boom")
+                run_manual_recording_test(config, "Cam One", duration_s=99999)
+                command = mock_run.call_args[0][0]
+                self.assertIn("-t", command)
+                self.assertEqual(command[command.index("-t") + 1], "120")
+
+    def test_list_manual_recording_tests_maps_camera_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tests_dir = os.path.join(temp_dir, "launch_tests")
+            os.makedirs(tests_dir)
+            with open(
+                os.path.join(tests_dir, "20260101T000000Z-cam-one.mp4"), "wb"
+            ) as f:
+                f.write(b"video")
+
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            config["cameras"] = {"Cam One": {"url": "http://camera.local"}}
+
+            result = list_manual_recording_tests(config)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["recordings"]), 1)
+        self.assertEqual(result["recordings"][0]["camera"], "Cam One")
+
+    def test_manual_recording_test_file_path_blocks_traversal(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+            with self.assertRaises(LaunchWorkflowError):
+                manual_recording_test_file_path(config, "../../etc/passwd")
+
+    def test_delete_manual_recording_test_removes_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tests_dir = os.path.join(temp_dir, "launch_tests")
+            os.makedirs(tests_dir)
+            target = os.path.join(tests_dir, "20260101T000000Z-cam-one.mp4")
+            with open(target, "wb") as f:
+                f.write(b"video")
+
+            config = sample_config()
+            config["global"]["work_dir"] = temp_dir
+
+            result = delete_manual_recording_test(
+                config, "20260101T000000Z-cam-one.mp4"
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(os.path.isfile(target))
 
     def test_due_launch_actions_builds_prelaunch_actions(self):
         actions = due_launch_actions(

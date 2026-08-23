@@ -43,9 +43,15 @@ from fenetre.image_profiles import ImageProfileError, apply_image_profile
 from fenetre.log_sanitizer import sanitize_text_for_logs
 from fenetre.media_storage import describe_media_location, relocate_media_storage
 from fenetre.launch_workflow import (
+    MANUAL_RECORDING_TEST_DEFAULT_DURATION_S,
+    LaunchWorkflowError,
+    delete_manual_recording_test,
+    list_manual_recording_tests,
     local_rtsp_recording_active,
+    manual_recording_test_file_path,
     preview_launch_workflow,
     run_due_launch_actions,
+    run_manual_recording_test,
     test_reolink_recording_action,
 )
 from fenetre.ptz import discover_presets, set_lock
@@ -2520,6 +2526,76 @@ def test_reolink_launch_recording():
         return jsonify(result), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/local_rtsp_test", methods=["POST"])
+def start_local_rtsp_test_recording():
+    """Manually trigger a short local_rtsp test recording for a camera.
+
+    Reolink cameras that reject SetManualRec and Sunba cameras (no known
+    on-camera recording API) have no working way to test launch recording
+    from the camera side -- this records a short clip straight from the
+    camera's rtsp_url instead, outside the public launches/ tree, so it can
+    be reviewed via /api/launches/local_rtsp_test (GET) before trusting an
+    unattended launch capture.
+    """
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = str(payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"ok": False, "error": "camera is required."}), 400
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
+        _, config = _load_effective_config_with_raw()
+        result = run_manual_recording_test(
+            config,
+            camera_name,
+            duration_s=int(
+                payload.get("duration_s") or MANUAL_RECORDING_TEST_DEFAULT_DURATION_S
+            ),
+        )
+        return jsonify(result), (200 if result.get("ok") else 502)
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/local_rtsp_test", methods=["GET"])
+def list_local_rtsp_test_recordings():
+    try:
+        _, config = _load_effective_config_with_raw()
+        return jsonify(list_manual_recording_tests(config)), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/local_rtsp_test/file/<path:filename>", methods=["GET"])
+def get_local_rtsp_test_recording(filename):
+    try:
+        _, config = _load_effective_config_with_raw()
+        path = manual_recording_test_file_path(config, filename)
+        return send_file(path, mimetype="video/mp4", conditional=True)
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/local_rtsp_test/file/<path:filename>", methods=["DELETE"])
+def delete_local_rtsp_test_recording(filename):
+    try:
+        _, config = _load_effective_config_with_raw()
+        return jsonify(delete_manual_recording_test(config, filename)), 200
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.route("/api/camera/add", methods=["POST"])

@@ -115,6 +115,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const previewLaunchWorkflowBtn = document.getElementById('previewLaunchWorkflowBtn');
     const saveLaunchWorkflowBtn = document.getElementById('saveLaunchWorkflowBtn');
     const launchPreviewResult = document.getElementById('launchPreviewResult');
+    const launchTestCamera = document.getElementById('launchTestCamera');
+    const launchTestDuration = document.getElementById('launchTestDuration');
+    const launchTestRecordBtn = document.getElementById('launchTestRecordBtn');
+    const launchTestRecordResult = document.getElementById('launchTestRecordResult');
+    const launchTestRecordingsList = document.getElementById('launchTestRecordingsList');
     const addCameraModal = document.getElementById('addCameraModal');
     const cameraModalTitle = document.getElementById('cameraModalTitle');
     const closeAddCameraModalBtn = document.getElementById('closeAddCameraModalBtn');
@@ -306,6 +311,17 @@ document.addEventListener('DOMContentLoaded', () => {
     previewLaunchWorkflowBtn.addEventListener('click', previewLaunchWorkflow);
     saveLaunchWorkflowBtn.addEventListener('click', saveLaunchWorkflow);
     launchWorkflowEnabled.addEventListener('change', syncLaunchWorkflowEnabledState);
+    if (launchTestRecordBtn) {
+        launchTestRecordBtn.addEventListener('click', startTestRecording);
+    }
+    if (launchTestRecordingsList) {
+        launchTestRecordingsList.addEventListener('click', event => {
+            const button = event.target.closest('.launch-test-recording-delete-btn');
+            if (button) {
+                deleteTestRecording(button.dataset.filename);
+            }
+        });
+    }
     newUserBtn.addEventListener('click', clearUserForm);
     userForm.addEventListener('submit', saveUser);
     passwordForm.addEventListener('submit', changeAdminPassword);
@@ -1164,6 +1180,128 @@ document.addEventListener('DOMContentLoaded', () => {
         launchPostSeconds.value = plan.post_seconds ?? workflow.default_post_seconds ?? 900;
         renderLaunchCameraPlans(configData, plan);
         syncLaunchWorkflowEnabledState();
+        populateLaunchTestCameraOptions(configData);
+    }
+
+    function populateLaunchTestCameraOptions(configData) {
+        if (!launchTestCamera) {
+            return;
+        }
+        const cameras = (configData && configData.cameras) || {};
+        const previousValue = launchTestCamera.value;
+        launchTestCamera.innerHTML = '';
+        const names = orderedCameraNames(configData).filter(name => (cameras[name] || {}).rtsp_url);
+        if (!names.length) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No cameras have rtsp_url set';
+            launchTestCamera.appendChild(option);
+            launchTestCamera.disabled = true;
+            return;
+        }
+        launchTestCamera.disabled = false;
+        names.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = cameraDisplayName(name, cameras[name] || {});
+            launchTestCamera.appendChild(option);
+        });
+        if (names.includes(previousValue)) {
+            launchTestCamera.value = previousValue;
+        }
+    }
+
+    function formatBytes(bytes) {
+        const value = Number(bytes) || 0;
+        if (value < 1024) {
+            return `${value} B`;
+        }
+        const units = ['KB', 'MB', 'GB'];
+        let scaled = value;
+        let unitIndex = -1;
+        while (scaled >= 1024 && unitIndex < units.length - 1) {
+            scaled /= 1024;
+            unitIndex += 1;
+        }
+        return `${scaled.toFixed(1)} ${units[Math.max(unitIndex, 0)]}`;
+    }
+
+    function renderTestRecordingsList(recordings) {
+        if (!launchTestRecordingsList) {
+            return;
+        }
+        if (!recordings.length) {
+            launchTestRecordingsList.innerHTML = '<div class="launch-empty">No test recordings yet.</div>';
+            return;
+        }
+        launchTestRecordingsList.innerHTML = recordings.map(recording => `
+            <div class="launch-camera-card" data-filename="${escapeHtml(recording.filename)}">
+                <strong>${escapeHtml(recording.camera || 'Camera')}</strong>
+                <a href="${escapeHtml(recording.url)}" target="_blank" rel="noopener">${escapeHtml(recording.filename)}</a>
+                <span>${escapeHtml(formatBytes(recording.bytes))}</span>
+                <small>${escapeHtml(new Date(recording.modified_at).toLocaleString())}</small>
+                <button type="button" class="launch-test-recording-delete-btn" data-filename="${escapeHtml(recording.filename)}">Delete</button>
+            </div>
+        `).join('');
+    }
+
+    async function loadTestRecordings() {
+        if (!launchTestRecordingsList) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/launches/local_rtsp_test');
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `HTTP ${response.status}`);
+            }
+            renderTestRecordingsList(result.recordings || []);
+        } catch (error) {
+            launchTestRecordingsList.innerHTML = `<div class="launch-empty">Error loading test recordings: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    async function startTestRecording() {
+        const camera = launchTestCamera.value;
+        if (!camera) {
+            launchTestRecordResult.textContent = 'Select a camera with rtsp_url set first.';
+            return;
+        }
+        const duration = intInputValue(launchTestDuration, 20);
+        launchTestRecordBtn.disabled = true;
+        launchTestRecordResult.textContent = `Recording ${duration}s from ${camera}...`;
+        try {
+            const response = await fetch('/api/launches/local_rtsp_test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera, duration_s: duration }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `HTTP ${response.status}`);
+            }
+            launchTestRecordResult.textContent = `Recorded ${formatBytes(result.bytes)} from ${camera} in ${result.elapsed_s}s.`;
+            await loadTestRecordings();
+        } catch (error) {
+            launchTestRecordResult.textContent = `Error: ${error.message}`;
+        } finally {
+            launchTestRecordBtn.disabled = false;
+        }
+    }
+
+    async function deleteTestRecording(filename) {
+        try {
+            const response = await fetch(`/api/launches/local_rtsp_test/file/${encodeURIComponent(filename)}`, {
+                method: 'DELETE',
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `HTTP ${response.status}`);
+            }
+            await loadTestRecordings();
+        } catch (error) {
+            launchTestRecordResult.textContent = `Error deleting recording: ${error.message}`;
+        }
     }
 
     function collectLaunchCameraPlans() {
@@ -3232,6 +3370,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchAndDisplayConfig();
     loadStorageSummary();
     loadMediaLocation();
+    loadTestRecordings();
 
     function handleAddCamera() {
         resetCameraForm();

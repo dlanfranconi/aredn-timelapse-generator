@@ -279,14 +279,10 @@
             parts.push('keep active HD viewers');
         }
         const detail = parts.length ? parts.join(' | ') : 'listed only';
-        const path = camera.download_path
-            ? `<small>Recording path: ${escapeHtml(camera.download_path)}</small>`
-            : '';
         return `
             <div class="launch-camera-card">
                 <strong>${escapeHtml(camera.name)}</strong>
                 <span>${escapeHtml(detail)}</span>
-                ${path}
             </div>
         `;
     }

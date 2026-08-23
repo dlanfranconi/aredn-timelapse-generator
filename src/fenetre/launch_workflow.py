@@ -501,7 +501,6 @@ def preview_launch_workflow(
                             or record.get("download_url")
                             or record.get("download_command")
                         ),
-                        "download_path": str(record.get("download_path") or ""),
                         "skip_when_full_viewers": _bool_config(
                             record.get("skip_when_full_viewers"), False
                         ),
@@ -1123,6 +1122,11 @@ def list_past_launch_recordings(
         _slug(str(camera_name)).casefold(): str(camera_name)
         for camera_name in (config.get("cameras") or {}).keys()
     }
+    in_progress_paths = {
+        os.path.abspath(str(recorder.get("path")))
+        for recorder in _local_rtsp_recorders.values()
+        if isinstance(recorder, dict) and recorder.get("path")
+    }
     launch_items = []
     for entry in os.scandir(launches_dir):
         if not entry.is_dir():
@@ -1135,6 +1139,11 @@ def list_past_launch_recordings(
                     continue
                 path = os.path.join(root, filename)
                 if not os.path.isfile(path):
+                    continue
+                if os.path.abspath(path) in in_progress_paths:
+                    # A local_rtsp recording still being written by ffmpeg for
+                    # this launch's pre/post window -- don't surface a partial
+                    # file as if it were a finished recording.
                     continue
                 stat = os.stat(path)
                 if stat.st_size <= 0:
@@ -1171,6 +1180,156 @@ def list_past_launch_recordings(
     launch_items.sort(key=lambda item: item["mtime"], reverse=True)
     result["launches"] = launch_items[: max(1, int(limit or 100))]
     return result
+
+
+MANUAL_RECORDING_TEST_DEFAULT_DURATION_S = 20
+MANUAL_RECORDING_TEST_MAX_DURATION_S = 120
+
+
+def _manual_recording_tests_dir(config: Dict[str, Any]) -> str:
+    work_dir = str((config.get("global") or {}).get("work_dir") or "/tmp")
+    # Deliberately outside launches/ -- that tree is served publicly (see
+    # fenetre.py's /launches/ handler and _handle_launches_history_api), and
+    # test clips triggered from the admin panel should never show up there.
+    return os.path.join(work_dir, "launch_tests")
+
+
+def run_manual_recording_test(
+    config: Dict[str, Any],
+    camera_name: str,
+    duration_s: int = MANUAL_RECORDING_TEST_DEFAULT_DURATION_S,
+    now: datetime | None = None,
+) -> Dict[str, Any]:
+    """Record a short clip straight from a camera's rtsp_url so an admin can
+    verify local_rtsp launch recording works ahead of a real launch.
+
+    Reolink models that reject SetManualRec and Sunba cameras (no known
+    recording API at all) have no working "start a test recording" path of
+    their own -- this is the substitute. Uses the exact same ffmpeg command
+    as the real record_start/record_stop local_rtsp action, just run
+    synchronously for a bounded duration instead of started/stopped async.
+    """
+    cameras = config.get("cameras") or {}
+    camera_config = cameras.get(camera_name)
+    if not isinstance(camera_config, dict):
+        raise LaunchWorkflowError(f"Camera '{camera_name}' was not found.")
+
+    duration_s = max(
+        1,
+        min(
+            int(duration_s or MANUAL_RECORDING_TEST_DEFAULT_DURATION_S),
+            MANUAL_RECORDING_TEST_MAX_DURATION_S,
+        ),
+    )
+    source_url = _local_rtsp_recording_source(camera_config, {}, {})
+
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    tests_dir = _manual_recording_tests_dir(config)
+    os.makedirs(tests_dir, exist_ok=True)
+    filename = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{_slug(camera_name)}.mp4"
+    output_path = os.path.join(tests_dir, filename)
+
+    command = _local_rtsp_ffmpeg_command(source_url, output_path, {}, duration_s)
+    started_at = time.time()
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=duration_s + 30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "camera": camera_name,
+            "error": "ffmpeg did not finish within the expected time.",
+        }
+    elapsed_s = time.time() - started_at
+
+    if (
+        completed.returncode != 0
+        or not os.path.isfile(output_path)
+        or os.path.getsize(output_path) <= 0
+    ):
+        return {
+            "ok": False,
+            "camera": camera_name,
+            "error": (completed.stderr or "Recording failed.").strip()[-2000:],
+        }
+
+    stat = os.stat(output_path)
+    return {
+        "ok": True,
+        "camera": camera_name,
+        "filename": filename,
+        "bytes": stat.st_size,
+        "requested_duration_s": duration_s,
+        "elapsed_s": round(elapsed_s, 1),
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "url": f"/api/launches/local_rtsp_test/file/{quote(filename)}",
+    }
+
+
+def list_manual_recording_tests(
+    config: Dict[str, Any], limit: int = 50
+) -> Dict[str, Any]:
+    tests_dir = _manual_recording_tests_dir(config)
+    camera_slug_map = {
+        _slug(str(camera_name)).casefold(): str(camera_name)
+        for camera_name in (config.get("cameras") or {}).keys()
+    }
+    recordings = []
+    if os.path.isdir(tests_dir):
+        for filename in os.listdir(tests_dir):
+            extension = os.path.splitext(filename)[1].lower()
+            if extension not in {".mp4", ".mov", ".mkv", ".webm", ".ts"}:
+                continue
+            path = os.path.join(tests_dir, filename)
+            if not os.path.isfile(path):
+                continue
+            stat = os.stat(path)
+            if stat.st_size <= 0:
+                continue
+            stem = os.path.splitext(filename)[0]
+            camera_slug = re.sub(r"^\d{8}T\d{6}Z-", "", stem)
+            recordings.append(
+                {
+                    "filename": filename,
+                    "camera": camera_slug_map.get(camera_slug.casefold(), camera_slug),
+                    "bytes": stat.st_size,
+                    "mtime": int(stat.st_mtime),
+                    "modified_at": datetime.fromtimestamp(
+                        stat.st_mtime, timezone.utc
+                    ).isoformat(),
+                    "url": f"/api/launches/local_rtsp_test/file/{quote(filename)}",
+                }
+            )
+    recordings.sort(key=lambda item: item["mtime"], reverse=True)
+    return {"ok": True, "recordings": recordings[: max(1, int(limit or 50))]}
+
+
+def manual_recording_test_file_path(config: Dict[str, Any], filename: str) -> str:
+    """Resolve a test-recording filename to its on-disk path.
+
+    Path-traversal safe: only the basename is used, and the result must
+    still resolve inside the tests directory.
+    """
+    tests_dir = os.path.abspath(_manual_recording_tests_dir(config))
+    safe_name = os.path.basename(str(filename or ""))
+    path = os.path.abspath(os.path.join(tests_dir, safe_name))
+    if path != tests_dir and not path.startswith(tests_dir + os.sep):
+        raise LaunchWorkflowError("Invalid filename.")
+    if not os.path.isfile(path):
+        raise LaunchWorkflowError("Recording not found.")
+    return path
+
+
+def delete_manual_recording_test(
+    config: Dict[str, Any], filename: str
+) -> Dict[str, Any]:
+    path = manual_recording_test_file_path(config, filename)
+    os.remove(path)
+    return {"ok": True}
 
 
 def _download_path_for_index(download_path: str, index: int, total: int) -> str:
