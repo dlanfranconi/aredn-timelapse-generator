@@ -2,12 +2,16 @@ import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SENSITIVE_URL_QUERY_KEYS = {
+    "access_token",
+    "api_key",
+    "apikey",
     "auth",
     "key",
     "pass",
     "password",
     "passwd",
     "pwd",
+    "secret",
     "session",
     "src",
     "token",
@@ -17,7 +21,8 @@ SENSITIVE_URL_QUERY_KEYS = {
 _URL_IN_TEXT_RE = re.compile(r"(?P<url>(?:https?|rtsps?)://[^\s'\"<>]+)")
 _SENSITIVE_PAIR_RE = re.compile(
     r"(?i)(?P<prefix>(?:[?&;]|\b)"
-    r"(?:auth|key|pass|password|passwd|pwd|session|src|token|user|username)=)"
+    r"(?:access_token|api_key|apikey|auth|key|pass|password|passwd|pwd|secret"
+    r"|session|src|token|user|username)=)"
     r"(?P<value>[^&;\s'\"<>]+)"
 )
 

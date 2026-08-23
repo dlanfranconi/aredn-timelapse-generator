@@ -420,6 +420,7 @@ def wait_for_ptz_idle(
     profile_token: str,
     timeout_s: float,
     poll_interval_s: float = 0.3,
+    initial_delay_s: float = 0.3,
 ) -> Optional[bool]:
     """Poll ONVIF GetStatus until MoveStatus reports the camera idle.
 
@@ -427,8 +428,16 @@ def wait_for_ptz_idle(
     once timeout_s elapses, or None if this camera/profile doesn't expose
     MoveStatus at all (or GetStatus itself fails) -- callers should fall
     back to a fixed delay in that case, same as before this existed.
+
+    initial_delay_s gives the camera a moment to actually start moving
+    before the first poll: GetStatus called immediately after issuing the
+    move command can still report the pre-move IDLE state (the camera
+    hasn't processed the command yet), which would make this return True
+    right away as if the move had already finished.
     """
     deadline = _now() + max(0.0, timeout_s)
+    if initial_delay_s > 0:
+        time.sleep(initial_delay_s)
     while True:
         try:
             status = _ptz_status(ptz_config, ptz_service, profile_token)

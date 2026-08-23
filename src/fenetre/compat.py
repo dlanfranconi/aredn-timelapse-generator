@@ -69,7 +69,9 @@ def patched_get_pic_from_url(
         "Connection": "close",
     }
 
-    verify_ssl = _bool_config(camera_config.get("verify_ssl"), default=False)
+    # TLS certificate verification is on by default; cameras behind a
+    # self-signed cert need to explicitly opt out with verify_ssl: false.
+    verify_ssl = _bool_config(camera_config.get("verify_ssl"), default=True)
     allow_redirects = _bool_config(camera_config.get("allow_redirects"), default=True)
 
     request_kwargs = {

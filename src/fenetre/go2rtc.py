@@ -177,8 +177,19 @@ def _has_url_query_key(query: list[tuple[str, str]], name: str) -> bool:
 
 
 def _split_go2rtc_source_params(source_text: str) -> tuple[str, list[str]]:
-    parts = source_text.split("#")
-    return parts[0], parts[1:]
+    """Split a go2rtc source string into its URL and '#'-delimited params.
+
+    go2rtc appends params as '#name=value' pairs after the connection URL
+    (see _join_go2rtc_source_params). Splitting on every '#' in the string
+    would corrupt an RTSP URL whose password contains a literal '#' -- only
+    look for the param delimiter after the URL's userinfo '@', if present,
+    so a '#' inside credentials stays part of the URL.
+    """
+    search_from = source_text.find("@") + 1
+    hash_index = source_text.find("#", search_from)
+    if hash_index == -1:
+        return source_text, []
+    return source_text[:hash_index], source_text[hash_index + 1 :].split("#")
 
 
 def _has_source_param(params: list[str], name: str) -> bool:

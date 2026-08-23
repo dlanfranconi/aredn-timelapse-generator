@@ -1301,3 +1301,10 @@ h1 {
         max-width: 600px;
     }
 }
+.app-footer {
+    margin-top: 24px;
+    padding: 12px 0;
+    text-align: center;
+    font-size: 0.8em;
+    color: #888;
+}

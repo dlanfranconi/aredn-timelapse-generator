@@ -459,6 +459,9 @@ def log_camera_error(camera_name: str, error_message: str, global_config: Dict):
     camera_logger.error(error_message)
 
 
+UNAVAILABLE_COMMAND_FAILURE_THRESHOLD = 3
+
+
 def run_camera_unavailable_command(
     camera_name: str, camera_config: Dict, reason: str
 ) -> None:
@@ -926,12 +929,21 @@ def snap(camera_name, camera_config: Dict):
     previous_pic_fullpath = os.path.join(previous_pic_dir, previous_pic_filename)
     previous_mode = "unknown"
     previous_pic = None
+    # Capture failures no longer kill this thread (see below), so the
+    # watchdog's is_alive() check can no longer detect "camera has been
+    # unavailable for a while" on its own. Track consecutive failures here
+    # instead and fire unavailable_command directly once, the same signal
+    # the watchdog used to provide by restarting a dead thread.
+    consecutive_capture_failures = 0
+    unavailable_command_fired = False
     while not exit_event.is_set():
         if not current_config_matches_snap_thread():
             return
         try:
             with profiler.timed(f"camera.{camera_name}.capture"):
                 previous_pic = capture(mode=previous_mode)
+            consecutive_capture_failures = 0
+            unavailable_command_fired = False
             break
         except Exception as e:
             error_msg = f"Failed to capture initial image for {camera_name}: {e}"
@@ -941,6 +953,17 @@ def snap(camera_name, camera_config: Dict):
             camera_online_metric.set(0.0)
             if mqtt_manager:
                 mqtt_manager.publish_camera_state(camera_name, False)
+            consecutive_capture_failures += 1
+            if (
+                consecutive_capture_failures >= UNAVAILABLE_COMMAND_FAILURE_THRESHOLD
+                and not unavailable_command_fired
+            ):
+                unavailable_command_fired = True
+                run_camera_unavailable_command(
+                    camera_name,
+                    camera_config,
+                    f"{consecutive_capture_failures} consecutive capture failures",
+                )
             retry_interval = capture_failure_retry_interval(camera_config)
             logger.info(
                 "%s: Initial capture failed; retrying in %.1fs without restarting the snap thread.",
@@ -1116,6 +1139,8 @@ def snap(camera_name, camera_config: Dict):
             try:
                 with profiler.timed(f"camera.{camera_name}.capture"):
                     new_pic = capture(current_mode)
+                consecutive_capture_failures = 0
+                unavailable_command_fired = False
                 break
             except Exception as e:
                 error_msg = f"Could not fetch picture for {camera_name}: {e}"
@@ -1125,6 +1150,18 @@ def snap(camera_name, camera_config: Dict):
                 camera_online_metric.set(0.0)
                 if mqtt_manager:
                     mqtt_manager.publish_camera_state(camera_name, False)
+                consecutive_capture_failures += 1
+                if (
+                    consecutive_capture_failures
+                    >= UNAVAILABLE_COMMAND_FAILURE_THRESHOLD
+                    and not unavailable_command_fired
+                ):
+                    unavailable_command_fired = True
+                    run_camera_unavailable_command(
+                        camera_name,
+                        camera_config,
+                        f"{consecutive_capture_failures} consecutive capture failures",
+                    )
                 retry_interval = capture_failure_retry_interval(
                     camera_config, current_sleep_interval
                 )

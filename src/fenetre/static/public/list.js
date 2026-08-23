@@ -393,6 +393,13 @@ function setDeploymentName(name) {
     document.title = `${deploymentName} Cameras`;
 }
 
+function setAppFooterVersion(version) {
+    const footer = document.getElementById('app-footer');
+    if (footer && version) {
+        footer.textContent = `Fenetre v${version}`;
+    }
+}
+
 function updateLaunchDashboardLink() {
     if (launchDashboardLink) {
         launchDashboardLink.hidden = !launchWorkflowEnabled;
@@ -1647,6 +1654,7 @@ function updateAllCameras() {
                 return;
             }
             setDeploymentName(data.global.deployment_name || deploymentName);
+            setAppFooterVersion(data.global.fenetre_version);
             const uiConfig = (data.global && data.global.ui) || {};
             siteIsPublic = uiConfig.public_site !== false;
             updateHeaderLinks(uiConfig);

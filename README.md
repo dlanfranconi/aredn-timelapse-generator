@@ -142,6 +142,8 @@ The `users:` block lives in `config.yaml`. Container rebuilds and upgrades do no
 
 Deleted cameras are automatically removed from every user's PTZ camera list during config saves.
 
+Every admin-panel config save keeps a timestamped backup at `work_dir/config_backups/config.yaml.bak.<UTC timestamp>`. These live under `work_dir` specifically so they survive a redeploy — a backup written as a sibling of `config.yaml` itself would only exist in the container's throwaway layer under the standard single-file bind mount (`- /srv/fenetre/config.yaml:/srv/fenetre/config.yaml`) and be gone the next time the container is recreated.
+
 If you lock yourself out, reset the default admin user from the container:
 
 ```bash
@@ -161,7 +163,7 @@ If captures still fail with `PermissionError`/`Operation not permitted` after th
 - `operator`: public dashboard access plus assigned PTZ control; no admin dashboard.
 - `viewer`: view-only public dashboard access; no admin dashboard.
 
-An `admin` account is scoped by the assigned-cameras list for PTZ lock/unlock and for triggering (non-dry-run) image-profile actions; only `superadmin` can set or change a camera's `local_command`/`unavailable_command` (these run as an OS command on the server, so this is a real privilege boundary, not just a UI convenience), manage other users, or change the media storage location.
+An `admin` account is scoped by the assigned-cameras list for PTZ lock/unlock, for triggering (non-dry-run) image-profile and Reolink/local-RTSP launch-recording test actions, for loading a camera's PTZ presets, and for editing, renaming, or reviewing that camera's local-RTSP test recordings; only `superadmin` can set or change a camera's `local_command`/`unavailable_command` (these run as an OS command on the server, so this is a real privilege boundary, not just a UI convenience), manage other users, change the media storage location, or save the whole-config editor (raw Configuration tab, Launch Workflow tab) — those apply site-wide rather than to one assigned camera. `GET /config` reflects the same scoping: a non-superadmin only sees their assigned cameras (in full, so they can still edit them), never the `users:` block, and every other section with credential-shaped fields redacted.
 
 Public-dashboard users can change their own password from the callsign/account menu in the top-right corner. Admin-dashboard users can also change their own password from the admin menu. Only a `superadmin` can set another user's password, and the last enabled `superadmin` account can't be deleted or demoted — promote another user first.
 
@@ -218,6 +220,8 @@ cameras:
 ```
 
 Use `type: basic` or `type: digest`. Some cameras reject unknown cache-busting query parameters; if a browser URL works but the admin test fails with `_fenetre_test=...`, set `cache_bust: false`.
+
+HTTPS snapshot URLs verify the camera's TLS certificate by default. A camera behind a self-signed certificate needs `verify_ssl: false` set explicitly, or its snapshot fetches will fail.
 
 Sunba snapshot cameras commonly use:
 
@@ -480,7 +484,7 @@ global:
 
 Storage limits are enforced in two passes when `global.storage_management.enabled` is true:
 
-- Per-camera cap: `camera.work_dir_max_size_GB`, or `global.storage_management.camera_max_size_GB` when the camera does not set its own value. This prunes only that camera's `work_dir/photos/<camera>` media folders.
+- Per-camera cap: `camera.work_dir_max_size_GB`, or `global.storage_management.camera_max_size_GB` when the camera does not set its own value. This prunes only that camera's `work_dir/photos/<camera>` media folders. `camera_max_size_GB` has no default — leave it unset for no per-camera cap (only the global cap applies) rather than having every camera newly start pruning against an unrequested limit.
 - Global cap: `global.storage_management.work_dir_max_size_GB`. This is the final ceiling for the whole `work_dir`, including all camera photos, timelapses, launch recordings, generated JSON, and other runtime files.
 
 When both a per-camera cap and a global cap are configured, Fenetre uses the lower value as that camera's effective cap. The global cap still runs after per-camera pruning, so the whole work directory is kept under the overall limit even when the sum of configured camera caps is larger than the global cap.
@@ -557,6 +561,8 @@ plans:
 ```
 
 Use `locations`, `pads`, `providers`, `names`, `statuses`, and `keywords` to include or exclude launch sources. A deployment in Florida can use a different plan; a deployment with no launch use case should leave `enabled: false`.
+
+**An empty list means "no filter on this field," not "match nothing."** `locations: []` matches launches at every location, not zero locations — so a plan meant to be Vandenberg-only needs `locations: [Vandenberg]` actually populated, not left as the empty default. If you're seeing launches from sites you didn't expect matched, check that the relevant `match` field isn't still empty.
 
 ### Launch Phases And Actions
 
@@ -694,6 +700,10 @@ global:
 
 For Sunba P636 V2, no verified public local HTTP API for start/stop/download of on-camera recordings has been found. Use `local_rtsp` for server-side launch recording or custom hooks only for URLs/commands you have tested against that camera or its management software.
 
+#### Test Recording Tool
+
+Cameras with no working on-camera recording API of their own (Reolink models that reject `SetManualRec`, Sunba) have no way to test launch recording short of waiting for a real launch. The admin Launch Automation panel's **Test Recording** section fixes that: pick any camera with `rtsp_url` set, choose a duration (up to 120s), and it records a short clip using the exact same `ffmpeg` command the real `local_rtsp` action uses. Test clips are written to `work_dir/launch_tests/`, deliberately outside the publicly-served `launches/` tree — they're reachable only through this admin-authenticated tool, never the public launch dashboard, and can be reviewed or deleted from the same panel.
+
 ### Launch Dashboards
 
 Admin launch dashboard:
@@ -708,7 +718,7 @@ Public launch dashboard:
 http://HOST:8888/launches.html
 ```
 
-The public launch dashboard is linked from the main camera page only when launch automation is enabled. It shows upcoming matched launch times, matching plans, relevant launch cameras, presets, image profiles, recording status, and configured download paths. It also lists past launch recordings saved under `work_dir/launches`, filtered by the same camera visibility rules as the main page.
+The public launch dashboard is linked from the main camera page only when launch automation is enabled. It shows upcoming matched launch times, matching plans, relevant launch cameras, presets, image profiles, and recording status. It never exposes server filesystem paths. It also lists past launch recordings saved under `work_dir/launches`, filtered by the same camera visibility rules as the main page — a `local_rtsp` recording still in progress (these run for the whole pre/post window, often 15+ minutes) is excluded until it's actually finished, rather than showing a partial file as if it were a completed recording.
 
 Past launch recordings follow the normal global storage policy. They count toward `global.storage_management.work_dir_max_size_GB`; if the global work directory is still over limit after normal camera pruning, Fenetre trims the oldest launch recording folders/files while preserving current-day launch recordings.
 
@@ -785,6 +795,8 @@ http://HOST:1984/
 If direct camera RTSP playback is stable but go2rtc pauses or buffers after a few seconds, inspect `/tmp/fenetre-go2rtc.yaml`. Current Fenetre defaults should generate stream sources like `ffmpeg:rtsp://...#video=copy#timeout=30`. On lossy mesh paths, test `go2rtc_rtsp_transport: udp` for the affected camera; the generated source should become `ffmpeg:rtsp://...#video=copy#input=rtsp/udp#timeout=30`. If the low-resolution aiming stream is black, test `go2rtc_video_mode: h264` on that camera. If a source still starts with plain `rtsp://`, reload/save the camera settings so the go2rtc runtime is synced, or set `global.go2rtc.source_mode: ffmpeg`.
 
 If ONVIF PTZ fails while RTSP works, test the ONVIF host and port separately from the RTSP URL. A `405 Method Not Allowed` response to a plain browser or curl GET on `/onvif/device_service` can still mean the ONVIF service is present, because ONVIF expects SOAP POST requests.
+
+If saving from the admin panel's raw Configuration tab or Launch Workflow tab fails with "Configuration changed on the server since this page was loaded," that's expected, not a bug: something else (another admin tab, a scoped save like editing a camera's PTZ presets) wrote `config.yaml` after this page's snapshot was fetched. Saving the stale snapshot would have silently reverted that other change, so it's rejected instead — reload the tab and reapply your edit.
 
 A `403 Cross-origin request rejected` from the admin API means the request's `Origin`/`Referer` header names a different host than the one being requested — the admin API rejects that as a CSRF-protection measure. This normally only happens from a script/browser context making requests to the wrong hostname; a request with neither header (e.g. plain `curl`) is unaffected.
 

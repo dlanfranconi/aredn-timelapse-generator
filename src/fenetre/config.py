@@ -271,11 +271,15 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             default=10,
             min_value=1,
         )
+        # No default cap here (unlike work_dir_max_size_GB): a silent
+        # default would newly start pruning any existing camera's photos on
+        # upgrade for deployments that already had storage_management
+        # enabled but never configured a per-camera limit. Leave unset
+        # (None -- no per-camera limit) unless the operator opts in.
         sm_out["camera_max_size_GB"] = _int(
             sm.get("camera_max_size_GB"),
             "global.storage_management.camera_max_size_GB",
             errors,
-            default=5,
             min_value=1,
         )
         sm_out["prune_snapshots_first"] = _bool(

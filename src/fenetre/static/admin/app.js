@@ -183,9 +183,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCameraModalStatus = document.getElementById('newCameraModalStatus');
     const newCameraTestResult = document.getElementById('newCameraTestResult');
     const configFormContainer = document.getElementById('configFormContainer');
+    const appFooter = document.getElementById('appFooter');
     const statusMessage = document.getElementById('statusMessage');
     let loadedConfigData = null;
     let loadedConfigVersion = null;
+    let canEditFullConfig = true;
     let newCameraLastTest = null;
     let usersPayload = { users: [], cameras: [] };
     let cameraFormMode = 'add';
@@ -663,7 +665,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const enabled = launchWorkflowEnabled.checked;
         launchWorkflowDetails.hidden = !enabled;
         previewLaunchWorkflowBtn.disabled = !enabled || !loadedConfigData;
-        saveLaunchWorkflowBtn.disabled = !loadedConfigData;
+        saveLaunchWorkflowBtn.disabled = !loadedConfigData || !canEditFullConfig;
+        saveLaunchWorkflowBtn.title = canEditFullConfig
+            ? ''
+            : 'Only superadmins can save launch workflow settings.';
         if (!enabled) {
             launchPreviewResult.textContent = '';
         }
@@ -2244,13 +2249,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const config = await response.json();
             loadedConfigData = config.config || config;
             loadedConfigVersion = config.config_version || null;
+            canEditFullConfig = config.can_edit_full_config !== false;
+            if (appFooter && config.fenetre_version) {
+                appFooter.textContent = `Fenetre v${config.fenetre_version}`;
+            }
             syncSiteInputsFromConfig(loadedConfigData);
             syncLaunchInputsFromConfig(loadedConfigData);
             saveSiteNameBtn.disabled = false;
             populateCameraEditOptions();
             renderConfigForm(loadedConfigData, configFormContainer, '');
-            setStatus('Configuration loaded successfully.', 'success');
-            saveConfigBtn.disabled = false;
+            saveConfigBtn.disabled = !canEditFullConfig;
+            saveConfigBtn.title = canEditFullConfig
+                ? ''
+                : 'Only superadmins can save the full site configuration. Edit your assigned cameras from the camera list instead.';
+            syncLaunchWorkflowEnabledState();
+            setStatus(
+                canEditFullConfig
+                    ? 'Configuration loaded successfully.'
+                    : 'Configuration loaded (read-only outside your assigned cameras; only superadmins can save the full configuration).',
+                'success'
+            );
         } catch (error) {
             console.error('Error fetching config:', error);
             setStatus(`Error fetching configuration: ${error.message}`, 'error');

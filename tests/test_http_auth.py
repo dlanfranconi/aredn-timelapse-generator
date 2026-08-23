@@ -63,6 +63,52 @@ class HttpAuthTest(unittest.TestCase):
         self.assertEqual(kwargs["auth"].username, "admin")
         self.assertEqual(kwargs["auth"].password, "pw")
 
+    @patch("fenetre.compat.requests.get")
+    def test_patched_get_pic_from_url_verifies_tls_by_default(self, mock_requests_get):
+        image = Image.new("RGB", (10, 10), color="red")
+        image_bytes = BytesIO()
+        image.save(image_bytes, format="JPEG")
+
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {"content-type": "image/jpeg"}
+        response.content = image_bytes.getvalue()
+        response.request = SimpleNamespace(
+            url="https://example.local/snapshot.jpg", headers={}
+        )
+        mock_requests_get.return_value = response
+
+        patched_get_pic_from_url(
+            "https://example.local/snapshot.jpg", 10, camera_config={}
+        )
+
+        _, kwargs = mock_requests_get.call_args
+        self.assertTrue(kwargs["verify"])
+
+    @patch("fenetre.compat.requests.get")
+    def test_patched_get_pic_from_url_honors_verify_ssl_false(self, mock_requests_get):
+        image = Image.new("RGB", (10, 10), color="red")
+        image_bytes = BytesIO()
+        image.save(image_bytes, format="JPEG")
+
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {"content-type": "image/jpeg"}
+        response.content = image_bytes.getvalue()
+        response.request = SimpleNamespace(
+            url="https://example.local/snapshot.jpg", headers={}
+        )
+        mock_requests_get.return_value = response
+
+        patched_get_pic_from_url(
+            "https://example.local/snapshot.jpg",
+            10,
+            camera_config={"verify_ssl": False},
+        )
+
+        _, kwargs = mock_requests_get.call_args
+        self.assertFalse(kwargs["verify"])
+
 
 if __name__ == "__main__":
     unittest.main()

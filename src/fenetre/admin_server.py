@@ -30,7 +30,9 @@ from fenetre.auth import (
     user_has_password,
     verify_password,
 )
+from fenetre import __version__ as fenetre_version
 from fenetre.cameras_metadata import write_cameras_metadata
+from fenetre.config import _redact_config_for_logs
 from fenetre.gopro import GoPro
 from fenetre.go2rtc import (
     build_go2rtc_runtime_config,
@@ -45,6 +47,7 @@ from fenetre.media_storage import describe_media_location, relocate_media_storag
 from fenetre.launch_workflow import (
     MANUAL_RECORDING_TEST_DEFAULT_DURATION_S,
     LaunchWorkflowError,
+    camera_name_for_manual_recording_filename,
     delete_manual_recording_test,
     list_manual_recording_tests,
     local_rtsp_recording_active,
@@ -249,6 +252,38 @@ def _current_user_can_act_on_camera(camera_name: str) -> bool:
     return camera_name in allowed_cameras
 
 
+def _filter_effective_config_for_user(
+    effective_config: dict, user: dict | None
+) -> dict:
+    """Scope the whole-config payload to what a non-superadmin may see.
+
+    GET /config used to return the entire effective config -- every camera's
+    credentials and the full users block (password hashes included) -- to
+    any admin-role account, not just superadmin. README documents "admin" as
+    camera control only for cameras assigned by a superadmin, so a
+    non-superadmin caller now gets: only their assigned cameras (in full,
+    since they're allowed to edit those), no users block, and every other
+    section (global, http_server, timelapse, ...) with credential-shaped
+    fields redacted -- those sections are read-only for this role anyway,
+    see the superadmin-only guard on PUT /config.
+    """
+    if not isinstance(effective_config, dict):
+        return effective_config
+    allowed_cameras = set((user or {}).get("ptz_cameras") or [])
+    original_cameras = effective_config.get("cameras")
+    original_cameras = original_cameras if isinstance(original_cameras, dict) else {}
+    filtered = _redact_config_for_logs(effective_config)
+    if not isinstance(filtered, dict):
+        return filtered
+    filtered["cameras"] = {
+        name: original_cameras[name]
+        for name in allowed_cameras
+        if name in original_cameras
+    }
+    filtered.pop("users", None)
+    return filtered
+
+
 def _would_remove_last_superadmin(
     users: dict, username: str, new_user: dict | None
 ) -> bool:
@@ -270,13 +305,17 @@ def _would_remove_last_superadmin(
     return not _has_superadmin(remaining)
 
 
-def _current_user_can_manage_storage_location() -> bool:
+def _current_user_is_superadmin() -> bool:
     if not _admin_auth_enabled():
         return True
     user = _current_admin_user()
     if not user:
         return False
     return effective_user_role(user) == "superadmin"
+
+
+def _current_user_can_manage_storage_location() -> bool:
+    return _current_user_is_superadmin()
 
 
 # local_command and unavailable_command run as an OS command on the server
@@ -322,12 +361,7 @@ def _camera_command_fields_changed(
 
 
 def _current_user_can_set_camera_command_fields() -> bool:
-    if not _admin_auth_enabled():
-        return True
-    user = _current_admin_user()
-    if not user:
-        return False
-    return effective_user_role(user) == "superadmin"
+    return _current_user_is_superadmin()
 
 
 def _cameras_with_changed_command_fields(
@@ -1716,11 +1750,18 @@ def go2rtc_status():
 def get_config():
     try:
         raw_config, effective_config = _load_effective_config_with_raw()
+        is_superadmin = _current_user_is_superadmin()
+        if not is_superadmin:
+            effective_config = _filter_effective_config_for_user(
+                effective_config, _current_admin_user()
+            )
         return (
             jsonify(
                 {
                     "config": effective_config,
                     "config_version": _config_version(_config_file_path()),
+                    "can_edit_full_config": is_superadmin,
+                    "fenetre_version": fenetre_version,
                 }
             ),
             200,
@@ -2093,6 +2134,17 @@ def update_ptz_lock():
 @app.route("/config", methods=["PUT"])
 def update_config():
     try:
+        if not _current_user_is_superadmin():
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can save the full site "
+                        "configuration or launch workflow settings. Edit your "
+                        "assigned cameras from the camera list instead."
+                    }
+                ),
+                403,
+            )
         config_file_path = _config_file_path()
         if not request.is_json:
             return jsonify({"error": "Request body must be JSON."}), 415
@@ -2418,6 +2470,19 @@ def test_snapshot_url():
 def load_ptz_presets():
     try:
         payload = request.get_json(force=True) or {}
+        existing_camera_name = str(payload.get("camera_name") or "").strip()
+        if existing_camera_name and not _current_user_can_act_on_camera(
+            existing_camera_name
+        ):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Not authorized to control camera '{existing_camera_name}'.",
+                    }
+                ),
+                403,
+            )
         camera_name = str(payload.get("camera_name") or payload.get("name") or "camera")
         ptz_config = {
             "enabled": True,
@@ -2550,13 +2615,26 @@ def test_reolink_launch_recording():
         record = payload.get("record") or {}
         if not isinstance(record, dict):
             return jsonify({"ok": False, "error": "record must be an object."}), 400
+        dry_run = payload.get("dry_run", True) is not False
+        # A dry run never contacts the camera, same exemption as the image
+        # profile endpoint; only a real action is scoped to assigned cameras.
+        if not dry_run and not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Not authorized to control camera '{camera_name}'.",
+                    }
+                ),
+                403,
+            )
         _, config = _load_effective_config_with_raw()
         result = test_reolink_recording_action(
             config,
             camera_name,
             record,
             action,
-            dry_run=payload.get("dry_run", True) is not False,
+            dry_run=dry_run,
             window_seconds=int(payload.get("window_seconds") or 900),
         )
         return jsonify(result), 200
@@ -2606,15 +2684,39 @@ def start_local_rtsp_test_recording():
 def list_local_rtsp_test_recordings():
     try:
         _, config = _load_effective_config_with_raw()
-        return jsonify(list_manual_recording_tests(config)), 200
+        result = list_manual_recording_tests(config)
+        result["recordings"] = [
+            recording
+            for recording in result.get("recordings", [])
+            if _current_user_can_act_on_camera(recording.get("camera"))
+        ]
+        return jsonify(result), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+def _require_can_act_on_recording_camera(config: dict, filename: str):
+    camera_name = camera_name_for_manual_recording_filename(config, filename)
+    if not _current_user_can_act_on_camera(camera_name):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Not authorized to control camera '{camera_name}'.",
+                }
+            ),
+            403,
+        )
+    return None
 
 
 @app.route("/api/launches/local_rtsp_test/file/<path:filename>", methods=["GET"])
 def get_local_rtsp_test_recording(filename):
     try:
         _, config = _load_effective_config_with_raw()
+        denied = _require_can_act_on_recording_camera(config, filename)
+        if denied:
+            return denied
         path = manual_recording_test_file_path(config, filename)
         return send_file(path, mimetype="video/mp4", conditional=True)
     except LaunchWorkflowError as exc:
@@ -2627,6 +2729,9 @@ def get_local_rtsp_test_recording(filename):
 def delete_local_rtsp_test_recording(filename):
     try:
         _, config = _load_effective_config_with_raw()
+        denied = _require_can_act_on_recording_camera(config, filename)
+        if denied:
+            return denied
         return jsonify(delete_manual_recording_test(config, filename)), 200
     except LaunchWorkflowError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
@@ -2637,6 +2742,11 @@ def delete_local_rtsp_test_recording(filename):
 @app.route("/api/camera/add", methods=["POST"])
 def add_camera():
     try:
+        # Adding a plain camera is an established admin-role capability (see
+        # test_admin_role_can_add_plain_rtsp_camera_without_command_approval)
+        # -- there's no existing camera to scope against yet, and the actual
+        # privilege-escalation risk (local_command/unavailable_command) is
+        # already gated below via _current_user_can_set_camera_command_fields.
         payload = request.get_json(force=True) or {}
         config_file_path = _config_file_path()
         raw_config, config = _load_effective_config_with_raw()
@@ -2710,6 +2820,13 @@ def update_camera(camera_name):
             return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
         if camera_name not in cameras:
             return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
 
         previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         old_camera = dict(cameras.get(camera_name) or {})
@@ -2790,6 +2907,11 @@ def rename_camera():
         cameras = config.setdefault("cameras", {})
         if old_name not in cameras:
             return jsonify({"error": f"Camera '{old_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(old_name):
+            return (
+                jsonify({"error": f"Not authorized to control camera '{old_name}'."}),
+                403,
+            )
         if new_name in cameras and new_name != old_name:
             return jsonify({"error": f"Camera '{new_name}' already exists."}), 409
         previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}

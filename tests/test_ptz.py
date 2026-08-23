@@ -212,7 +212,9 @@ class PTZTestCase(unittest.TestCase):
         status.MoveStatus.Zoom = "IDLE"
         ptz_service.GetStatus.return_value = status
 
-        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+        result = wait_for_ptz_idle(
+            {}, ptz_service, "profile-1", timeout_s=5, initial_delay_s=0
+        )
 
         self.assertTrue(result)
         ptz_service.GetStatus.assert_called_once()
@@ -228,7 +230,12 @@ class PTZTestCase(unittest.TestCase):
         ptz_service.GetStatus.side_effect = [moving, moving, idle]
 
         result = wait_for_ptz_idle(
-            {}, ptz_service, "profile-1", timeout_s=5, poll_interval_s=0.01
+            {},
+            ptz_service,
+            "profile-1",
+            timeout_s=5,
+            poll_interval_s=0.01,
+            initial_delay_s=0,
         )
 
         self.assertTrue(result)
@@ -242,7 +249,12 @@ class PTZTestCase(unittest.TestCase):
         ptz_service.GetStatus.return_value = moving
 
         result = wait_for_ptz_idle(
-            {}, ptz_service, "profile-1", timeout_s=0.05, poll_interval_s=0.01
+            {},
+            ptz_service,
+            "profile-1",
+            timeout_s=0.05,
+            poll_interval_s=0.01,
+            initial_delay_s=0,
         )
 
         self.assertFalse(result)
@@ -252,7 +264,9 @@ class PTZTestCase(unittest.TestCase):
         status = MagicMock(spec=[])
         ptz_service.GetStatus.return_value = status
 
-        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+        result = wait_for_ptz_idle(
+            {}, ptz_service, "profile-1", timeout_s=5, initial_delay_s=0
+        )
 
         self.assertIsNone(result)
 
@@ -260,9 +274,38 @@ class PTZTestCase(unittest.TestCase):
         ptz_service = MagicMock()
         ptz_service.GetStatus.side_effect = RuntimeError("boom")
 
-        result = wait_for_ptz_idle({}, ptz_service, "profile-1", timeout_s=5)
+        result = wait_for_ptz_idle(
+            {}, ptz_service, "profile-1", timeout_s=5, initial_delay_s=0
+        )
 
         self.assertIsNone(result)
+
+    def test_wait_for_ptz_idle_waits_before_first_poll(self):
+        # GetStatus called immediately after issuing the move command can
+        # still report the pre-move IDLE state before the camera has
+        # actually processed it, which would make this return True right
+        # away as if the move already finished.
+        ptz_service = MagicMock()
+        status = MagicMock()
+        status.MoveStatus.PanTilt = "IDLE"
+        status.MoveStatus.Zoom = "IDLE"
+        ptz_service.GetStatus.return_value = status
+        call_order = []
+        ptz_service.GetStatus.side_effect = lambda *a, **k: (
+            call_order.append("get_status") or status
+        )
+
+        with patch(
+            "fenetre.ptz.time.sleep",
+            side_effect=lambda *a, **k: call_order.append("sleep"),
+        ) as mock_sleep:
+            result = wait_for_ptz_idle(
+                {}, ptz_service, "profile-1", timeout_s=5, initial_delay_s=0.3
+            )
+
+        self.assertTrue(result)
+        mock_sleep.assert_any_call(0.3)
+        self.assertEqual(call_order[0], "sleep")
 
     def test_goto_preset_reports_move_settled_once_status_confirms_idle(self):
         media = MagicMock()

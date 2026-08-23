@@ -5,6 +5,7 @@ import math
 import os
 from typing import Dict, Any
 
+from fenetre import __version__ as fenetre_version
 from fenetre.go2rtc import build_go2rtc_metadata
 from fenetre.ptz import public_ptz_metadata
 
@@ -215,6 +216,7 @@ def build_cameras_metadata(
         ),
         "deployment_name": (global_config or {}).get("deployment_name"),
         "ui": ui_public,
+        "fenetre_version": fenetre_version,
     }
 
     return updated_cameras_metadata

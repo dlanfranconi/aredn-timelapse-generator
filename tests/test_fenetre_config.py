@@ -258,8 +258,26 @@ class FenetreConfigTestCase(unittest.TestCase):
         _, _, global_conf, _, _ = config_load(config_path)
 
         storage_conf = global_conf["storage_management"]
-        self.assertEqual(storage_conf["camera_max_size_GB"], 5)
+        # No default cap: an operator upgrading with storage_management
+        # already enabled but no camera_max_size_GB configured must not
+        # suddenly start pruning cameras against a new, unrequested limit.
+        self.assertIsNone(storage_conf["camera_max_size_GB"])
         self.assertTrue(storage_conf["prune_snapshots_first"])
+
+    def test_config_load_storage_management_honors_explicit_camera_max_size(self):
+        test_data = {
+            "global": {
+                "work_dir": self.mock_work_dir,
+                "timezone": "UTC",
+                "storage_management": {"enabled": True, "camera_max_size_GB": 20},
+            },
+            "cameras": {"cam1": {"url": "http://cam1"}},
+        }
+        config_path = self._create_temp_config_file(test_data)
+
+        _, _, global_conf, _, _ = config_load(config_path)
+
+        self.assertEqual(global_conf["storage_management"]["camera_max_size_GB"], 20)
 
     def test_config_load_camera_unavailable_command(self):
         test_data = {

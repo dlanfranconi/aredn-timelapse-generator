@@ -1270,14 +1270,31 @@ def run_manual_recording_test(
     }
 
 
-def list_manual_recording_tests(
-    config: Dict[str, Any], limit: int = 50
-) -> Dict[str, Any]:
-    tests_dir = _manual_recording_tests_dir(config)
+def camera_name_for_manual_recording_filename(
+    config: Dict[str, Any], filename: str
+) -> str:
+    """Recover the camera name encoded in a manual test-recording filename.
+
+    Filenames are f"{timestamp}-{_slug(camera_name)}.ext" (see
+    run_manual_recording_test); this reverses that to whichever configured
+    camera's slug matches, falling back to the raw slug if none do, so
+    callers (the admin endpoints' camera-scoping checks) can authorize
+    access to a specific recording without trusting the client's own claim
+    of which camera it belongs to.
+    """
+    stem = os.path.splitext(os.path.basename(str(filename or "")))[0]
+    camera_slug = re.sub(r"^\d{8}T\d{6}Z-", "", stem)
     camera_slug_map = {
         _slug(str(camera_name)).casefold(): str(camera_name)
         for camera_name in (config.get("cameras") or {}).keys()
     }
+    return camera_slug_map.get(camera_slug.casefold(), camera_slug)
+
+
+def list_manual_recording_tests(
+    config: Dict[str, Any], limit: int = 50
+) -> Dict[str, Any]:
+    tests_dir = _manual_recording_tests_dir(config)
     recordings = []
     if os.path.isdir(tests_dir):
         for filename in os.listdir(tests_dir):
@@ -1290,12 +1307,12 @@ def list_manual_recording_tests(
             stat = os.stat(path)
             if stat.st_size <= 0:
                 continue
-            stem = os.path.splitext(filename)[0]
-            camera_slug = re.sub(r"^\d{8}T\d{6}Z-", "", stem)
             recordings.append(
                 {
                     "filename": filename,
-                    "camera": camera_slug_map.get(camera_slug.casefold(), camera_slug),
+                    "camera": camera_name_for_manual_recording_filename(
+                        config, filename
+                    ),
                     "bytes": stat.st_size,
                     "mtime": int(stat.st_mtime),
                     "modified_at": datetime.fromtimestamp(

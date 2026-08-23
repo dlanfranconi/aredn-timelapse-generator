@@ -658,6 +658,110 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertNotIn("evil-cam", updated_data_yaml.get("cameras") or {})
 
+    def test_admin_role_cannot_update_camera_not_assigned_to_them(self):
+        self.test_config_data["cameras"] = {
+            "cam1": {"url": "http://localhost/cam1.jpg"},
+            "cam2": {"url": "http://localhost/cam2.jpg"},
+        }
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.put(
+            "/api/camera/cam2",
+            data=json.dumps(
+                {
+                    "name": "cam2",
+                    "url": "http://attacker/cam2.jpg",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["cameras"]["cam2"]["url"], "http://localhost/cam2.jpg"
+        )
+
+    def test_admin_role_cannot_rename_camera_not_assigned_to_them(self):
+        self.test_config_data["cameras"] = {
+            "cam1": {"url": "http://localhost/cam1.jpg"},
+            "cam2": {"url": "http://localhost/cam2.jpg"},
+        }
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/rename",
+            data=json.dumps({"old_name": "cam2", "new_name": "cam2-renamed"}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertIn("cam2", updated_data_yaml["cameras"])
+
+    def test_admin_role_cannot_load_ptz_presets_for_camera_not_assigned_to_them(self):
+        self.test_config_data["cameras"] = {
+            "cam1": {"url": "http://localhost/cam1.jpg"},
+            "cam2": {
+                "url": "http://localhost/cam2.jpg",
+                "ptz": {
+                    "enabled": True,
+                    "host": "192.0.2.20",
+                    "port": 80,
+                    "username": "operator",
+                    "password": "other-cam-secret",
+                },
+            },
+        }
+        self.test_config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+
+        response = self.app.post(
+            "/api/camera/ptz_presets",
+            data=json.dumps({"camera_name": "cam2"}),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_superadmin_can_add_camera_with_custom_local_command(self):
         self.test_config_data["users"] = {
             "root": {
@@ -2069,6 +2173,89 @@ class ConfigServerTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNotNone(response.json.get("config_version"))
 
+    def test_get_config_superadmin_sees_everything_unfiltered(self):
+        self.test_config_data["global"] = {
+            "setting": "value",
+            "mqtt": {"password": "secret-mqtt-pw"},
+        }
+        self.test_config_data["cameras"]["cam2"] = {
+            "url": "http://otherhost",
+            "ptz": {"password": "secret-ptz-pw"},
+        }
+        self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        root_token = base64.b64encode(b"root:rootpw").decode("ascii")
+        response = self.app.get(
+            "/config", headers={"Authorization": f"Basic {root_token}"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["can_edit_full_config"])
+        self.assertIn("cam2", response.json["config"]["cameras"])
+        self.assertEqual(
+            response.json["config"]["cameras"]["cam2"]["ptz"]["password"],
+            "secret-ptz-pw",
+        )
+        self.assertEqual(
+            response.json["config"]["global"]["mqtt"]["password"], "secret-mqtt-pw"
+        )
+        self.assertIn("users", response.json["config"])
+
+    def test_get_config_scopes_cameras_and_redacts_secrets_for_admin_role(self):
+        self.test_config_data["global"] = {
+            "setting": "value",
+            "mqtt": {"password": "secret-mqtt-pw"},
+        }
+        self.test_config_data["cameras"]["cam1"]["ptz"] = {
+            "password": "assigned-cam-pw"
+        }
+        self.test_config_data["cameras"]["cam2"] = {
+            "url": "http://otherhost",
+            "ptz": {"password": "other-cam-pw"},
+        }
+        self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["cam1"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        response = self.app.get(
+            "/config", headers={"Authorization": f"Basic {admin_token}"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json["can_edit_full_config"])
+        config = response.json["config"]
+        # Assigned camera stays fully visible (including credentials) so it
+        # can still be edited via the scoped camera endpoints.
+        self.assertEqual(
+            config["cameras"]["cam1"]["ptz"]["password"], "assigned-cam-pw"
+        )
+        # Cameras not assigned to this admin are excluded entirely.
+        self.assertNotIn("cam2", config["cameras"])
+        # No users block, and other sections have credential-shaped fields
+        # redacted rather than being dropped wholesale.
+        self.assertNotIn("users", config)
+        self.assertEqual(config["global"]["setting"], "value")
+        self.assertNotEqual(config["global"]["mqtt"]["password"], "secret-mqtt-pw")
+
     def test_update_config_accepts_matching_config_version(self):
         current_version = self.app.get("/config").json["config_version"]
         response = self.app.put(
@@ -2290,6 +2477,50 @@ class ConfigServerTestCase(unittest.TestCase):
 
     def test_update_config_cannot_inject_new_superadmin_user(self):
         self.test_config_data["users"] = {
+            "root": {
+                "role": "superadmin",
+                "password_hash": hash_password("rootpw"),
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(self.test_config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        # Only a superadmin may PUT the whole config at all (see
+        # test_admin_role_cannot_save_full_config_via_put); this test
+        # exercises _merge_persistent_users' own defense-in-depth rejection
+        # of a users block trying to sneak in a new, unmanaged account.
+        root_token = base64.b64encode(b"root:rootpw").decode("ascii")
+        response = self.app.put(
+            "/config",
+            data=json.dumps(
+                {
+                    "global": self.test_config_data["global"],
+                    "cameras": self.test_config_data["cameras"],
+                    "users": {
+                        "root": {
+                            "role": "superadmin",
+                            "password_hash": hash_password("rootpw"),
+                        },
+                        "backdoor": {
+                            "role": "superadmin",
+                            "password": "hunter2",
+                        },
+                    },
+                }
+            ),
+            content_type="application/json",
+            headers={"Authorization": f"Basic {root_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["rejected_new_users"], ["backdoor"])
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertNotIn("backdoor", updated_data_yaml["users"])
+
+    def test_admin_role_cannot_save_full_config_via_put(self):
+        self.test_config_data["users"] = {
             "admin": {
                 "role": "admin",
                 "password_hash": hash_password("adminpw"),
@@ -2308,27 +2539,13 @@ class ConfigServerTestCase(unittest.TestCase):
                 {
                     "global": self.test_config_data["global"],
                     "cameras": self.test_config_data["cameras"],
-                    "users": {
-                        "admin": {
-                            "role": "admin",
-                            "password_hash": hash_password("adminpw"),
-                        },
-                        "backdoor": {
-                            "role": "superadmin",
-                            "password": "hunter2",
-                        },
-                    },
                 }
             ),
             content_type="application/json",
             headers={"Authorization": f"Basic {admin_token}"},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["rejected_new_users"], ["backdoor"])
-        with open(self.temp_config_file.name, "r") as f:
-            updated_data_yaml = yaml.safe_load(f)
-        self.assertNotIn("backdoor", updated_data_yaml["users"])
+        self.assertEqual(response.status_code, 403)
 
     @patch("os.kill")
     def test_reload_config_success(self, mock_kill):
@@ -2590,6 +2807,85 @@ class ManualRecordingTestEndpointTests(unittest.TestCase):
             "/api/launches/local_rtsp_test/file/..%2F..%2Fetc%2Fpasswd"
         )
         self.assertEqual(response.status_code, 404)
+
+    @patch("fenetre.launch_workflow.subprocess.run")
+    def test_admin_role_scoped_to_assigned_camera_for_test_recordings(self, mock_run):
+        def fake_run(command, **kwargs):
+            with open(command[-1], "wb") as f:
+                f.write(b"fake video bytes")
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = fake_run
+
+        with open(self.temp_config_file.name, "r") as f:
+            config_data = yaml.safe_load(f)
+        config_data["cameras"]["Cam Two"] = {
+            "rtsp_url": "rtsp://user:pass@camera2.local:554/main"
+        }
+        config_data["users"] = {
+            "admin": {
+                "role": "admin",
+                "password_hash": hash_password("adminpw"),
+                "ptz_access": "manual",
+                "ptz_cameras": ["Cam One"],
+            },
+        }
+        with open(self.temp_config_file.name, "w") as f:
+            yaml.safe_dump(config_data, f)
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+        admin_token = base64.b64encode(b"admin:adminpw").decode("ascii")
+        auth_header = {"Authorization": f"Basic {admin_token}"}
+
+        # Cannot even start a test recording for a camera not assigned to them.
+        denied_start = self.app.post(
+            "/api/launches/local_rtsp_test",
+            json={"camera": "Cam Two", "duration_s": 5},
+            headers=auth_header,
+        )
+        self.assertEqual(denied_start.status_code, 403)
+
+        # Record clips for both cameras as an unrestricted (auth-disabled)
+        # caller, then confirm the admin-role account can only see/reach the
+        # one assigned to them.
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = False
+        own = self.app.post(
+            "/api/launches/local_rtsp_test",
+            json={"camera": "Cam One", "duration_s": 5},
+        )
+        other = self.app.post(
+            "/api/launches/local_rtsp_test",
+            json={"camera": "Cam Two", "duration_s": 5},
+        )
+        self.assertTrue(own.json["ok"])
+        self.assertTrue(other.json["ok"])
+        own_filename = own.json["filename"]
+        other_filename = other.json["filename"]
+        flask_app.config["FENETRE_ADMIN_AUTH_ENABLED"] = True
+
+        listing = self.app.get("/api/launches/local_rtsp_test", headers=auth_header)
+        self.assertEqual(listing.status_code, 200)
+        cameras_seen = {item["camera"] for item in listing.json["recordings"]}
+        self.assertEqual(cameras_seen, {"Cam One"})
+
+        allowed_fetch = self.app.get(
+            f"/api/launches/local_rtsp_test/file/{own_filename}", headers=auth_header
+        )
+        self.assertEqual(allowed_fetch.status_code, 200)
+
+        denied_fetch = self.app.get(
+            f"/api/launches/local_rtsp_test/file/{other_filename}",
+            headers=auth_header,
+        )
+        self.assertEqual(denied_fetch.status_code, 403)
+
+        denied_delete = self.app.delete(
+            f"/api/launches/local_rtsp_test/file/{other_filename}",
+            headers=auth_header,
+        )
+        self.assertEqual(denied_delete.status_code, 403)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.work_dir, "launch_tests", other_filename))
+        )
 
 
 if __name__ == "__main__":

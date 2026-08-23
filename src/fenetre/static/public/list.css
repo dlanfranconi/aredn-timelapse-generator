@@ -1071,3 +1071,11 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
         padding: 32px 16px;
     }
 }
+
+.app-footer {
+    margin-top: 16px;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 0.75em;
+    opacity: 0.6;
+}
