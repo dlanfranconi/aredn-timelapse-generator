@@ -800,6 +800,6 @@ If saving from the admin panel's raw Configuration tab or Launch Workflow tab fa
 
 A `403 Cross-origin request rejected` from the admin API means the request's `Origin`/`Referer` header names a different host than the one being requested — the admin API rejects that as a CSRF-protection measure. This normally only happens from a script/browser context making requests to the wrong hostname; a request with neither header (e.g. plain `curl`) is unaffected.
 
-A `429 Too many failed login attempts` means 10+ failed Basic Auth attempts happened for that username+source IP within the last 15 minutes; wait for the window to age out. This resets if the container restarts.
+A `429 Too many failed login attempts` means 10+ failed login attempts happened for that username+source IP within the last 15 minutes; wait for the window to age out. This resets if the container restarts. Both the admin dashboard's Basic Auth login and the public site's `/api/auth/login` are covered by this lockout.
 
 If camera captures or timelapse generation report permission errors right after upgrading to a non-root image, see [Upgrading From An Older, Root-Only Image](#upgrading-from-an-older-root-only-image).

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Fenetre are documented in this file.
+All notable changes to aredn-timelapse-server are documented in this file.
 
 ## [1.1.0] - 2026-08-22
 
@@ -78,6 +78,14 @@ security and reliability fixes.
   the go2rtc live-view iframe on the admin dashboard.
 - Numerous PTZ, go2rtc, camera-editor, and timelapse scheduling fixes; see
   commit history for detail.
+- Logging out of the admin dashboard now actually logs you out. HTTP Basic
+  Auth credentials are cached by the browser itself, not by the server, so
+  the previous `/logout` (which only cleared cookies/storage) left the
+  browser silently re-sending the old credentials on the next request.
+- The public site's login is now a modal dialog (with a close button,
+  click-outside, and Escape to dismiss) instead of an inline field bar, to
+  match the admin dashboard's login experience and make it clearer that
+  you're being asked to log in.
 
 ### Security
 
@@ -88,3 +96,6 @@ security and reliability fixes.
   missing on several endpoints.
 - Verified the go2rtc binary's checksum at image build time and pinned
   minimum-safe dependency versions.
+- The public site's `/api/auth/login` now has the same per-username+IP
+  brute-force lockout (10 failed attempts / 15 minutes) the admin dashboard
+  login already had; previously it had no rate limiting at all.

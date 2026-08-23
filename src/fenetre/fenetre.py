@@ -122,6 +122,7 @@ from fenetre.cameras_metadata import (
 )
 from fenetre.mqtt import MQTTManager
 from fenetre.media_storage import ensure_media_storage_layout, RELOCATE_LOCK
+from fenetre import __version__ as fenetre_version
 from fenetre import profiler
 
 mimetypes.add_type("application/vnd.apple.mpegurl", ".m3u8")
@@ -178,6 +179,56 @@ timelapse_queue_lock = threading.Lock()
 background_job_lock = threading.Lock()
 mqtt_manager: Optional[MQTTManager] = None
 public_auth_sessions = {}
+# Mirrors admin_server.py's admin-login lockout: an in-process, best-effort
+# brute-force guard. Not a substitute for a real rate limiter in a
+# multi-process/multi-instance deployment.
+_PUBLIC_FAILED_LOGIN_WINDOW_S = 900
+_PUBLIC_FAILED_LOGIN_MAX_ATTEMPTS = 10
+public_failed_login_attempts: dict[tuple[str, str], list] = {}
+public_failed_login_lock = threading.Lock()
+
+
+def _public_login_throttle_key(username: str, addr: str) -> tuple[str, str]:
+    return (username or "", addr or "unknown")
+
+
+def _prune_public_login_attempts(attempts: list, now: float) -> list:
+    return [t for t in attempts if now - t < _PUBLIC_FAILED_LOGIN_WINDOW_S]
+
+
+def is_public_login_throttled(username: str, addr: str) -> bool:
+    key = _public_login_throttle_key(username, addr)
+    now = time.time()
+    with public_failed_login_lock:
+        attempts = _prune_public_login_attempts(
+            public_failed_login_attempts.get(key, []), now
+        )
+        public_failed_login_attempts[key] = attempts
+        return len(attempts) >= _PUBLIC_FAILED_LOGIN_MAX_ATTEMPTS
+
+
+def record_public_failed_login(username: str, addr: str) -> None:
+    key = _public_login_throttle_key(username, addr)
+    now = time.time()
+    with public_failed_login_lock:
+        attempts = _prune_public_login_attempts(
+            public_failed_login_attempts.get(key, []), now
+        )
+        attempts.append(now)
+        public_failed_login_attempts[key] = attempts
+
+
+def clear_public_failed_login(username: str, addr: str) -> None:
+    key = _public_login_throttle_key(username, addr)
+    with public_failed_login_lock:
+        public_failed_login_attempts.pop(key, None)
+
+
+def reset_public_login_throttle_state() -> None:
+    with public_failed_login_lock:
+        public_failed_login_attempts.clear()
+
+
 public_config_cache = {}
 public_config_cache_lock = threading.Lock()
 ptz_tour_resume_timers = {}
@@ -1449,12 +1500,14 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             return "no-cache, must-revalidate"
         return None
 
-    def _send_json(self, status_code, payload):
+    def _send_json(self, status_code, payload, extra_headers=None):
         body = json.dumps(payload, indent=2).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache, must-revalidate")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1749,11 +1802,25 @@ class FenetreHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if send_errors:
                 self._send_json(400, {"error": "username and password are required"})
             return None, None
+        addr = self.client_address[0] if self.client_address else "unknown"
+        if is_public_login_throttled(username, addr):
+            if send_errors:
+                self._send_json(
+                    429,
+                    {
+                        "error": "Too many failed login attempts for this account. "
+                        "Try again later."
+                    },
+                    extra_headers={"Retry-After": str(_PUBLIC_FAILED_LOGIN_WINDOW_S)},
+                )
+            return None, None
         user = authenticate_config_user_record(FLAGS.config, username, password)
         if not user:
+            record_public_failed_login(username, addr)
             if send_errors:
                 self._send_json(401, {"error": "Invalid username or password"})
             return None, None
+        clear_public_failed_login(username, addr)
         token = secrets.token_urlsafe(32)
         public_user = {
             "username": username,
@@ -1903,6 +1970,7 @@ window.location.replace({json.dumps(next_url)});
                 "public_site": self._site_is_public(),
                 "deployment_name": self._deployment_name(),
                 "launch_workflow_enabled": self._launch_workflow_enabled(),
+                "fenetre_version": fenetre_version,
             },
         )
 

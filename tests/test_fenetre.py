@@ -26,6 +26,7 @@ from fenetre.fenetre import (
     _prune_launch_recordings_for_global_limit,
     queue_missing_daily_timelapses,
     record_live_view_heartbeat,
+    reset_public_login_throttle_state,
     run_camera_unavailable_command,
     should_defer_capture_for_live_view,
 )
@@ -1624,6 +1625,92 @@ class TestFenetre(unittest.TestCase):
 
             self.assertTrue(os.path.exists(shared_path))
             self.assertEqual(deleted_paths, [])
+
+
+class PublicLoginThrottleTests(unittest.TestCase):
+    """The public site's /api/auth/login had no brute-force protection at
+    all, unlike the admin dashboard's Basic Auth login. _create_public_session
+    is the single choke point for all three public login entry points (JSON
+    login, Basic-auth JSON login, Basic-auth login page), so it's the right
+    place to mirror admin_server.py's per-username+IP lockout.
+    """
+
+    def setUp(self):
+        reset_public_login_throttle_state()
+        self.old_flags = fenetre_module.FLAGS
+        fenetre_module.FLAGS = SimpleNamespace(config="/nonexistent-config.yaml")
+        self.handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        self.handler.client_address = ("203.0.113.5", 5555)
+        self.sent = []
+        self.handler._send_json = lambda status, payload, extra_headers=None: (
+            self.sent.append((status, payload, extra_headers))
+        )
+
+    def tearDown(self):
+        fenetre_module.FLAGS = self.old_flags
+        reset_public_login_throttle_state()
+
+    @patch("fenetre.fenetre.authenticate_config_user_record", return_value=None)
+    def test_throttled_after_repeated_failures(self, mock_auth):
+        for _ in range(10):
+            token, user = self.handler._create_public_session("someuser", "wrong")
+            self.assertIsNone(token)
+        self.assertEqual(self.sent[-1][0], 401)
+
+        token, user = self.handler._create_public_session("someuser", "wrong")
+        self.assertIsNone(token)
+        self.assertEqual(self.sent[-1][0], 429)
+        self.assertIn("Retry-After", self.sent[-1][2])
+        # authenticate_config_user_record must not even be attempted once
+        # throttled -- otherwise this isn't slowing a guesser down at all.
+        self.assertEqual(mock_auth.call_count, 10)
+
+    @patch("fenetre.fenetre.authenticate_config_user_record", return_value=None)
+    def test_correct_password_also_throttled_once_limit_hit(self, mock_auth):
+        for _ in range(10):
+            self.handler._create_public_session("someuser", "wrong")
+        mock_auth.return_value = {
+            "role": "viewer",
+            "ptz_access": "presets",
+            "ptz_cameras": [],
+        }
+        token, user = self.handler._create_public_session("someuser", "right")
+        self.assertIsNone(token)
+        self.assertEqual(self.sent[-1][0], 429)
+
+    @patch("fenetre.fenetre.authenticate_config_user_record")
+    def test_successful_login_clears_the_failure_counter(self, mock_auth):
+        mock_auth.return_value = None
+        for _ in range(9):
+            self.handler._create_public_session("someuser", "wrong")
+        mock_auth.return_value = {
+            "role": "viewer",
+            "ptz_access": "presets",
+            "ptz_cameras": [],
+        }
+        token, user = self.handler._create_public_session("someuser", "right")
+        self.assertIsNotNone(token)
+
+        mock_auth.return_value = None
+        token2, user2 = self.handler._create_public_session("someuser", "wrong")
+        self.assertIsNone(token2)
+        self.assertEqual(self.sent[-1][0], 401)
+
+    @patch("fenetre.fenetre.authenticate_config_user_record", return_value=None)
+    def test_throttle_is_scoped_to_username_and_source_address(self, mock_auth):
+        for _ in range(10):
+            self.handler._create_public_session("someuser", "wrong")
+
+        other_user = self.handler._create_public_session("otheruser", "wrong")
+        self.assertIsNone(other_user[0])
+        self.assertEqual(self.sent[-1][0], 401)
+
+        other_handler = FenetreHTTPRequestHandler.__new__(FenetreHTTPRequestHandler)
+        other_handler.client_address = ("198.51.100.7", 6666)
+        other_handler._send_json = self.handler._send_json
+        result = other_handler._create_public_session("someuser", "wrong")
+        self.assertIsNone(result[0])
+        self.assertEqual(self.sent[-1][0], 401)
 
 
 if __name__ == "__main__":

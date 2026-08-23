@@ -4,7 +4,9 @@ const mapToggleButton = document.getElementById('map-toggle');
 const loginToggle = document.getElementById('login-toggle');
 const accountMenu = document.getElementById('account-menu');
 const accountMenuRole = document.getElementById('account-menu-role');
+const loginBackdrop = document.getElementById('login-backdrop');
 const loginPanel = document.getElementById('login-panel');
+const loginClose = document.getElementById('login-close');
 const loginUsername = document.getElementById('login-username');
 const loginPassword = document.getElementById('login-password');
 const loginSubmit = document.getElementById('login-submit');
@@ -396,7 +398,7 @@ function setDeploymentName(name) {
 function setAppFooterVersion(version) {
     const footer = document.getElementById('app-footer');
     if (footer && version) {
-        footer.textContent = `Fenetre v${version}`;
+        footer.textContent = `aredn-timelapse-server v${version}`;
     }
 }
 
@@ -426,7 +428,7 @@ function syncLoginUi() {
     loginStatus.textContent = '';
     accountMenuRole.textContent = authUser ? `${authUser.role || 'viewer'} access` : '';
     if (authUser) {
-        loginPanel.hidden = true;
+        closeLoginPanel();
     } else {
         closeAccountMenu();
         passwordPanel.hidden = true;
@@ -441,6 +443,7 @@ async function loadAuthStatus() {
         siteIsPublic = data.public_site !== false;
         launchWorkflowEnabled = data.launch_workflow_enabled === true;
         setDeploymentName(data.deployment_name || deploymentName);
+        setAppFooterVersion(data.fenetre_version);
         authUser = data.authenticated ? data.user : null;
         if (!authUser) {
             storeAuthToken('');
@@ -464,9 +467,13 @@ privateLoginButton.addEventListener('click', openLoginPanel);
 
 function openLoginPanel() {
     closeAccountMenu();
-    loginPanel.hidden = false;
+    loginBackdrop.hidden = false;
     loginStatus.textContent = '';
     window.setTimeout(() => loginUsername.focus(), 0);
+}
+
+function closeLoginPanel() {
+    loginBackdrop.hidden = true;
 }
 
 function closeAccountMenu() {
@@ -475,10 +482,17 @@ function closeAccountMenu() {
 }
 
 function toggleAccountMenu() {
-    loginPanel.hidden = true;
+    closeLoginPanel();
     accountMenu.hidden = !accountMenu.hidden;
     loginToggle.setAttribute('aria-expanded', accountMenu.hidden ? 'false' : 'true');
 }
+
+loginClose.addEventListener('click', closeLoginPanel);
+loginBackdrop.addEventListener('click', event => {
+    if (event.target === loginBackdrop) {
+        closeLoginPanel();
+    }
+});
 
 async function loginWithJsonCredentials() {
     loginStatus.textContent = 'Signing in...';
@@ -549,6 +563,7 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
         closeAccountMenu();
+        closeLoginPanel();
     }
 });
 

@@ -2231,6 +2231,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hideModal(passwordModal);
             setStatus((result.message || 'Password changed.') + configWriteDetails(result), 'success');
             window.setTimeout(() => {
+                forgetCachedAdminCredentials();
                 window.location.href = '/logout';
             }, 900);
         } catch (error) {
@@ -2251,7 +2252,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadedConfigVersion = config.config_version || null;
             canEditFullConfig = config.can_edit_full_config !== false;
             if (appFooter && config.fenetre_version) {
-                appFooter.textContent = `Fenetre v${config.fenetre_version}`;
+                appFooter.textContent = `aredn-timelapse-server v${config.fenetre_version}`;
             }
             syncSiteInputsFromConfig(loadedConfigData);
             syncLaunchInputsFromConfig(loadedConfigData);
@@ -3341,7 +3342,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function forgetCachedAdminCredentials() {
+        // HTTP Basic Auth has no real logout: the browser itself caches the
+        // credential and keeps silently resending it on the next request no
+        // matter what /logout responds with -- Clear-Site-Data does not
+        // clear that cache. Overwriting it with bogus credentials via a
+        // synchronous XHR (its own username/password params, not the URL,
+        // so it's actually applied to the browser's credential cache) is
+        // the standard workaround: the browser then has nothing valid left
+        // to resend, so the native login prompt reappears.
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', '/', false, 'logged-out', 'logged-out');
+            xhr.send();
+        } catch (e) {
+            // Expected: the bogus credentials fail with 401.
+        }
+    }
+
     function logoutAdmin() {
+        forgetCachedAdminCredentials();
         window.location.href = '/logout';
     }
 
