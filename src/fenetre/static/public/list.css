@@ -270,18 +270,22 @@ body.dark-mode #theme-toggle {
     outline: none;
 }
 
-.modal-backdrop {
+/* Mirrors the admin dashboard's .modal/.modal-card/.modal-header (see
+   static/admin/style.css) so the public login dialog matches the same
+   dialog pattern used across the app instead of inventing its own look. */
+.modal {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 200;
+    z-index: 1000;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 16px;
+    padding: 28px 16px;
+    background: rgba(0, 0, 0, 0.45);
+    overflow-y: auto;
 }
 
-.modal-backdrop[hidden] {
+.modal[hidden] {
     display: none;
 }
 
@@ -289,40 +293,24 @@ body.dark-mode #theme-toggle {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    width: min(360px, 100%);
     background: #fff;
     border-radius: 8px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
-    padding: 20px;
-    width: 100%;
-    max-width: 320px;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.25);
+    padding: 18px;
 }
 
-.modal-card-header {
+.modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 12px;
     margin-bottom: 4px;
 }
 
-.modal-card-header h2 {
+.modal-header h2 {
     margin: 0;
     font-size: 1.1em;
-}
-
-.modal-close-btn {
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    font-size: 1.4em;
-    line-height: 1;
-    padding: 0 4px;
-    color: #666;
-}
-
-.modal-close-btn:hover,
-.modal-close-btn:focus {
-    color: #000;
 }
 
 #password-panel[hidden] {
@@ -392,15 +380,6 @@ body.dark-mode .private-landing button {
 body.dark-mode #login-panel {
     background: #222;
     color: #e0e0e0;
-}
-
-body.dark-mode .modal-close-btn {
-    color: #aaa;
-}
-
-body.dark-mode .modal-close-btn:hover,
-body.dark-mode .modal-close-btn:focus {
-    color: #fff;
 }
 
 body.dark-mode #password-panel {
