@@ -2,12 +2,25 @@
 
 All notable changes to aredn-timelapse-server are documented in this file.
 
-## [1.1.0] - 2026-08-22
+## [2.0.0] - 2026-08-23
 
 This is the first release since 1.0.0 and folds in everything developed on
 the WIP branch: admin dashboard authentication and roles, PTZ/ONVIF control,
 go2rtc live view, rocket launch recording automation, and a round of
-security and reliability fixes.
+security and reliability fixes. Bumped to a new major version rather than
+1.1.0 because of two breaking changes below, not just the volume of change.
+
+**Breaking changes:**
+
+- **The container now runs as a non-root user.** An existing deployment
+  upgrading from a pre-2.0 (root-only) image will hit permission errors on
+  its bind-mounted media/config directories until they're re-owned by the
+  new non-root user. See "Upgrading From An Older, Root-Only Image" in
+  README.md before upgrading a running deployment.
+- **The admin dashboard now requires authentication.** Previously open,
+  it's now gated behind HTTP Basic Auth, with an `admin`/`admin` superadmin
+  account bootstrapped on first startup if no `users:` block exists in
+  config. Change that password immediately after upgrading.
 
 ### Added
 

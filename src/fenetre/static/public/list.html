@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-    <link rel="stylesheet" href="list.css?v=20260823-login-modal">
+    <link rel="stylesheet" href="list.css?v=20260823-login-modal-style">
 </head>
 <body>
     <div id="main-container">
@@ -88,14 +88,20 @@
             </div>
             <div id="login-backdrop" class="modal" hidden>
                 <div id="login-panel" role="dialog" aria-modal="true" aria-labelledby="login-panel-title">
-                    <div class="modal-header">
-                        <h2 id="login-panel-title">Log In</h2>
-                        <button id="login-close" type="button">Close</button>
+                    <h2 id="login-panel-title">Sign in</h2>
+                    <div class="login-field">
+                        <label for="login-username">Username</label>
+                        <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
-                    <input id="login-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username">
-                    <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Password">
-                    <button id="login-submit" type="button">Login</button>
+                    <div class="login-field">
+                        <label for="login-password">Password</label>
+                        <input id="login-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false">
+                    </div>
                     <span id="login-status"></span>
+                    <div class="login-actions">
+                        <button id="login-close" type="button" class="login-btn-secondary">Cancel</button>
+                        <button id="login-submit" type="button" class="login-btn-primary">Sign in</button>
+                    </div>
                 </div>
             </div>
             <div id="password-panel" hidden>
@@ -118,6 +124,6 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-    <script src="list.js?v=20260823-login-modal"></script>
+    <script src="list.js?v=20260823-login-modal-style"></script>
 </body>
 </html>

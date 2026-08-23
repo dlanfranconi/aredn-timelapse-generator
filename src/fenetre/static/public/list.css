@@ -270,9 +270,9 @@ body.dark-mode #theme-toggle {
     outline: none;
 }
 
-/* Mirrors the admin dashboard's .modal/.modal-card/.modal-header (see
-   static/admin/style.css) so the public login dialog matches the same
-   dialog pattern used across the app instead of inventing its own look. */
+/* Backdrop reuses the admin dashboard's .modal overlay treatment (see
+   static/admin/style.css); the card itself below is styled separately to
+   match the browser's native Basic Auth dialog look instead. */
 .modal {
     position: fixed;
     inset: 0;
@@ -289,28 +289,93 @@ body.dark-mode #theme-toggle {
     display: none;
 }
 
+/* Styled to match the browser's own native Basic Auth "Sign in" dialog
+   (rounded card, labeled fields with a blue focus ring, pill-shaped
+   Cancel/Sign in buttons) rather than the admin dashboard's boxier
+   .modal-card, since that native dialog is what people already associate
+   with logging into this app. */
 #login-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    width: min(360px, 100%);
+    gap: 16px;
+    width: min(380px, 100%);
     background: #fff;
-    border-radius: 8px;
+    border-radius: 28px;
     box-shadow: 0 15px 45px rgba(0, 0, 0, 0.25);
-    padding: 18px;
+    padding: 24px;
 }
 
-.modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 4px;
-}
-
-.modal-header h2 {
+#login-panel h2 {
     margin: 0;
-    font-size: 1.1em;
+    font-size: 1.375rem;
+    font-weight: 500;
+    color: #1f1f1f;
+}
+
+.login-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.login-field label {
+    font-size: 0.85rem;
+    color: #444;
+}
+
+#login-username,
+#login-password {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    box-sizing: border-box;
+}
+
+#login-username:focus,
+#login-password:focus {
+    outline: none;
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 1px #1a73e8;
+}
+
+.login-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.login-actions button {
+    border-radius: 20px;
+    padding: 10px 24px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.login-btn-secondary {
+    background: #fff;
+    color: #1a73e8;
+    border: 1px solid #dcdcdc;
+}
+
+.login-btn-secondary:hover,
+.login-btn-secondary:focus {
+    background: #f4f8fe;
+}
+
+.login-btn-primary {
+    background: #1a73e8;
+    color: #fff;
+    border: 1px solid #1a73e8;
+}
+
+.login-btn-primary:hover,
+.login-btn-primary:focus {
+    background: #1662c4;
 }
 
 #password-panel[hidden] {
@@ -325,18 +390,11 @@ body.dark-mode #theme-toggle {
     border-bottom: 1px solid #ddd;
 }
 
-#login-panel input,
-#login-panel button {
-    width: 100%;
-    box-sizing: border-box;
-}
-
 #password-panel input {
     height: 30px;
     max-width: 180px;
 }
 
-#login-panel button,
 #password-panel button {
     height: 32px;
 }
@@ -380,6 +438,24 @@ body.dark-mode .private-landing button {
 body.dark-mode #login-panel {
     background: #222;
     color: #e0e0e0;
+}
+
+body.dark-mode #login-panel h2 {
+    color: #f0f0f0;
+}
+
+body.dark-mode .login-field label {
+    color: #bbb;
+}
+
+body.dark-mode .login-btn-secondary {
+    background: #222;
+    border-color: #555;
+}
+
+body.dark-mode .login-btn-secondary:hover,
+body.dark-mode .login-btn-secondary:focus {
+    background: #2a2a2a;
 }
 
 body.dark-mode #password-panel {
