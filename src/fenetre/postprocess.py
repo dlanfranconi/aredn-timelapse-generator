@@ -293,7 +293,9 @@ def _add_sun_path_overlay(
     final_svg = overlay_time_bar(
         svg_content=base_svg,
         time_to_overlay=now,
-        overlay_rect_width=step_config.get("overlay_rect_width", 5),
+        overlay_rect_width=step_config.get(
+            "overlay_rect_width", step_config.get("overlay_bar_width", 5)
+        ),
         overlay_border_width=step_config.get("overlay_border_width", 2),
         overlay_border_color=step_config.get("overlay_border_color", "white"),
         overlay_rect_height_ratio=step_config.get("overlay_rect_height_ratio", 1.0),
@@ -581,6 +583,7 @@ def get_exif_dict(
     Prefer pyexiv2 when the expected API is available, but fall back to piexif for
     platforms where the Debian pyexiv2 package exposes a different interface.
     """
+
     def normalize_numeric(value, default=None):
         if value is None:
             return default
@@ -615,7 +618,9 @@ def get_exif_dict(
             or normalize_numeric(exif.get("Exif.Photo.PixelYDimension")),
         }
 
-    def parse_piexif_exif(exif_dict: Dict, image_size: Optional[Tuple[int, int]]) -> Dict:
+    def parse_piexif_exif(
+        exif_dict: Dict, image_size: Optional[Tuple[int, int]]
+    ) -> Dict:
         zeroth = exif_dict.get("0th", {})
         exif = exif_dict.get("Exif", {})
         width = normalize_numeric(zeroth.get(piexif.ImageIFD.ImageWidth))
@@ -655,7 +660,11 @@ def get_exif_dict(
     if not isinstance(image_source, (str, os.PathLike, bytes, bytearray, memoryview)):
         raise TypeError(f"Unsupported image source type: {type(image_source)}")
 
-    if pyexiv2 is not None and hasattr(pyexiv2, "Image") and hasattr(pyexiv2, "ImageData"):
+    if (
+        pyexiv2 is not None
+        and hasattr(pyexiv2, "Image")
+        and hasattr(pyexiv2, "ImageData")
+    ):
         try:
             if isinstance(image_source, (str, os.PathLike)):
                 with pyexiv2.Image(str(Path(image_source))) as img:

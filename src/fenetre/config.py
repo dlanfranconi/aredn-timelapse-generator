@@ -2,21 +2,100 @@ import logging
 import os
 import difflib
 import re
-from typing import Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional
 
 import yaml
 
+from fenetre.log_sanitizer import sanitize_text_for_logs
+
 logger = logging.getLogger(__name__)
+
+DEFAULT_SUN_PATH_POSTPROCESSING = {
+    "type": "sun_path",
+    "enabled": True,
+    "position": "top_center",
+    "padding": 20,
+    "overlay_width": 800,
+    "major_bar_width": 2,
+    "minor_bar_width": 1,
+    "overlay_bar_width": 4,
+    "overlay_rect_width": 4,
+}
+DEFAULT_FREQUENT_TIMELAPSE_FFMPEG_OPTIONS = (
+    "-c:v libx264 -preset veryfast -crf 26 -pix_fmt yuv420p"
+)
+DEFAULT_DAILY_TIMELAPSE_FFMPEG_OPTIONS = (
+    "-c:v libx264 -preset medium -crf 28 -pix_fmt yuv420p -movflags +faststart"
+)
 
 
 class ConfigError(Exception):
     pass
 
 
+_REDACTED = "REDACTED"
+_SENSITIVE_CONFIG_KEYS = {
+    "api_key",
+    "auth",
+    "authorization",
+    "client_secret",
+    "credential",
+    "credentials",
+    "key",
+    "pass",
+    "password",
+    "password_hash",
+    "passwd",
+    "private_key",
+    "pwd",
+    "secret",
+    "session",
+    "token",
+}
+
+
+def _is_sensitive_config_key(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key).strip().lower()).strip("_")
+    return normalized in _SENSITIVE_CONFIG_KEYS or normalized.endswith(
+        ("_password", "_password_hash", "_secret", "_token", "_api_key")
+    )
+
+
+def _redacted_scalar(value: Any) -> Any:
+    if value is None or value == "":
+        return value
+    return _REDACTED
+
+
+def _redact_config_for_logs(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                _redacted_scalar(item)
+                if _is_sensitive_config_key(key)
+                else _redact_config_for_logs(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_config_for_logs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_config_for_logs(item) for item in value)
+    if isinstance(value, str):
+        return sanitize_text_for_logs(value)
+    return value
+
+
 def _log_config_diff(section_name: str, before: Dict, after: Dict):
     """Logs the difference between two configuration dictionaries using YAML."""
-    before_str = yaml.dump(before, sort_keys=True, default_flow_style=False, indent=2)
-    after_str = yaml.dump(after, sort_keys=True, default_flow_style=False, indent=2)
+    safe_before = _redact_config_for_logs(before)
+    safe_after = _redact_config_for_logs(after)
+    before_str = yaml.dump(
+        safe_before, sort_keys=True, default_flow_style=False, indent=2
+    )
+    after_str = yaml.dump(
+        safe_after, sort_keys=True, default_flow_style=False, indent=2
+    )
 
     if before_str != after_str:
         diff = difflib.unified_diff(
@@ -107,6 +186,7 @@ def _warn_unknown_keys(section_name: str, got: Dict, allowed_keys: set):
 def _validate_global(cfg: Dict, errors) -> Dict:
     allowed = {
         "work_dir",
+        "media_dir",
         "log_dir",
         "logging_level",
         "logging_levels",
@@ -116,10 +196,13 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         "log_max_bytes",
         "log_backup_count",
         "ui",
+        "go2rtc",
         "deployment_name",
         "mqtt",
         "profiler",
         "serialize_background_jobs",
+        "launch_workflow",
+        "rocket_launches",
     }
     _warn_unknown_keys("global", cfg, allowed)
 
@@ -129,6 +212,12 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors.append("global.work_dir: required string is missing")
     else:
         out["work_dir"] = os.path.abspath(work_dir)
+
+    media_dir = cfg.get("media_dir")
+    if media_dir is not None:
+        media_dir = _str(media_dir, "global.media_dir", errors)
+        if media_dir:
+            out["media_dir"] = os.path.abspath(media_dir)
 
     log_dir = cfg.get("log_dir")
     if log_dir is not None:
@@ -181,6 +270,23 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             errors,
             default=10,
             min_value=1,
+        )
+        # No default cap here (unlike work_dir_max_size_GB): a silent
+        # default would newly start pruning any existing camera's photos on
+        # upgrade for deployments that already had storage_management
+        # enabled but never configured a per-camera limit. Leave unset
+        # (None -- no per-camera limit) unless the operator opts in.
+        sm_out["camera_max_size_GB"] = _int(
+            sm.get("camera_max_size_GB"),
+            "global.storage_management.camera_max_size_GB",
+            errors,
+            min_value=1,
+        )
+        sm_out["prune_snapshots_first"] = _bool(
+            sm.get("prune_snapshots_first"),
+            "global.storage_management.prune_snapshots_first",
+            errors,
+            default=True,
         )
         out["storage_management"] = sm_out
 
@@ -246,6 +352,8 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "show_main_website_icon",
             "show_github_icon",
             "show_map_by_default",
+            "public_site",
+            "camera_order",
             "linked_deployments",
             "map_privacy_radius_m",
             "map_privacy_jitter_m",
@@ -287,6 +395,32 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default=False,
     )
+    ui_out["public_site"] = _bool(
+        ui_cfg.get("public_site"),
+        "global.ui.public_site",
+        errors,
+        default=True,
+    )
+    camera_order_cfg = ui_cfg.get("camera_order")
+    if camera_order_cfg is None:
+        camera_order_out = []
+    elif isinstance(camera_order_cfg, list):
+        camera_order_out = []
+        for idx, camera_name in enumerate(camera_order_cfg):
+            value = _str(
+                camera_name,
+                f"global.ui.camera_order[{idx}]",
+                errors,
+                default="",
+            )
+            if value:
+                camera_order_out.append(value)
+    else:
+        errors.append(
+            f"global.ui.camera_order: expected list, got {type(camera_order_cfg).__name__}"
+        )
+        camera_order_out = []
+    ui_out["camera_order"] = camera_order_out
     ui_out["map_privacy_radius_m"] = _float(
         ui_cfg.get("map_privacy_radius_m"),
         "global.ui.map_privacy_radius_m",
@@ -338,6 +472,207 @@ def _validate_global(cfg: Dict, errors) -> Dict:
     ui_out["linked_deployments"] = linked_out
     out["ui"] = ui_out
 
+    go2rtc_cfg = _dict(cfg.get("go2rtc"), "global.go2rtc", errors)
+    go2rtc_out = {}
+    _warn_unknown_keys(
+        "global.go2rtc",
+        go2rtc_cfg,
+        {
+            "enabled",
+            "base_url",
+            "base_urls",
+            "player_url_template",
+            "preview_url_template",
+            "player_mode",
+            "preview_mode",
+            "stream_name_prefix",
+            "source_mode",
+            "rtsp_timeout_s",
+            "rtsp_transport",
+            "video_mode",
+            "preload_ptz_streams",
+            "preload_query",
+            "api_listen",
+            "rtsp_listen",
+            "webrtc_listen",
+            "webrtc_candidates",
+            "live_view_idle_timeout_s",
+        },
+    )
+    go2rtc_out["enabled"] = _bool(
+        go2rtc_cfg.get("enabled"),
+        "global.go2rtc.enabled",
+        errors,
+        default=False,
+    )
+    go2rtc_out["base_url"] = _str(
+        go2rtc_cfg.get("base_url"),
+        "global.go2rtc.base_url",
+        errors,
+        default="",
+    ).rstrip("/")
+    base_urls_cfg = go2rtc_cfg.get("base_urls")
+    base_urls_out = {}
+    if base_urls_cfg is None:
+        base_urls_cfg = {}
+    if isinstance(base_urls_cfg, dict):
+        for host, base_url in base_urls_cfg.items():
+            entry_path = f"global.go2rtc.base_urls.{host}"
+            if not isinstance(host, str):
+                errors.append(
+                    f"global.go2rtc.base_urls: expected string host keys, got {type(host).__name__}"
+                )
+                continue
+            host_key = host.strip().lower()
+            if not host_key:
+                continue
+            base_url_value = _str(base_url, entry_path, errors, default="")
+            if base_url_value:
+                base_urls_out[host_key] = base_url_value.rstrip("/")
+    else:
+        errors.append(
+            f"global.go2rtc.base_urls: expected mapping, got {type(base_urls_cfg).__name__}"
+        )
+    go2rtc_out["base_urls"] = base_urls_out
+    player_url_template = _str(
+        go2rtc_cfg.get("player_url_template"),
+        "global.go2rtc.player_url_template",
+        errors,
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
+    )
+    if player_url_template in {
+        "{base_url}/webrtc.html?src={stream}",
+        "{base_url}/stream.html?src={stream}",
+        "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+    }:
+        player_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    go2rtc_out["player_url_template"] = player_url_template
+    preview_url_template = _str(
+        go2rtc_cfg.get("preview_url_template"),
+        "global.go2rtc.preview_url_template",
+        errors,
+        default="{base_url}/stream.html?src={stream}&media=video&muted=1",
+    )
+    if preview_url_template in {
+        "{base_url}/webrtc.html?src={stream}",
+        "{base_url}/stream.html?src={stream}",
+        "{base_url}/stream.html?src={stream}&media=video&muted=1",
+        "{base_url}/stream.html?src={stream}&mode={mode}&media=video&muted=1",
+        "{base_url}/api/stream.mjpeg?src={stream}",
+    }:
+        preview_url_template = "{base_url}/stream.html?src={stream}&media=video&muted=1"
+    go2rtc_out["preview_url_template"] = preview_url_template
+    player_mode = _str(
+        go2rtc_cfg.get("player_mode"),
+        "global.go2rtc.player_mode",
+        errors,
+        default="",
+    ).strip()
+    go2rtc_out["player_mode"] = player_mode
+    preview_mode = _str(
+        go2rtc_cfg.get("preview_mode"),
+        "global.go2rtc.preview_mode",
+        errors,
+        default=player_mode,
+    ).strip()
+    if not preview_mode:
+        preview_mode = player_mode
+    go2rtc_out["preview_mode"] = preview_mode
+    go2rtc_out["stream_name_prefix"] = _str(
+        go2rtc_cfg.get("stream_name_prefix"),
+        "global.go2rtc.stream_name_prefix",
+        errors,
+        default="fenetre_",
+    )
+    go2rtc_out["source_mode"] = _str(
+        go2rtc_cfg.get("source_mode"),
+        "global.go2rtc.source_mode",
+        errors,
+        default="ffmpeg",
+        choices={"ffmpeg", "rtsp"},
+    )
+    go2rtc_out["video_mode"] = _str(
+        go2rtc_cfg.get("video_mode"),
+        "global.go2rtc.video_mode",
+        errors,
+        default="copy",
+        choices={"copy", "h264", "h265", "mjpeg"},
+    )
+    go2rtc_out["rtsp_timeout_s"] = _int(
+        go2rtc_cfg.get("rtsp_timeout_s"),
+        "global.go2rtc.rtsp_timeout_s",
+        errors,
+        default=30,
+        min_value=1,
+    )
+    go2rtc_out["rtsp_transport"] = _str(
+        go2rtc_cfg.get("rtsp_transport"),
+        "global.go2rtc.rtsp_transport",
+        errors,
+        default="tcp",
+        choices={"tcp", "udp"},
+    )
+    go2rtc_out["preload_ptz_streams"] = _bool(
+        go2rtc_cfg.get("preload_ptz_streams"),
+        "global.go2rtc.preload_ptz_streams",
+        errors,
+        default=True,
+    )
+    preload_query = _str(
+        go2rtc_cfg.get("preload_query"),
+        "global.go2rtc.preload_query",
+        errors,
+        default="video",
+    ).strip()
+    go2rtc_out["preload_query"] = preload_query or "video"
+    go2rtc_out["api_listen"] = _str(
+        go2rtc_cfg.get("api_listen"),
+        "global.go2rtc.api_listen",
+        errors,
+        default=":1984",
+    )
+    go2rtc_out["rtsp_listen"] = _str(
+        go2rtc_cfg.get("rtsp_listen"),
+        "global.go2rtc.rtsp_listen",
+        errors,
+        default=":8554",
+    )
+    go2rtc_out["webrtc_listen"] = _str(
+        go2rtc_cfg.get("webrtc_listen"),
+        "global.go2rtc.webrtc_listen",
+        errors,
+        default=":8555",
+    )
+    candidates_cfg = go2rtc_cfg.get("webrtc_candidates")
+    if candidates_cfg is None:
+        candidates_out = []
+    elif isinstance(candidates_cfg, list):
+        candidates_out = []
+        for idx, candidate in enumerate(candidates_cfg):
+            value = _str(
+                candidate,
+                f"global.go2rtc.webrtc_candidates[{idx}]",
+                errors,
+                default="",
+            )
+            if value:
+                candidates_out.append(value)
+    else:
+        errors.append(
+            "global.go2rtc.webrtc_candidates: expected list, "
+            f"got {type(candidates_cfg).__name__}"
+        )
+        candidates_out = []
+    go2rtc_out["webrtc_candidates"] = candidates_out
+    go2rtc_out["live_view_idle_timeout_s"] = _int(
+        go2rtc_cfg.get("live_view_idle_timeout_s"),
+        "global.go2rtc.live_view_idle_timeout_s",
+        errors,
+        default=60,
+        min_value=0,
+    )
+    out["go2rtc"] = go2rtc_out
+
     mqtt_cfg = _dict(cfg.get("mqtt"), "global.mqtt", errors)
     mqtt_out = {}
     _warn_unknown_keys(
@@ -351,6 +686,9 @@ def _validate_global(cfg: Dict, errors) -> Dict:
             "password",
             "base_topic",
             "discovery_prefix",
+            "tls",
+            "tls_insecure",
+            "ca_certs",
         },
     )
     mqtt_out["enabled"] = _bool(
@@ -388,6 +726,19 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         errors,
         default="homeassistant",
     )
+    mqtt_out["tls"] = _bool(
+        mqtt_cfg.get("tls"), "global.mqtt.tls", errors, default=False
+    )
+    mqtt_out["tls_insecure"] = _bool(
+        mqtt_cfg.get("tls_insecure"),
+        "global.mqtt.tls_insecure",
+        errors,
+        default=False,
+    )
+    if mqtt_cfg.get("ca_certs") is not None:
+        mqtt_out["ca_certs"] = _str(
+            mqtt_cfg.get("ca_certs"), "global.mqtt.ca_certs", errors
+        )
     out["mqtt"] = mqtt_out
 
     profiler_cfg = _dict(cfg.get("profiler"), "global.profiler", errors)
@@ -435,6 +786,108 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         min_value=1,
     )
     out["profiler"] = profiler_out
+
+    launch_cfg = _dict(
+        cfg.get("launch_workflow") or cfg.get("rocket_launches"),
+        "global.launch_workflow",
+        errors,
+    )
+    if launch_cfg:
+        launch_out = {}
+        _warn_unknown_keys(
+            "global.launch_workflow",
+            launch_cfg,
+            {
+                "enabled",
+                "dry_run",
+                "schedule_url",
+                "schedule_file",
+                "schedule_events",
+                "schedule_timeout_s",
+                "refresh_interval_s",
+                "lookahead_hours",
+                "default_pre_seconds",
+                "default_post_seconds",
+                "state_file",
+                "plans",
+            },
+        )
+        launch_out["enabled"] = _bool(
+            launch_cfg.get("enabled"),
+            "global.launch_workflow.enabled",
+            errors,
+            default=False,
+        )
+        launch_out["dry_run"] = _bool(
+            launch_cfg.get("dry_run"),
+            "global.launch_workflow.dry_run",
+            errors,
+            default=True,
+        )
+        launch_out["schedule_url"] = _str(
+            launch_cfg.get("schedule_url"),
+            "global.launch_workflow.schedule_url",
+            errors,
+            default="",
+        )
+        launch_out["schedule_file"] = _str(
+            launch_cfg.get("schedule_file"),
+            "global.launch_workflow.schedule_file",
+            errors,
+            default="",
+        )
+        launch_out["schedule_timeout_s"] = _float(
+            launch_cfg.get("schedule_timeout_s"),
+            "global.launch_workflow.schedule_timeout_s",
+            errors,
+            default=10.0,
+            min_value=0.1,
+        )
+        launch_out["refresh_interval_s"] = _int(
+            launch_cfg.get("refresh_interval_s"),
+            "global.launch_workflow.refresh_interval_s",
+            errors,
+            default=300,
+            min_value=10,
+        )
+        launch_out["lookahead_hours"] = _float(
+            launch_cfg.get("lookahead_hours"),
+            "global.launch_workflow.lookahead_hours",
+            errors,
+            default=168.0,
+            min_value=0.1,
+        )
+        launch_out["default_pre_seconds"] = _int(
+            launch_cfg.get("default_pre_seconds"),
+            "global.launch_workflow.default_pre_seconds",
+            errors,
+            default=60,
+            min_value=0,
+        )
+        launch_out["default_post_seconds"] = _int(
+            launch_cfg.get("default_post_seconds"),
+            "global.launch_workflow.default_post_seconds",
+            errors,
+            default=600,
+            min_value=0,
+        )
+        launch_out["state_file"] = _str(
+            launch_cfg.get("state_file"),
+            "global.launch_workflow.state_file",
+            errors,
+            default="",
+        )
+        if launch_cfg.get("schedule_events") is not None:
+            if isinstance(launch_cfg.get("schedule_events"), list):
+                launch_out["schedule_events"] = launch_cfg.get("schedule_events")
+            else:
+                errors.append("global.launch_workflow.schedule_events: expected list")
+        if launch_cfg.get("plans") is not None:
+            if isinstance(launch_cfg.get("plans"), (dict, list)):
+                launch_out["plans"] = launch_cfg.get("plans")
+            else:
+                errors.append("global.launch_workflow.plans: expected mapping or list")
+        out["launch_workflow"] = launch_out
     return out
 
 
@@ -525,6 +978,7 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             ft.get("ffmpeg_options"),
             "timelapse.frequent_timelapse.ffmpeg_options",
             errors,
+            default=DEFAULT_FREQUENT_TIMELAPSE_FFMPEG_OPTIONS,
         )
         ft_out["output_format"] = _str(
             ft.get("output_format"),
@@ -565,6 +1019,20 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             default=1200,
             min_value=1,
         )
+        ft_out["max_width"] = _int(
+            ft.get("max_width"),
+            "timelapse.frequent_timelapse.max_width",
+            errors,
+            default=1280,
+            min_value=160,
+        )
+        ft_out["max_height"] = _int(
+            ft.get("max_height"),
+            "timelapse.frequent_timelapse.max_height",
+            errors,
+            default=720,
+            min_value=90,
+        )
         out["frequent_timelapse"] = ft_out
 
     if "daily_timelapse" in cfg:
@@ -581,7 +1049,10 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             min_value=1,
         )
         dt_out["ffmpeg_options"] = _str(
-            dt.get("ffmpeg_options"), "timelapse.daily_timelapse.ffmpeg_options", errors
+            dt.get("ffmpeg_options"),
+            "timelapse.daily_timelapse.ffmpeg_options",
+            errors,
+            default=DEFAULT_DAILY_TIMELAPSE_FFMPEG_OPTIONS,
         )
         dt_out["ffmpeg_2pass"] = _bool(
             dt.get("ffmpeg_2pass"),
@@ -593,7 +1064,21 @@ def _validate_timelapse(cfg: Dict, errors) -> Dict:
             dt.get("file_extension"),
             "timelapse.daily_timelapse.file_extension",
             errors,
-            default="webm",
+            default="mp4",
+        )
+        dt_out["max_width"] = _int(
+            dt.get("max_width"),
+            "timelapse.daily_timelapse.max_width",
+            errors,
+            default=1920,
+            min_value=160,
+        )
+        dt_out["max_height"] = _int(
+            dt.get("max_height"),
+            "timelapse.daily_timelapse.max_height",
+            errors,
+            default=1080,
+            min_value=90,
         )
         out["daily_timelapse"] = dt_out
 
@@ -694,6 +1179,91 @@ def _validate_day_night_settings(cam_config: Dict, cam_name: str, errors: list) 
     return out
 
 
+def _validate_image_profiles(cam_config: Dict, cam_name: str, errors: list) -> Dict:
+    image_profiles = cam_config.get("image_profiles") or cam_config.get(
+        "image_settings_profiles"
+    )
+    if image_profiles is None:
+        return {}
+    image_profiles = _dict(image_profiles, f"cameras.{cam_name}.image_profiles", errors)
+    if not image_profiles:
+        return {"image_profiles": {}}
+
+    _warn_unknown_keys(
+        f"cameras.{cam_name}.image_profiles",
+        image_profiles,
+        {
+            "enabled",
+            "vendor",
+            "host",
+            "port",
+            "http_port",
+            "channel",
+            "username",
+            "password",
+            "timeout_s",
+            "mode_profiles",
+            "mode_map",
+            "profiles",
+        },
+    )
+    out = {
+        "enabled": _bool(
+            image_profiles.get("enabled"),
+            f"cameras.{cam_name}.image_profiles.enabled",
+            errors,
+            default=False,
+        ),
+        "vendor": _str(
+            image_profiles.get("vendor"),
+            f"cameras.{cam_name}.image_profiles.vendor",
+            errors,
+            default="generic",
+        ),
+    }
+    for key in ("host", "username", "password"):
+        if image_profiles.get(key) is not None:
+            out[key] = _str(
+                image_profiles.get(key),
+                f"cameras.{cam_name}.image_profiles.{key}",
+                errors,
+            )
+    for key in ("port", "http_port", "channel"):
+        if image_profiles.get(key) is not None:
+            out[key] = _int(
+                image_profiles.get(key),
+                f"cameras.{cam_name}.image_profiles.{key}",
+                errors,
+                min_value=0 if key == "channel" else 1,
+            )
+    if image_profiles.get("timeout_s") is not None:
+        out["timeout_s"] = _float(
+            image_profiles.get("timeout_s"),
+            f"cameras.{cam_name}.image_profiles.timeout_s",
+            errors,
+            min_value=0.1,
+        )
+    mode_map = image_profiles.get("mode_profiles") or image_profiles.get("mode_map")
+    if mode_map is not None:
+        if isinstance(mode_map, dict):
+            out["mode_profiles"] = mode_map
+        else:
+            errors.append(
+                f"cameras.{cam_name}.image_profiles.mode_profiles: expected mapping"
+            )
+    profiles = image_profiles.get("profiles")
+    if profiles is not None:
+        if isinstance(profiles, dict):
+            out["profiles"] = profiles
+        else:
+            errors.append(
+                f"cameras.{cam_name}.image_profiles.profiles: expected mapping"
+            )
+    else:
+        out["profiles"] = {}
+    return {"image_profiles": out}
+
+
 def _validate_cameras(cfg: Dict, errors) -> Dict:
     if cfg is None:
         return {}
@@ -754,10 +1324,65 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             cam_out["capture_method"] = _str(
                 capture_method, f"cameras.{name}.capture_method", errors
             )
+        if cam.get("http_auth") is not None:
+            http_auth = _dict(cam.get("http_auth"), f"cameras.{name}.http_auth", errors)
+            http_auth_out = {}
+            if http_auth:
+                http_auth_out["type"] = _str(
+                    http_auth.get("type"),
+                    f"cameras.{name}.http_auth.type",
+                    errors,
+                    default="basic",
+                    choices={"basic", "digest"},
+                )
+                http_auth_out["username"] = _str(
+                    http_auth.get("username"),
+                    f"cameras.{name}.http_auth.username",
+                    errors,
+                )
+                if http_auth_out["username"] is None:
+                    errors.append(f"cameras.{name}.http_auth.username: required")
+                http_auth_out["password"] = _str(
+                    http_auth.get("password"),
+                    f"cameras.{name}.http_auth.password",
+                    errors,
+                )
+                if http_auth_out["password"] is None:
+                    errors.append(f"cameras.{name}.http_auth.password: required")
+                cam_out["http_auth"] = http_auth_out
+
+        if cam.get("description") is not None:
+            cam_out["description"] = _str(
+                cam.get("description"), f"cameras.{name}.description", errors
+            )
+        if cam.get("display_name") is not None:
+            cam_out["display_name"] = _str(
+                cam.get("display_name"), f"cameras.{name}.display_name", errors
+            )
+        for template_key in (
+            "template_vendor",
+            "snapshot_template",
+            "rtsp_template",
+        ):
+            if cam.get(template_key) is not None:
+                cam_out[template_key] = _str(
+                    cam.get(template_key), f"cameras.{name}.{template_key}", errors
+                )
+        if cam.get("disabled") is not None:
+            cam_out["disabled"] = _bool(
+                cam.get("disabled"), f"cameras.{name}.disabled", errors
+            )
 
         cam_out["timeout_s"] = _int(
             cam.get("timeout_s"),
             f"cameras.{name}.timeout_s",
+            errors,
+            default=60,
+            min_value=1,
+        )
+        cam_out["capture_failure_interval_s"] = _int(
+            cam.get("capture_failure_interval_s"),
+            f"cameras.{name}.capture_failure_interval_s",
             errors,
             default=60,
             min_value=1,
@@ -777,6 +1402,47 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             errors,
             default=True,
         )
+        cam_out["go2rtc_enabled"] = _bool(
+            cam.get("go2rtc_enabled"),
+            f"cameras.{name}.go2rtc_enabled",
+            errors,
+            default=True,
+        )
+        if cam.get("go2rtc_source_mode") is not None:
+            cam_out["go2rtc_source_mode"] = _str(
+                cam.get("go2rtc_source_mode"),
+                f"cameras.{name}.go2rtc_source_mode",
+                errors,
+                choices={"ffmpeg", "rtsp"},
+            )
+        if cam.get("go2rtc_rtsp_timeout_s") is not None:
+            cam_out["go2rtc_rtsp_timeout_s"] = _int(
+                cam.get("go2rtc_rtsp_timeout_s"),
+                f"cameras.{name}.go2rtc_rtsp_timeout_s",
+                errors,
+                min_value=1,
+            )
+        if cam.get("go2rtc_rtsp_transport") is not None:
+            cam_out["go2rtc_rtsp_transport"] = _str(
+                cam.get("go2rtc_rtsp_transport"),
+                f"cameras.{name}.go2rtc_rtsp_transport",
+                errors,
+                choices={"tcp", "udp"},
+            )
+        if cam.get("go2rtc_video_mode") is not None:
+            cam_out["go2rtc_video_mode"] = _str(
+                cam.get("go2rtc_video_mode"),
+                f"cameras.{name}.go2rtc_video_mode",
+                errors,
+                choices={"copy", "h264", "h265", "mjpeg"},
+            )
+        if cam.get("go2rtc_preload") is not None:
+            cam_out["go2rtc_preload"] = _bool(
+                cam.get("go2rtc_preload"),
+                f"cameras.{name}.go2rtc_preload",
+                errors,
+                default=False,
+            )
         if cam.get("unavailable_command") is not None:
             cam_out["unavailable_command"] = _str(
                 cam.get("unavailable_command"),
@@ -810,6 +1476,34 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
         if cam.get("sky_area") is not None:
             s = _str(cam.get("sky_area"), f"cameras.{name}.sky_area", errors)
             cam_out["sky_area"] = s
+
+        if cam.get("timelapse_enabled") is not None:
+            cam_out["timelapse_enabled"] = _bool(
+                cam.get("timelapse_enabled"),
+                f"cameras.{name}.timelapse_enabled",
+                errors,
+            )
+        if cam.get("generate_timelapse") is not None:
+            legacy_timelapse_enabled = _bool(
+                cam.get("generate_timelapse"),
+                f"cameras.{name}.generate_timelapse",
+                errors,
+            )
+            if cam_out.get("timelapse_enabled") is None:
+                cam_out["timelapse_enabled"] = legacy_timelapse_enabled
+            cam_out["generate_timelapse"] = legacy_timelapse_enabled
+        if cam.get("timelapse") is not None:
+            timelapse_cfg = _dict(
+                cam.get("timelapse"), f"cameras.{name}.timelapse", errors
+            )
+            timelapse_out = {}
+            if "enabled" in timelapse_cfg:
+                timelapse_out["enabled"] = _bool(
+                    timelapse_cfg.get("enabled"),
+                    f"cameras.{name}.timelapse.enabled",
+                    errors,
+                )
+            cam_out["timelapse"] = timelapse_out
 
         # Geo / sunrise-sunset (lat/lon only; hard break)
         if cam.get("latitude") is not None:
@@ -896,6 +1590,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
 
         # Day/Night settings
         cam_out.update(_validate_day_night_settings(cam, name, errors))
+        cam_out.update(_validate_image_profiles(cam, name, errors))
 
         # Optional postprocessing list (pass-through, validated elsewhere)
         if cam.get("postprocessing") is not None:
@@ -903,11 +1598,27 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
                 cam_out["postprocessing"] = cam.get("postprocessing")
             else:
                 errors.append(f"cameras.{name}.postprocessing: expected list")
+        else:
+            cam_out["postprocessing"] = []
+        if not any(
+            isinstance(step, dict) and step.get("type") == "sun_path"
+            for step in cam_out.get("postprocessing", [])
+        ):
+            cam_out.setdefault("postprocessing", []).append(
+                dict(DEFAULT_SUN_PATH_POSTPROCESSING)
+            )
 
         # Copy any known keys used elsewhere without deep validation to preserve behavior
         for k in (
+            "public",
+            "visibility",
+            "hidden",
+            "ptz",
             "work_dir_max_size_GB",
+            "rtsp_url",
+            "ptz_rtsp_url",
             "snap_interval_s",
+            "activity_interval_s",
             "tuning_file",
             "exposure_time",
             "analogue_gain",
@@ -927,6 +1638,7 @@ def _validate_cameras(cfg: Dict, errors) -> Dict:
             "gopro_usb",
             "name",
             "iface",
+            "recording",
         ):
             if k in cam:
                 cam_out[k] = cam[k]

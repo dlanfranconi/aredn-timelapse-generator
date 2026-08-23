@@ -5,26 +5,51 @@ services:
     restart: unless-stopped
 
     ports:
-      # Public/static camera website
+      # Fenetre public/private camera dashboard
       - "8888:8888"
-      # Admin/configuration GUI
+      # Fenetre admin/configuration dashboard
       - "8889:8889"
+      # go2rtc web/API for PTZ live alignment
+      - "1984:1984"
+      # go2rtc RTSP restreaming
+      - "8554:8554"
+      # go2rtc WebRTC
+      - "8555:8555"
+      - "8555:8555/udp"
 
     environment:
       TZ: America/Los_Angeles
       FENETRE_PID_FILE: /tmp/fenetre.pid
+      # auto: start bundled go2rtc only when global.go2rtc.enabled is true.
+      # Use "off" to disable it or "on" to require it at startup.
+      # Alignment live views default to go2rtc stream.html and unload after
+      # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
+      # If WebRTC mode fails while MSE/HLS works, set
+      # global.go2rtc.webrtc_candidates to HOST:8555 in config.yaml.
+      FENETRE_GO2RTC: auto
 
     volumes:
-      # Main runtime config. Copy config.aredn-example.yaml to ./config/config.yaml first.
-      - ./config/config.yaml:/srv/fenetre/config.yaml
+      # Persistent runtime config on the host. The admin UI writes changes here.
+      - /srv/fenetre/config.yaml:/srv/fenetre/config.yaml
 
-      # Persistent image/video database and generated web files.
-      - ./data:/srv/fenetre/data
+      # Persistent generated public UI, photos, videos, and metadata.
+      - /srv/fenetre/data:/srv/fenetre/data
 
       # Persistent logs.
-      - ./logs:/srv/fenetre/logs
+      - /srv/fenetre/logs:/srv/fenetre/logs
+
+      # Optional: mount a separate volume (e.g. a NAS share) here and set
+      # global.media_dir to /srv/fenetre/media from the admin Storage panel to
+      # keep photos/timelapses/launch recordings off the local disk while
+      # config.yaml, logs, and app state stay in /srv/fenetre/data above.
+      # - /mnt/nas/fenetre-media:/srv/fenetre/media
 
     # Optional: enable this only if you want Intel VAAPI/QSV hardware encoding
-    # and the host has /dev/dri available.
+    # and the host has /dev/dri available. The app runs as a fixed non-root
+    # user inside the container, so it also needs the host GID that owns
+    # /dev/dri/renderD128 (find it with `stat -c '%g' /dev/dri/renderD128`)
+    # added via group_add.
     # devices:
     #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "109"

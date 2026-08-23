@@ -8,10 +8,30 @@ services:
     restart: unless-stopped
     shm_size: '256m'
     ports:
-      - "8888:8888"  # For python unsecure public web interface
-      - "8889:8889"  # For admin interface
+      - "8888:8888"  # Fenetre public/private camera dashboard
+      - "8889:8889"  # Fenetre admin dashboard
+      - "1984:1984"  # go2rtc web/API for PTZ live alignment
+      - "8554:8554"  # go2rtc RTSP restreaming
+      - "8555:8555"  # go2rtc WebRTC TCP
+      - "8555:8555/udp"  # go2rtc WebRTC UDP
+    environment:
+      TZ: America/Los_Angeles
+      FENETRE_PID_FILE: /tmp/fenetre.pid
+      # auto: start bundled go2rtc only when global.go2rtc.enabled is true
+      # off: never start go2rtc
+      # on: fail container startup if go2rtc config cannot be generated
+      # Alignment live views default to go2rtc stream.html and unload after
+      # global.go2rtc.live_view_idle_timeout_s seconds of PTZ inactivity.
+      # If WebRTC mode fails while MSE/HLS works, set
+      # global.go2rtc.webrtc_candidates to HOST:8555 in config.yaml.
+      FENETRE_GO2RTC: auto
     devices:
       - /dev/dri:/dev/dri
+    # The app runs as a fixed non-root user inside the container. For it to
+    # use /dev/dri, add its host GID here -- find it with:
+    #   stat -c '%g' /dev/dri/renderD128
+    # group_add:
+    #   - "109"
     volumes:
       # Mount the local config.yaml to the container's config path
       - ./config.yaml:/srv/fenetre/config.yaml
@@ -19,20 +39,8 @@ services:
       - /srv/fenetre/data:/srv/fenetre/data
       # Optional log to directory instead of stdout
       - /srv/fenetre/logs:/srv/fenetre/logs
-
-  nginx:
-    image: nginx:alpine
-    container_name: fenetre_webserver
-    restart: unless-stopped
-    ports:
-      - "8887:80"  # Robust static nginx public web server
-        #      - "5803:443" # Expose port 5803 on the host to port 443 for HTTPS in the container
-    volumes:
-      # Mount the same data directory to the Nginx container to serve it
-      - /srv/fenetre/data:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # Mount SSL certificates into the Nginx container
-      #      - ./ssl/cert.pem:/etc/nginx/ssl/cert.pem:ro
-      #      - ./ssl/key.pem:/etc/nginx/ssl/key.pem:ro
-    depends_on:
-      - fenetre
+      # Optional: mount a separate volume (e.g. a NAS share) here and set
+      # global.media_dir to /srv/fenetre/media from the admin Storage panel to
+      # keep photos/timelapses/launch recordings off the local disk while
+      # config.yaml, logs, and app state stay in /srv/fenetre/data above.
+      # - /mnt/nas/fenetre-media:/srv/fenetre/media

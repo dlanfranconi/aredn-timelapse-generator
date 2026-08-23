@@ -555,6 +555,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`Failed to fetch current config: ${currentConfigResponse.status}`);
             }
             const currentConfig = await currentConfigResponse.json();
+            const configVersion = currentConfig.config_version || null;
 
             // Ensure the cameras object exists
             if (!currentConfig.config.cameras) {
@@ -609,9 +610,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/config', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentConfig.config)
+                body: JSON.stringify({ config_version: configVersion, config: currentConfig.config })
             });
 
+            if (response.status === 409) {
+                const conflictData = await response.json().catch(() => ({}));
+                throw new Error(conflictData.error || 'Configuration changed elsewhere; reload and try again.');
+            }
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
                 throw new Error(errorData.error || 'Failed to apply settings.');

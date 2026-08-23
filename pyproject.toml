@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fenetre"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
     "pytz",
-    "pyyaml",
+    "pyyaml>=6.0.1",
     "absl-py",
     "numpy",
     "astral",
-    "Flask",
-    "requests",
+    "Flask>=3.0.3",
+    "Werkzeug>=3.0.3",
+    "requests>=2.32.0",
     "mozjpeg-lossless-optimization",
     "paho-mqtt",
-    "waitress",
+    "waitress>=3.0.0",
     "prometheus-client",
     "scikit-image",
-    "Pillow",
+    "Pillow>=10.3.0",
     "cairosvg",
     "piexif",
 ]
@@ -39,9 +40,13 @@ picamera2 = [
 pyexiv2 = [
     "pyexiv2",
 ]
+ptz = [
+    "onvif-zeep",
+]
 
 [project.scripts]
-fenetre = "fenetre.fenetre:run"
+fenetre = "fenetre.compat:run"
+fenetre-user = "fenetre.auth:main"
 daylight-tool = "fenetre.daylight_tool:run"
 timelapse-tool = "fenetre.timelapse_tool:run"
 
@@ -51,7 +56,7 @@ packages = ["fenetre"]
 
 [tool.flake8]
 max-line-length = 120
-ignore = "E501" # Example of ignoring other codes
+ignore = "E501"
 
 [tool.isort]
 profile = "black"

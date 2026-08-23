@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fenetre Configuration</title>
-    <link rel="stylesheet" href="/static/admin/style.css">
+    <link rel="stylesheet" href="/static/admin/style.css?v=20260816-media-storage-location">
 </head>
 <body>
     <div class="container">
@@ -19,17 +19,477 @@
             <button id="reloadAppBtn">Reload Application Config</button>
             <button id="syncUiBtn">Sync UI</button>
             <button id="rebuildCamerasBtn">Rebuild cameras.json</button>
-            <button id="addCameraBtn">Add New Camera</button> <!-- Added this button -->
+            <button id="manageUsersBtn" type="button">Manage Users</button>
+            <button id="addCameraBtn" type="button">Add New Camera</button>
+            <a class="button-link" href="/static/admin/launches.html">Launch Dashboard</a>
+            <button id="changeAdminPasswordBtn" type="button">Change Password</button>
+            <button id="adminLogoutBtn" type="button">Logout</button>
         </div>
 
         <div id="statusMessage"></div>
+
+        <section class="quick-settings">
+            <h2>Site</h2>
+            <label for="siteNameInput">GUI name</label>
+            <input id="siteNameInput" type="text" autocomplete="off" placeholder="fenetre.cam">
+            <label for="sitePublicInput">Website access</label>
+            <select id="sitePublicInput">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+            </select>
+            <button id="saveSiteNameBtn" type="button" disabled>Save site settings</button>
+        </section>
+
+        <section class="quick-settings storage-summary">
+            <div class="section-header">
+                <h2>Storage</h2>
+                <button id="refreshStorageBtn" type="button">Refresh</button>
+            </div>
+            <div id="storageSummary" class="storage-summary-body">Loading storage usage...</div>
+
+            <div class="media-location">
+                <label for="mediaDirInput">Media storage location</label>
+                <input id="mediaDirInput" type="text" autocomplete="off" placeholder="/srv/fenetre/media (leave blank to keep photos/launches inside work_dir)">
+                <p class="field-hint">
+                    Stores all camera photos, timelapses, and launch recordings under this
+                    directory instead of inside <code>work_dir</code> &mdash; useful for pointing
+                    media at a NAS or other external mount while keeping config.yaml, logs, and
+                    app state local. Mount the extra volume in your Docker/Portainer stack first
+                    (see README: "Media Storage Location"), then set the path here. Existing files
+                    are moved into the new location automatically.
+                </p>
+                <div class="media-location-actions">
+                    <button id="previewMediaDirBtn" type="button">Preview changes</button>
+                    <button id="relocateMediaDirBtn" type="button" disabled>Relocate media storage</button>
+                </div>
+                <div id="mediaLocationStatus" class="media-location-status"></div>
+            </div>
+        </section>
+
+        <section class="quick-settings camera-editor">
+            <div class="section-header">
+                <h2>Cameras</h2>
+                <div class="section-actions">
+                    <button id="sortCameraOrderBtn" type="button" disabled>Sort A-Z</button>
+                    <button id="saveCameraOrderBtn" type="button" disabled>Save order</button>
+                    <button id="editCameraBtn" type="button" disabled>Edit Selected Camera</button>
+                </div>
+            </div>
+            <div class="form-grid compact-form-grid">
+                <label for="editCameraSelect">Camera</label>
+                <select id="editCameraSelect">
+                    <option value="">Load config to select a camera</option>
+                </select>
+            </div>
+            <div id="cameraOrderList" class="camera-order-list" aria-live="polite">
+                Load config to reorder cameras.
+            </div>
+        </section>
+
+        <section class="quick-settings launch-settings">
+            <div class="section-header">
+                <h2>Launch Automation</h2>
+                <div class="section-actions">
+                    <button id="previewLaunchWorkflowBtn" type="button" disabled>Preview Launches</button>
+                    <button id="saveLaunchWorkflowBtn" type="button" disabled>Save Launch Workflow</button>
+                </div>
+            </div>
+
+            <div class="launch-enable-row">
+                <label><input id="launchWorkflowEnabled" type="checkbox"> Enable workflow</label>
+            </div>
+
+            <div id="launchWorkflowDetails" hidden>
+            <div class="form-grid launch-source-grid">
+                <label><input id="launchWorkflowDryRun" type="checkbox" checked> Dry run only</label>
+                <span></span>
+
+                <label for="launchScheduleUrl">Schedule URL</label>
+                <input id="launchScheduleUrl" type="text" autocomplete="off" placeholder="https://ll.thespacedevs.com/2.3.0/launches/upcoming/?format=json&limit=100&ordering=net">
+
+                <label for="launchRefreshInterval">Refresh seconds</label>
+                <input id="launchRefreshInterval" type="number" min="10" value="900">
+
+                <label for="launchLookaheadHours">Lookahead hours</label>
+                <input id="launchLookaheadHours" type="number" min="1" step="1" value="168">
+
+                <label for="launchStateFile">State file</label>
+                <input id="launchStateFile" type="text" autocomplete="off" placeholder="/srv/fenetre/data/launch_workflow_state.json">
+            </div>
+
+            <fieldset class="launch-plan-box">
+                <legend>Match and Timing</legend>
+                <div class="form-grid">
+                    <label for="launchPlanId">Plan ID</label>
+                    <input id="launchPlanId" type="text" autocomplete="off" value="vandenberg-spacex">
+
+                    <label for="launchProviders">Provider match</label>
+                    <input id="launchProviders" type="text" autocomplete="off" value="SpaceX">
+
+                    <label for="launchLocations">Location match</label>
+                    <input id="launchLocations" type="text" autocomplete="off" value="Vandenberg">
+
+                    <label for="launchPads">Pad match</label>
+                    <input id="launchPads" type="text" autocomplete="off" placeholder="Optional, comma separated">
+
+                    <label for="launchPreSeconds">Pre-launch seconds</label>
+                    <input id="launchPreSeconds" type="number" min="0" value="60">
+
+                    <label for="launchPostSeconds">Post-launch seconds</label>
+                    <input id="launchPostSeconds" type="number" min="0" value="900">
+                </div>
+            </fieldset>
+
+            <div class="section-header subsection-header">
+                <h3>Launch Cameras</h3>
+            </div>
+            <div id="launchCameraPlans" class="launch-camera-list">
+                Load the config to select launch cameras.
+            </div>
+
+            <div id="launchPreviewResult" class="launch-preview-result"></div>
+
+            <div class="section-header subsection-header">
+                <h3>Test Recording</h3>
+            </div>
+            <p class="launch-test-recording-note">
+                Record a short clip straight from a camera's RTSP stream to verify local_rtsp
+                launch recording works, without waiting for a real launch. Useful for cameras
+                whose on-camera recording API doesn't support this (Reolink models that reject
+                SetManualRec, Sunba). Test clips are admin-only and never appear on the public
+                launch dashboard.
+            </p>
+            <div class="form-grid launch-test-recording-grid">
+                <label for="launchTestCamera">Camera</label>
+                <select id="launchTestCamera"></select>
+
+                <label for="launchTestDuration">Duration seconds</label>
+                <input id="launchTestDuration" type="number" min="1" max="120" value="20">
+
+                <span></span>
+                <button id="launchTestRecordBtn" type="button">Start Test Recording</button>
+            </div>
+            <div id="launchTestRecordResult" class="launch-test-recording-result"></div>
+            <div id="launchTestRecordingsList" class="launch-test-recordings-list"></div>
+            </div>
+        </section>
+
+        <div id="addCameraModal" class="modal" hidden>
+            <div class="modal-card modal-card-wide">
+                <div class="modal-header">
+                    <h2 id="cameraModalTitle">Add Camera</h2>
+                    <button id="closeAddCameraModalBtn" type="button">Close</button>
+                </div>
+                <section class="quick-settings camera-add-panel">
+                    <div class="form-grid camera-modal-grid">
+                        <label for="newCameraName">Camera ID</label>
+                        <input id="newCameraName" type="text" autocomplete="off" placeholder="north-ridge">
+
+                        <label for="newCameraDisplayName">Display name</label>
+                        <input id="newCameraDisplayName" type="text" autocomplete="off" placeholder="North Ridge">
+
+                        <label for="newCameraDescription">Description</label>
+                        <textarea id="newCameraDescription" rows="2" placeholder="Optional text shown under the camera name"></textarea>
+
+                        <label for="newCameraVendor">Template</label>
+                        <select id="newCameraVendor">
+                            <option value="generic">Generic</option>
+                            <option value="reolink">Reolink</option>
+                            <option value="sunba">Sunba</option>
+                            <option value="hikvision">Hikvision</option>
+                            <option value="ubiquiti">Ubiquiti</option>
+                            <option value="dahua">Dahua</option>
+                            <option value="amcrest">Amcrest</option>
+                            <option value="axis">Axis</option>
+                            <option value="tplink">TP-Link</option>
+                        </select>
+
+                        <label for="newCameraSnapshotTemplate">Snapshot template</label>
+                        <select id="newCameraSnapshotTemplate"></select>
+
+                        <label for="newCameraRtspTemplate">RTSP template</label>
+                        <select id="newCameraRtspTemplate"></select>
+
+                        <label for="newCameraCaptureSource">Capture source</label>
+                        <select id="newCameraCaptureSource">
+                            <option value="snapshot">HTTP/HTTPS snapshot</option>
+                            <option value="rtsp">RTSP frame capture</option>
+                        </select>
+
+                        <label for="newCameraUrl">Snapshot URL</label>
+                        <div class="inline-field">
+                            <input id="newCameraUrl" type="password" autocomplete="off" placeholder="http://camera/snapshot.jpg">
+                            <button id="toggleNewCameraUrlBtn" type="button">Show</button>
+                        </div>
+
+                        <label for="newCameraSnapshotUsername">Snapshot username</label>
+                        <input id="newCameraSnapshotUsername" type="text" autocomplete="off" placeholder="Optional">
+
+                        <label for="newCameraSnapshotPassword">Snapshot password</label>
+                        <div class="inline-field">
+                            <input id="newCameraSnapshotPassword" type="password" autocomplete="new-password" placeholder="Optional">
+                            <button id="toggleNewCameraSnapshotPasswordBtn" type="button">Show</button>
+                        </div>
+
+                        <label for="newCameraSnapshotAuthType">Snapshot auth</label>
+                        <select id="newCameraSnapshotAuthType">
+                            <option value="basic">Basic</option>
+                            <option value="digest">Digest</option>
+                        </select>
+
+                        <div id="newCameraRtspRow" class="stream-field-row">
+                            <label for="newCameraRtspUrl">RTSP capture URL</label>
+                            <div class="inline-field">
+                                <input id="newCameraRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/stream">
+                                <button id="toggleNewCameraRtspUrlBtn" type="button">Show</button>
+                            </div>
+                        </div>
+
+                        <div id="newCameraPtzRtspRow" class="stream-field-row" hidden>
+                            <label for="newCameraPtzRtspUrl">PTZ live RTSP URL (optional substream)</label>
+                            <div class="inline-field">
+                                <input id="newCameraPtzRtspUrl" type="password" autocomplete="off" placeholder="rtsp://user:pass@camera:554/substream">
+                                <button id="toggleNewCameraPtzRtspUrlBtn" type="button">Show</button>
+                            </div>
+                        </div>
+                    </div>
+
+            <div class="option-groups">
+                <fieldset class="option-group enabled">
+                    <legend>Required Capture</legend>
+                    <label for="newCameraVisibility">Main page visibility</label>
+                    <select id="newCameraVisibility">
+                        <option value="public">Public</option>
+                        <option value="authenticated">Logged-in users</option>
+                        <option value="hidden">Hidden</option>
+                    </select>
+                    <label><input id="newCameraCacheBust" type="checkbox" checked> Cache bust URL</label>
+                    <label><input id="newCameraMozjpeg" type="checkbox" checked> Optimize JPEGs</label>
+                    <label><input id="newCameraTimelapse" type="checkbox" checked> Create timelapses</label>
+                    <label><input id="newCameraGo2rtcEnabled" type="checkbox" checked> Enable RTSP live view</label>
+                    <label><input id="newCameraGo2rtcPreload" type="checkbox" checked> Keep low-res PTZ stream warm</label>
+                    <label for="newCameraGo2rtcTransport">go2rtc RTSP transport</label>
+                    <select id="newCameraGo2rtcTransport">
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                    </select>
+                    <label for="newCameraGo2rtcVideoMode">go2rtc video mode</label>
+                    <select id="newCameraGo2rtcVideoMode">
+                        <option value="copy">Copy</option>
+                        <option value="h264">H.264 transcode</option>
+                        <option value="h265">H.265 transcode</option>
+                        <option value="mjpeg">MJPEG transcode</option>
+                    </select>
+                    <label for="newCameraTimeout">Timeout seconds</label>
+                    <input id="newCameraTimeout" type="number" min="1" value="15">
+                    <label for="newCameraFailureRetry">Failure retry seconds</label>
+                    <input id="newCameraFailureRetry" type="number" min="1" value="60">
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraFixedIntervalEnabled" type="checkbox" checked> Normal capture interval</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSnapInterval">Seconds</label>
+                        <input id="newCameraSnapInterval" type="number" min="1" value="60">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraActivityEnabled" type="checkbox" checked> Sky activity fast capture</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraActivityInterval">Fast seconds</label>
+                        <input id="newCameraActivityInterval" type="number" min="1" value="10">
+                        <label for="newCameraSsimSetpoint">SSIM threshold</label>
+                        <input id="newCameraSsimSetpoint" type="number" min="0" max="1" step="0.01" value="0.88">
+                        <label for="newCameraSsimArea">Activity crop box</label>
+                        <input id="newCameraSsimArea" type="text" value="0,0,1,1">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraSunEnabled" type="checkbox" checked> Sunrise/sunset fast capture</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSunInterval">Fast seconds</label>
+                        <input id="newCameraSunInterval" type="number" min="1" value="10">
+                        <label for="newCameraLat">Latitude</label>
+                        <input id="newCameraLat" type="number" step="0.000001" value="35.2828">
+                        <label for="newCameraLon">Longitude</label>
+                        <input id="newCameraLon" type="number" step="0.000001" value="-120.6596">
+                        <label for="newCameraSunWindow">Window minutes</label>
+                        <input id="newCameraSunWindow" type="number" min="0" value="45">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraSkyEnabled" type="checkbox" checked> Sky/daylight crop box</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraSkyArea">Sky crop box</label>
+                        <input id="newCameraSkyArea" type="text" value="0,0,1,0.35">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraStorageEnabled" type="checkbox" checked> Per-camera storage cap</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraStorageGb">GB</label>
+                        <input id="newCameraStorageGb" type="number" min="1" value="5">
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraTimestampEnabled" type="checkbox" checked> Timestamp overlay</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraTimestampPosition">Position</label>
+                        <select id="newCameraTimestampPosition">
+                            <option value="bottom_right">Bottom right</option>
+                            <option value="bottom_left">Bottom left</option>
+                            <option value="top_right">Top right</option>
+                            <option value="top_left">Top left</option>
+                        </select>
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraPtzEnabled" type="checkbox"> PTZ controls</label></legend>
+                    <div class="option-content">
+                        <label><input id="newCameraPtzPublic" type="checkbox"> Show PTZ on public page</label>
+                        <span></span>
+                        <label><input id="newCameraPtzAllowPresets" type="checkbox" checked> Allow presets</label>
+                        <span></span>
+                        <label><input id="newCameraPtzAllowManual" type="checkbox"> Allow manual movement</label>
+                        <span></span>
+                        <label for="newCameraPtzAccessLevel">Default access</label>
+                        <select id="newCameraPtzAccessLevel">
+                            <option value="presets">Presets only</option>
+                            <option value="manual">Manual controls</option>
+                            <option value="admin">Admin only</option>
+                        </select>
+                        <label>Movement controls</label>
+                        <div class="inline-options">
+                            <label><input id="newCameraPtzCapabilityPan" type="checkbox" checked> Pan</label>
+                            <label><input id="newCameraPtzCapabilityTilt" type="checkbox" checked> Tilt</label>
+                            <label><input id="newCameraPtzCapabilityZoom" type="checkbox" checked> Zoom</label>
+                            <label><input id="newCameraPtzCapabilityFocus" type="checkbox"> Focus</label>
+                        </div>
+                        <label><input id="newCameraPtzTourEnabled" type="checkbox"> Tour controls</label>
+                        <span></span>
+                        <label for="newCameraPtzTourAutoResume">Tour auto-resume seconds</label>
+                        <input id="newCameraPtzTourAutoResume" type="number" min="0" max="86400" value="1800">
+                        <label for="newCameraPtzHost">ONVIF host/IP</label>
+                        <input id="newCameraPtzHost" type="text" autocomplete="off" placeholder="192.0.2.10">
+                        <label for="newCameraPtzPort">ONVIF/PTZ port</label>
+                        <input id="newCameraPtzPort" type="number" min="1" max="65535" value="80" placeholder="80, 8000, 8080, 8899">
+                        <label for="newCameraPtzUsername">ONVIF username</label>
+                        <input id="newCameraPtzUsername" type="text" autocomplete="off">
+                        <label for="newCameraPtzPassword">ONVIF password</label>
+                        <input id="newCameraPtzPassword" type="password" autocomplete="new-password">
+                        <label for="newCameraPtzProfileToken">Profile token</label>
+                        <input id="newCameraPtzProfileToken" type="text" autocomplete="off" placeholder="Optional">
+                        <label>Presets</label>
+                        <button id="loadNewCameraPtzPresetsBtn" type="button">Load ONVIF Presets</button>
+                        <div id="newCameraPtzPresetEditor" class="preset-editor">
+                            <div id="newCameraPtzPresetRows" class="preset-rows"></div>
+                            <button id="addNewCameraPtzPresetBtn" type="button">Add Preset</button>
+                        </div>
+                        <textarea id="newCameraPtzPresets" rows="5" hidden></textarea>
+                    </div>
+                </fieldset>
+            </div>
+
+                    <div class="add-camera-actions">
+                        <button id="testNewCameraBtn" type="button">Test Capture and Streams</button>
+                        <button id="confirmNewCameraBtn" type="button" disabled>Add Camera to Config</button>
+                    </div>
+                    <div id="newCameraModalStatus" class="modal-status" aria-live="polite"></div>
+                    <div id="newCameraTestResult" class="camera-test-result"></div>
+                </section>
+            </div>
+        </div>
+
+        <div id="userModal" class="modal" hidden>
+            <div class="modal-card modal-card-wide">
+                <div class="modal-header">
+                    <h2>Manage Users</h2>
+                    <button id="closeUserModalBtn" type="button">Close</button>
+                </div>
+                <div class="user-manager">
+                    <div>
+                        <h3>Users</h3>
+                        <div id="userList" class="user-list"></div>
+                    </div>
+                    <form id="userForm" class="user-form" autocomplete="off">
+                        <label for="userUsername">Username</label>
+                        <input id="userUsername" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="operator">
+
+                        <label for="userPassword">New password</label>
+                        <input id="userPassword" type="password" autocomplete="new-password" placeholder="Leave blank to keep current password">
+
+                        <label for="userRole">Role</label>
+                        <select id="userRole">
+                            <option value="viewer">Viewer</option>
+                            <option value="operator">Operator</option>
+                            <option value="admin">Admin</option>
+                            <option value="superadmin">Superadmin</option>
+                        </select>
+
+                        <label for="userPtzAccess">PTZ access</label>
+                        <select id="userPtzAccess">
+                            <option value="none">No PTZ</option>
+                            <option value="presets">Presets only</option>
+                            <option value="manual">Manual controls</option>
+                            <option value="admin">Admin controls</option>
+                        </select>
+
+                        <label for="userPtzCameras">PTZ cameras</label>
+                        <div id="userPtzCameras" class="camera-access-table"></div>
+
+                        <label class="checkbox-line"><input id="userDisabled" type="checkbox"> Disabled</label>
+                        <div class="user-actions">
+                            <button id="newUserBtn" type="button">New User</button>
+                            <button id="saveUserBtn" type="submit">Save User</button>
+                            <button id="deleteUserBtn" type="button">Delete User</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div id="passwordModal" class="modal" hidden>
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h2>Change Password</h2>
+                    <button id="closePasswordModalBtn" type="button">Close</button>
+                </div>
+                <form id="passwordForm" class="user-form" autocomplete="off">
+                    <label for="adminCurrentPassword">Current password</label>
+                    <input id="adminCurrentPassword" type="password" autocomplete="current-password">
+
+                    <label for="adminNewPassword">New password</label>
+                    <input id="adminNewPassword" type="password" autocomplete="new-password">
+
+                    <label for="adminConfirmPassword">Confirm password</label>
+                    <input id="adminConfirmPassword" type="password" autocomplete="new-password">
+
+                    <div class="user-actions">
+                        <button id="saveAdminPasswordBtn" type="submit">Save Password</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <section class="quick-settings advanced-config-note">
+            <h2>Advanced Config Editor</h2>
+            <p>Use the guided controls above for common changes. The raw editor below rewrites the full YAML config and is intended for advanced edits only.</p>
+        </section>
 
         <div id="configFormContainer">
             <!-- Dynamic form will be rendered here by JavaScript -->
             <p>Click "Load Current Config" to view and edit.</p>
         </div>
+
+        <footer id="appFooter" class="app-footer"></footer>
     </div>
 
-    <script src="/static/admin/app.js"></script>
+    <script src="/static/admin/app.js?v=20260823-login-modal"></script>
 </body>
 </html>

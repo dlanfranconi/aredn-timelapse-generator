@@ -4,7 +4,6 @@ import re
 import threading
 from typing import Dict, Optional, Set
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +93,20 @@ class MQTTManager:
             client.reconnect_delay_set(self._reconnect_delay)
             client.enable_logger(logger)
 
+            if self._config.get("tls"):
+                ca_certs = self._config.get("ca_certs") or None
+                try:
+                    client.tls_set(ca_certs=ca_certs)
+                except Exception as exc:
+                    logger.error("Failed to configure MQTT TLS: %s", exc)
+                    self._enabled = False
+                    return False
+                if self._config.get("tls_insecure"):
+                    # Skips hostname verification against the broker's
+                    # certificate; only intended for brokers with a
+                    # self-signed cert on a trusted local network.
+                    client.tls_insecure_set(True)
+
             try:
                 client.connect(host, port, keepalive=60)
             except Exception as exc:
@@ -115,7 +128,9 @@ class MQTTManager:
             logger.info("MQTT connected successfully.")
             try:
                 if self._availability_topic:
-                    client.publish(self._availability_topic, payload="online", retain=True)
+                    client.publish(
+                        self._availability_topic, payload="online", retain=True
+                    )
             except Exception as exc:
                 logger.warning("MQTT availability publish failed on connect: %s", exc)
         else:

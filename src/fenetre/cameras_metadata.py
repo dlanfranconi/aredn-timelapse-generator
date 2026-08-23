@@ -5,6 +5,9 @@ import math
 import os
 from typing import Dict, Any
 
+from fenetre import __version__ as fenetre_version
+from fenetre.go2rtc import build_go2rtc_metadata
+from fenetre.ptz import public_ptz_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -64,46 +67,112 @@ def _load_existing_cameras(json_filepath: str) -> list:
     return []
 
 
+def _camera_timelapse_enabled(cam_conf: Dict[str, Any]) -> bool:
+    if cam_conf.get("generate_timelapse") is False:
+        return False
+    if cam_conf.get("timelapse_enabled") is False:
+        return False
+    timelapse_cfg = cam_conf.get("timelapse")
+    if isinstance(timelapse_cfg, dict):
+        return bool(timelapse_cfg.get("enabled", True))
+    return True
+
+
+def camera_visibility(cam_conf: Dict[str, Any]) -> str:
+    visibility = cam_conf.get("visibility")
+    if visibility in {"public", "authenticated", "hidden"}:
+        return visibility
+    if cam_conf.get("hidden") is True:
+        return "hidden"
+    if cam_conf.get("public", True) is False:
+        return "authenticated"
+    return "public"
+
+
+def _camera_display_name(name: str, cam_conf: Dict[str, Any]) -> str:
+    return str(cam_conf.get("display_name") or name)
+
+
+def _ordered_camera_items(
+    cameras_configs: Dict[str, Dict[str, Any]], global_config: Dict[str, Any]
+):
+    ui_config = (global_config or {}).get("ui") or {}
+    configured_order = ui_config.get("camera_order") or []
+    order_index = {}
+    if isinstance(configured_order, list):
+        for item in configured_order:
+            name = str(item)
+            if name in cameras_configs and name not in order_index:
+                order_index[name] = len(order_index)
+
+    def sort_key(item):
+        name, cam_conf = item
+        if name in order_index:
+            return (0, order_index[name], "", "")
+        display_name = _camera_display_name(name, cam_conf).casefold()
+        return (1, 0, display_name, name.casefold())
+
+    return sorted(cameras_configs.items(), key=sort_key)
+
+
 def build_cameras_metadata(
     cameras_configs: Dict[str, Dict[str, Any]],
     global_config: Dict[str, Any],
     timelapse_config: Dict[str, Any],
     json_filepath: str,
+    include_private: bool = False,
+    include_hidden: bool = False,
+    include_removed: bool = True,
+    include_go2rtc: bool = True,
 ) -> Dict[str, Any]:
     updated_cameras_metadata = {"cameras": [], "global": {}}
     ui_public = dict((global_config or {}).get("ui", {}))
     default_privacy_radius = ui_public.get("map_privacy_radius_m") or 0.0
     default_privacy_jitter = ui_public.get("map_privacy_jitter_m")
 
-    old_camera_list = _load_existing_cameras(json_filepath)
-    for camera_metadata in old_camera_list:
-        if camera_metadata.get("title") not in cameras_configs:
-            logger.warning(
-                "Camera %s is not configured anymore. Delete it from %s manually if you want to.",
-                camera_metadata.get("title"),
-                json_filepath,
-            )
-            updated_cameras_metadata["cameras"].append(camera_metadata)
+    if include_removed:
+        old_camera_list = _load_existing_cameras(json_filepath)
+        for camera_metadata in old_camera_list:
+            camera_key = camera_metadata.get("id") or camera_metadata.get("title")
+            if camera_key not in cameras_configs:
+                logger.warning(
+                    "Camera %s is not configured anymore. Delete it from %s manually if you want to.",
+                    camera_key,
+                    json_filepath,
+                )
+                updated_cameras_metadata["cameras"].append(camera_metadata)
 
-    for cam, cam_conf in cameras_configs.items():
+    for cam, cam_conf in _ordered_camera_items(cameras_configs, global_config or {}):
+        visibility = camera_visibility(cam_conf)
+        if visibility == "hidden" and not include_hidden:
+            continue
+        if visibility == "authenticated" and not include_private:
+            continue
+        display_name = _camera_display_name(cam, cam_conf)
+
         metadata = {
-            "title": cam,
+            "id": cam,
+            "title": display_name,
             "url": f"list.html?camera={cam}",
             "fullscreen_url": f"fullscreen.html?camera={cam}",
+            "timelapse_enabled": _camera_timelapse_enabled(cam_conf),
+            "public": visibility == "public",
+            "visibility": visibility,
+            "ptz": public_ptz_metadata(cam_conf.get("ptz") or {}),
         }
+        if include_go2rtc:
+            go2rtc_metadata = build_go2rtc_metadata(cam, cam_conf, global_config or {})
+            if go2rtc_metadata:
+                metadata["go2rtc"] = go2rtc_metadata
 
         if cam_conf.get("source") == "external_website":
             metadata["source"] = "external_website"
             metadata["url"] = cam_conf.get("url")
             metadata["thumbnail_url"] = cam_conf.get("thumbnail_url")
         else:
-            metadata["original_url"] = cam_conf.get("url") or cam_conf.get(
-                "local_command"
-            )
             metadata["dynamic_metadata"] = os.path.join("photos", cam, "metadata.json")
             metadata["image"] = os.path.join("photos", cam, "latest.jpg")
 
-        metadata["original_url"] = cam_conf.get("url") or cam_conf.get("local_command")
         metadata["description"] = cam_conf.get("description", "")
         metadata["snap_interval_s"] = cam_conf.get("snap_interval_s") or "dynamic"
         metadata["dynamic_metadata"] = os.path.join("photos", cam, "metadata.json")
@@ -147,6 +216,7 @@ def build_cameras_metadata(
         ),
         "deployment_name": (global_config or {}).get("deployment_name"),
         "ui": ui_public,
+        "fenetre_version": fenetre_version,
     }
 
     return updated_cameras_metadata
@@ -157,12 +227,15 @@ def write_cameras_metadata(
     global_config: Dict[str, Any],
     timelapse_config: Dict[str, Any],
     json_filepath: str,
+    include_removed: bool = False,
 ) -> Dict[str, Any]:
     updated_cameras_metadata = build_cameras_metadata(
         cameras_configs,
         global_config,
         timelapse_config,
         json_filepath,
+        include_removed=include_removed,
+        include_go2rtc=False,
     )
 
     with open(json_filepath, "w") as json_file:

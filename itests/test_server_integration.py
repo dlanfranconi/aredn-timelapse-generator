@@ -114,6 +114,64 @@ class ServerIntegrationTest(unittest.TestCase):
                 f"HTTP server did not start or is not listening. Connection error: {e}"
             )
 
+    def test_hidden_camera_photos_are_not_served_even_with_percent_encoded_slash(self):
+        # Regression test for a visibility-check bypass: _path_camera_name
+        # used to split the raw, still-percent-encoded request path on "/"
+        # before decoding each segment, so a request for
+        # /photos%2fHiddenCam/... never matched "photos" as the first
+        # segment and skipped the visibility check entirely -- while the
+        # stdlib file server underneath decodes the whole path first and
+        # still resolved and served the real file. Same bug affected
+        # /launches/, which additionally had no per-recording visibility
+        # check at all.
+        photo_dir = os.path.join(self.work_dir, "photos", "HiddenCam", "2026-05-02")
+        os.makedirs(photo_dir)
+        with open(os.path.join(photo_dir, "frame.jpg"), "wb") as f:
+            f.write(b"secret pixels")
+
+        launch_dir = os.path.join(self.work_dir, "launches", "launch-1")
+        os.makedirs(launch_dir)
+        with open(os.path.join(launch_dir, "launch-1-HiddenCam.mp4"), "wb") as f:
+            f.write(b"secret video")
+
+        self.config_data["cameras"] = {
+            "HiddenCam": {
+                "url": "http://example.invalid/snap.jpg",
+                "visibility": "hidden",
+                # Keep this test to static files already on disk; a live
+                # capture thread isn't needed to exercise the HTTP handler's
+                # visibility checks and pulls in unrelated snap-loop state
+                # this lightweight harness doesn't initialize.
+                "disabled": True,
+            },
+        }
+        with open(self.config_path, "w") as f:
+            yaml.dump(self.config_data, f)
+
+        load_and_apply_configuration(
+            initial_load=True, config_file_override=self.config_path
+        )
+        self._wait_for_http_server(f"http://127.0.0.1:{self.port}/test.html")
+
+        base = f"http://127.0.0.1:{self.port}"
+        plain_photo = requests.get(f"{base}/photos/HiddenCam/2026-05-02/frame.jpg")
+        self.assertEqual(plain_photo.status_code, 404)
+
+        encoded_photo = requests.get(f"{base}/photos%2fHiddenCam/2026-05-02/frame.jpg")
+        self.assertEqual(encoded_photo.status_code, 404)
+
+        launch_video = requests.get(f"{base}/launches/launch-1/launch-1-HiddenCam.mp4")
+        self.assertEqual(launch_video.status_code, 404)
+
+        photos_listing = requests.get(f"{base}/photos/")
+        self.assertEqual(photos_listing.status_code, 404)
+
+        launches_listing = requests.get(f"{base}/launches/")
+        self.assertEqual(launches_listing.status_code, 404)
+
+        ptz_status_response = requests.get(f"{base}/api/ptz/status?camera=HiddenCam")
+        self.assertEqual(ptz_status_response.status_code, 404)
+
     def test_http_server_serves_incremental_hls_timelapse(self):
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             self.skipTest("ffmpeg and ffprobe are required for HLS integration tests")

@@ -1,9 +1,10 @@
 import logging
 from typing import Dict, Optional
-from urllib.parse import urlparse
 
 import requests
 from PIL import Image, ImageStat
+from fenetre.log_sanitizer import sanitize_text_for_logs, sanitize_url_for_logs
+
 from .postprocess import get_exif_dict
 
 logger = logging.getLogger(__name__)

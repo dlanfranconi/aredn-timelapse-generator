@@ -1,52 +1,534 @@
 import base64
+import hmac
 import json
+import logging
 import os
 import re
+import shlex
+import shutil
 import signal
-from datetime import datetime
+import subprocess
+import threading
+import time
+from datetime import datetime, timezone
 from io import BytesIO
+from urllib.parse import urlsplit
 
 import requests
 import yaml
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 from prometheus_client import REGISTRY, Counter, Gauge, generate_latest
 from werkzeug.exceptions import BadRequest
 
+from fenetre.auth import (
+    ADMIN_ROLES,
+    authenticate_config_user_record,
+    effective_user_role,
+    ensure_default_admin_user,
+    hash_password,
+    user_has_password,
+    verify_password,
+)
+from fenetre import __version__ as fenetre_version
 from fenetre.cameras_metadata import write_cameras_metadata
-from fenetre.config import config_load
+from fenetre.config import _redact_config_for_logs
 from fenetre.gopro import GoPro
+from fenetre.go2rtc import (
+    build_go2rtc_runtime_config,
+    go2rtc_browser_port,
+    go2rtc_preload_query_params,
+    go2rtc_stream_name,
+)
+from fenetre.http_auth import auth_from_camera_config
+from fenetre.image_profiles import ImageProfileError, apply_image_profile
+from fenetre.log_sanitizer import sanitize_text_for_logs
+from fenetre.media_storage import describe_media_location, relocate_media_storage
+from fenetre.launch_workflow import (
+    MANUAL_RECORDING_TEST_DEFAULT_DURATION_S,
+    LaunchWorkflowError,
+    camera_name_for_manual_recording_filename,
+    delete_manual_recording_test,
+    list_manual_recording_tests,
+    local_rtsp_recording_active,
+    manual_recording_test_file_path,
+    preview_launch_workflow,
+    run_due_launch_actions,
+    run_manual_recording_test,
+    test_reolink_recording_action,
+)
+from fenetre.ptz import discover_presets, set_lock
+from fenetre.rtsp_capture import (
+    camera_local_command,
+    is_fenetre_generated_rtsp_snapshot_command,
+    rtsp_snapshot_command,
+)
 from fenetre.ui_utils import copy_public_html_files
 
-metric_pictures_taken_total = Counter("pictures_taken_total", "Total number of pictures taken", ["camera_name"])
-metric_last_successful_picture_timestamp = Gauge("capture_last_success_timestamp", "Timestamp of the last successfully taken picture", ["camera_name"])
-metric_capture_failures_total = Counter("capture_failures_total", "Total number of capture failures", ["camera_name"])
-metric_timelapses_created_total = Counter("timelapses_created_total", "Total number of timelapses created", ["camera_name", "type"])
-metric_timelapse_queue_size = Gauge("timelapse_queue_size", "Number of timelapses in the queue")
-metric_camera_directory_size_bytes = Gauge("camera_directory_size_bytes", "Size of the camera directory in bytes", ["camera_name"])
-metric_work_directory_size_bytes = Gauge("work_dir_size_bytes", "Size of the work directory in bytes")
-metric_directories_total = Gauge("dir_total_count", "Total number of directories", ["camera_name"])
-metric_directories_archived_total = Gauge("dir_archived_count", "Number of archived directories", ["camera_name"])
-metric_directories_timelapse_total = Gauge("dir_timelapse_count", "Number of directories with a timelapse file", ["camera_name"])
-metric_directories_daylight_total = Gauge("dir_daylight_count", "Number of directories with a daylight.png file", ["camera_name"])
-metric_picture_width_pixels = Gauge("picture_width_pixels", "Width of the captured picture in pixels", ["camera_name"])
-metric_picture_height_pixels = Gauge("picture_height_pixels", "Height of the captured picture in pixels", ["camera_name"])
-metric_picture_size_bytes = Gauge("picture_size_bytes", "Size of the captured picture in bytes", ["camera_name"])
-metric_picture_iso = Gauge("picture_iso", "ISO value of the captured picture", ["camera_name"])
-metric_picture_focal_length_mm = Gauge("picture_focal_length_mm", "Focal length of the captured picture in mm", ["camera_name"])
-metric_picture_aperture = Gauge("picture_aperture", "Aperture value of the captured picture", ["camera_name"])
-metric_picture_exposure_time_seconds = Gauge("picture_exposure_time_seconds", "Exposure time of the captured picture in seconds", ["camera_name"])
-metric_picture_white_balance = Gauge("picture_white_balance", "White balance value of the captured picture", ["camera_name"])
-metric_processing_time_seconds = Gauge("capture_processing_time_seconds", "Time it took to fetch and process a new picture", ["camera_name"])
-metric_sleep_time_seconds = Gauge("capture_loop_sleep_time_seconds", "Time the camera sleeps between pictures", ["camera_name"])
-metric_camera_mode = Gauge("camera_mode", "Current camera mode with mode label", ["camera_name", "mode"])
-metric_camera_ssim_value = Gauge("camera_ssim_value", "Latest SSIM measurement", ["camera_name"])
-metric_camera_ssim_target = Gauge("camera_ssim_target", "Configured SSIM target", ["camera_name"])
-metric_camera_online = Gauge("camera_online", "Camera online status reported by the snap loop", ["camera_name"])
+logger = logging.getLogger(__name__)
+
+go2rtc_spawned_process = None
+
+# Cameras whose PTZ/aim go2rtc stream we've explicitly warmed via
+# warm_ptz_stream and haven't released yet. go2rtc's own PUT /api/preload
+# is not idempotent -- re-adding an already-preloaded stream tears down and
+# reopens the consumer -- so this local bookkeeping is what lets
+# warm_ptz_stream/release_ptz_stream only call the live API on a genuine
+# state transition instead of on every heartbeat.
+ptz_warm_streams: set = set()
+ptz_warm_streams_lock = threading.Lock()
+
+metric_pictures_taken_total = Counter(
+    "pictures_taken_total", "Total number of pictures taken", ["camera_name"]
+)
+metric_last_successful_picture_timestamp = Gauge(
+    "capture_last_success_timestamp",
+    "Timestamp of the last successfully taken picture",
+    ["camera_name"],
+)
+metric_capture_failures_total = Counter(
+    "capture_failures_total", "Total number of capture failures", ["camera_name"]
+)
+metric_timelapses_created_total = Counter(
+    "timelapses_created_total",
+    "Total number of timelapses created",
+    ["camera_name", "type"],
+)
+metric_timelapse_queue_size = Gauge(
+    "timelapse_queue_size", "Number of timelapses in the queue"
+)
+metric_camera_directory_size_bytes = Gauge(
+    "camera_directory_size_bytes",
+    "Size of the camera directory in bytes",
+    ["camera_name"],
+)
+metric_work_directory_size_bytes = Gauge(
+    "work_dir_size_bytes", "Size of the work directory in bytes"
+)
+metric_directories_total = Gauge(
+    "dir_total_count", "Total number of directories", ["camera_name"]
+)
+metric_directories_archived_total = Gauge(
+    "dir_archived_count", "Number of archived directories", ["camera_name"]
+)
+metric_directories_timelapse_total = Gauge(
+    "dir_timelapse_count",
+    "Number of directories with a timelapse file",
+    ["camera_name"],
+)
+metric_directories_daylight_total = Gauge(
+    "dir_daylight_count",
+    "Number of directories with a daylight.png file",
+    ["camera_name"],
+)
+metric_picture_width_pixels = Gauge(
+    "picture_width_pixels", "Width of the captured picture in pixels", ["camera_name"]
+)
+metric_picture_height_pixels = Gauge(
+    "picture_height_pixels", "Height of the captured picture in pixels", ["camera_name"]
+)
+metric_picture_size_bytes = Gauge(
+    "picture_size_bytes", "Size of the captured picture in bytes", ["camera_name"]
+)
+metric_picture_iso = Gauge(
+    "picture_iso", "ISO value of the captured picture", ["camera_name"]
+)
+metric_picture_focal_length_mm = Gauge(
+    "picture_focal_length_mm",
+    "Focal length of the captured picture in mm",
+    ["camera_name"],
+)
+metric_picture_aperture = Gauge(
+    "picture_aperture", "Aperture value of the captured picture", ["camera_name"]
+)
+metric_picture_exposure_time_seconds = Gauge(
+    "picture_exposure_time_seconds",
+    "Exposure time of the captured picture in seconds",
+    ["camera_name"],
+)
+metric_picture_white_balance = Gauge(
+    "picture_white_balance",
+    "White balance value of the captured picture",
+    ["camera_name"],
+)
+metric_processing_time_seconds = Gauge(
+    "capture_processing_time_seconds",
+    "Time it took to fetch and process a new picture",
+    ["camera_name"],
+)
+metric_sleep_time_seconds = Gauge(
+    "capture_loop_sleep_time_seconds",
+    "Time the camera sleeps between pictures",
+    ["camera_name"],
+)
+metric_camera_mode = Gauge(
+    "camera_mode", "Current camera mode with mode label", ["camera_name", "mode"]
+)
+metric_camera_ssim_value = Gauge(
+    "camera_ssim_value", "Latest SSIM measurement", ["camera_name"]
+)
+metric_camera_ssim_target = Gauge(
+    "camera_ssim_target", "Configured SSIM target", ["camera_name"]
+)
+metric_camera_online = Gauge(
+    "camera_online", "Camera online status reported by the snap loop", ["camera_name"]
+)
 gopro_state_gauge = Gauge("gopro_state", "GoPro State", ["camera_name", "state_name"])
-gopro_setting_gauge = Gauge("gopro_setting", "GoPro Setting", ["camera_name", "setting_name"])
+gopro_setting_gauge = Gauge(
+    "gopro_setting", "GoPro Setting", ["camera_name", "setting_name"]
+)
 
 app = Flask(__name__)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _admin_auth_enabled() -> bool:
+    if "FENETRE_ADMIN_AUTH_ENABLED" in app.config:
+        return bool(app.config["FENETRE_ADMIN_AUTH_ENABLED"])
+    return _env_bool("FENETRE_ADMIN_AUTH_ENABLED", True)
+
+
+def _auth_failed_response():
+    return Response(
+        "Authentication required.\n",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Fenetre Admin", charset="UTF-8"'},
+    )
+
+
+def _current_admin_user():
+    user = getattr(request, "fenetre_admin_user", None)
+    return user if isinstance(user, dict) else None
+
+
+def _has_superadmin(users: dict) -> bool:
+    return any(
+        isinstance(user, dict)
+        and not user.get("disabled", False)
+        and effective_user_role(user) == "superadmin"
+        for user in (users or {}).values()
+    )
+
+
+def _current_user_can_manage_users(config: dict) -> bool:
+    user = _current_admin_user()
+    if not user:
+        return not _admin_auth_enabled()
+    role = effective_user_role(user)
+    if role == "superadmin":
+        return True
+    # Backward compatibility: allow the existing admin account to promote a
+    # superadmin until one exists, then reserve user permission edits for
+    # superadmins.
+    return role == "admin" and not _has_superadmin(config.get("users") or {})
+
+
+def _current_user_can_act_on_camera(camera_name: str) -> bool:
+    """Scope admin-role camera actions to the cameras a superadmin assigned.
+
+    README documents "admin" as camera control only for cameras assigned by
+    a superadmin, but there's no dedicated assignment list in the data
+    model beyond a user's ptz_cameras (used for the public site's PTZ
+    access). Reusing it here is a bounded fix for endpoints -- PTZ lock,
+    image profile actions -- that otherwise let any admin-role account act
+    on any camera, not just ones assigned to them, contradicting that
+    documented model. superadmin is unrestricted, as is every other
+    endpoint when admin auth is disabled entirely.
+    """
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    if effective_user_role(user) == "superadmin":
+        return True
+    allowed_cameras = user.get("ptz_cameras") or []
+    return camera_name in allowed_cameras
+
+
+def _filter_effective_config_for_user(
+    effective_config: dict, user: dict | None
+) -> dict:
+    """Scope the whole-config payload to what a non-superadmin may see.
+
+    GET /config used to return the entire effective config -- every camera's
+    credentials and the full users block (password hashes included) -- to
+    any admin-role account, not just superadmin. README documents "admin" as
+    camera control only for cameras assigned by a superadmin, so a
+    non-superadmin caller now gets: only their assigned cameras (in full,
+    since they're allowed to edit those), no users block, and every other
+    section (global, http_server, timelapse, ...) with credential-shaped
+    fields redacted -- those sections are read-only for this role anyway,
+    see the superadmin-only guard on PUT /config.
+    """
+    if not isinstance(effective_config, dict):
+        return effective_config
+    allowed_cameras = set((user or {}).get("ptz_cameras") or [])
+    original_cameras = effective_config.get("cameras")
+    original_cameras = original_cameras if isinstance(original_cameras, dict) else {}
+    filtered = _redact_config_for_logs(effective_config)
+    if not isinstance(filtered, dict):
+        return filtered
+    filtered["cameras"] = {
+        name: original_cameras[name]
+        for name in allowed_cameras
+        if name in original_cameras
+    }
+    filtered.pop("users", None)
+    return filtered
+
+
+def _would_remove_last_superadmin(
+    users: dict, username: str, new_user: dict | None
+) -> bool:
+    """True if replacing `username` with new_user (None means deleted) would
+    leave the deployment with no enabled superadmin account -- which, absent
+    host access to run `fenetre-user reset-admin`, would lock every admin
+    out of user management permanently.
+
+    Only applies when a superadmin currently exists: if none does yet (e.g.
+    users configured entirely by hand, or before the admin/admin bootstrap
+    has run), there's nothing to protect and normal user management
+    shouldn't be blocked waiting for one to appear.
+    """
+    if not _has_superadmin(users or {}):
+        return False
+    remaining = {name: user for name, user in (users or {}).items() if name != username}
+    if new_user is not None:
+        remaining[username] = new_user
+    return not _has_superadmin(remaining)
+
+
+def _current_user_is_superadmin() -> bool:
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    return effective_user_role(user) == "superadmin"
+
+
+def _current_user_can_manage_storage_location() -> bool:
+    return _current_user_is_superadmin()
+
+
+# local_command and unavailable_command run as an OS command on the server
+# (see fenetre.py get_pic_from_local_command / run_camera_unavailable_command)
+# with no sandboxing, in a container that runs as root. README documents the
+# "admin" role as scoped to "camera control only for cameras assigned by a
+# superadmin" -- letting that role set or change either to a free-form value
+# is an unsandboxed-command-execution privilege escalation to root, so doing
+# so is restricted to superadmin regardless of which endpoint is used.
+#
+# The Fenetre-generated RTSP snapshot command (a fixed ffmpeg argv template
+# with a shlex-quoted rtsp_url, see rtsp_capture.py) is exempted: it's safe,
+# and every ordinary RTSP-only camera gets one auto-derived from rtsp_url, so
+# gating that on superadmin would block the common case of an "admin" role
+# managing a plain RTSP camera, not just the actually-dangerous case of a
+# free-form custom command.
+
+
+def _is_custom_local_command(value: str | None) -> bool:
+    value = (value or "").strip()
+    if not value:
+        return False
+    return not is_fenetre_generated_rtsp_snapshot_command(value)
+
+
+def _camera_command_fields_changed(
+    old_camera: dict | None, new_camera: dict | None
+) -> bool:
+    old_camera = old_camera or {}
+    new_camera = new_camera or {}
+
+    old_unavailable = str(old_camera.get("unavailable_command") or "").strip()
+    new_unavailable = str(new_camera.get("unavailable_command") or "").strip()
+    if new_unavailable and new_unavailable != old_unavailable:
+        return True
+
+    old_local = str(old_camera.get("local_command") or "").strip()
+    new_local = str(new_camera.get("local_command") or "").strip()
+    if new_local != old_local and _is_custom_local_command(new_local):
+        return True
+
+    return False
+
+
+def _current_user_can_set_camera_command_fields() -> bool:
+    return _current_user_is_superadmin()
+
+
+def _cameras_with_changed_command_fields(
+    existing_cameras: dict | None, new_cameras: dict | None
+) -> list[str]:
+    existing_cameras = existing_cameras if isinstance(existing_cameras, dict) else {}
+    new_cameras = new_cameras if isinstance(new_cameras, dict) else {}
+    changed = []
+    for name in set(existing_cameras) | set(new_cameras):
+        old_camera = existing_cameras.get(name)
+        new_camera = new_cameras.get(name)
+        if _camera_command_fields_changed(
+            old_camera if isinstance(old_camera, dict) else {},
+            new_camera if isinstance(new_camera, dict) else {},
+        ):
+            changed.append(str(name))
+    return sorted(changed)
+
+
+def _current_user_can_set_user_password(target_username: str) -> bool:
+    if not _admin_auth_enabled():
+        return True
+    user = _current_admin_user()
+    if not user:
+        return False
+    if effective_user_role(user) == "superadmin":
+        return True
+    return user.get("username") == target_username
+
+
+# Best-effort brute-force mitigation on admin login. This is in-process,
+# in-memory state: it resets on restart and (with multiple worker
+# processes) only covers whichever worker handled a given attempt. Good
+# enough to slow down an unattended online guesser against a fresh
+# deployment's default admin/admin bootstrap credentials without needing
+# external infrastructure; not a substitute for a real rate limiter in a
+# multi-process/multi-instance deployment.
+_FAILED_LOGIN_WINDOW_S = 900
+_FAILED_LOGIN_MAX_ATTEMPTS = 10
+_failed_login_lock = threading.Lock()
+_failed_login_attempts: dict[tuple[str, str], list[float]] = {}
+
+
+def _login_throttle_key() -> tuple[str, str]:
+    auth = request.authorization
+    username = (auth.username if auth else "") or ""
+    return (username, request.remote_addr or "unknown")
+
+
+def _prune_login_attempts(attempts: list[float], now: float) -> list[float]:
+    return [t for t in attempts if now - t < _FAILED_LOGIN_WINDOW_S]
+
+
+def _is_login_throttled() -> bool:
+    key = _login_throttle_key()
+    now = time.time()
+    with _failed_login_lock:
+        attempts = _prune_login_attempts(_failed_login_attempts.get(key, []), now)
+        _failed_login_attempts[key] = attempts
+        return len(attempts) >= _FAILED_LOGIN_MAX_ATTEMPTS
+
+
+def _record_failed_login() -> None:
+    key = _login_throttle_key()
+    now = time.time()
+    with _failed_login_lock:
+        attempts = _prune_login_attempts(_failed_login_attempts.get(key, []), now)
+        attempts.append(now)
+        _failed_login_attempts[key] = attempts
+
+
+def _clear_failed_login() -> None:
+    key = _login_throttle_key()
+    with _failed_login_lock:
+        _failed_login_attempts.pop(key, None)
+
+
+def reset_login_throttle_state() -> None:
+    """Test-only helper to reset in-memory login-throttle state between tests."""
+    with _failed_login_lock:
+        _failed_login_attempts.clear()
+
+
+_CSRF_PROTECTED_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def _same_origin_request() -> bool:
+    """Best-effort CSRF mitigation for the Basic-Auth-protected admin API.
+
+    Basic Auth credentials are cached by the browser per origin and are
+    attached automatically to cross-origin requests -- unlike cookie auth,
+    there's no SameSite attribute to lean on here, and this API has no
+    session/CSRF token. So for state-changing requests, reject any request
+    whose Origin or Referer header names a different host than the one being
+    requested: that's exactly what a cross-site form/fetch CSRF attempt
+    looks like. Requests with neither header (non-browser API clients, e.g.
+    curl-based automation) are allowed through unchanged, since they can't
+    be a browser-driven cross-site attack.
+    """
+    host = request.host
+    origin = request.headers.get("Origin")
+    if origin:
+        return urlsplit(origin).netloc == host
+    referer = request.headers.get("Referer")
+    if referer:
+        return urlsplit(referer).netloc == host
+    return True
+
+
+@app.before_request
+def require_admin_auth():
+    if request.path == "/logout":
+        return None
+    if not _admin_auth_enabled():
+        return None
+
+    if request.method in _CSRF_PROTECTED_METHODS and not _same_origin_request():
+        return jsonify({"error": "Cross-origin request rejected."}), 403
+
+    auth = request.authorization
+    if not auth:
+        return _auth_failed_response()
+
+    if _is_login_throttled():
+        response = jsonify(
+            {
+                "error": "Too many failed login attempts for this account. "
+                "Try again later."
+            }
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(_FAILED_LOGIN_WINDOW_S)
+        return response
+
+    config_file_path = app.config.get("FENETRE_CONFIG_FILE")
+    if config_file_path:
+        ensure_default_admin_user(config_file_path)
+        user = authenticate_config_user_record(
+            config_file_path, auth.username or "", auth.password or ""
+        )
+        if user and effective_user_role(user) in ADMIN_ROLES:
+            _clear_failed_login()
+            request.fenetre_admin_user = user
+            return None
+
+    expected_username = app.config.get("FENETRE_ADMIN_USERNAME") or os.environ.get(
+        "FENETRE_ADMIN_USERNAME"
+    )
+    expected_password = app.config.get("FENETRE_ADMIN_PASSWORD") or os.environ.get(
+        "FENETRE_ADMIN_PASSWORD"
+    )
+    if expected_username is None or expected_password is None:
+        _record_failed_login()
+        return _auth_failed_response()
+    username_ok = hmac.compare_digest(auth.username or "", str(expected_username))
+    password_ok = hmac.compare_digest(auth.password or "", str(expected_password))
+    if not (username_ok and password_ok):
+        _record_failed_login()
+        return _auth_failed_response()
+    _clear_failed_login()
+    request.fenetre_admin_user = {
+        "username": auth.username or "env-admin",
+        "role": "superadmin",
+        "ptz_access": "admin",
+        "ptz_cameras": [],
+    }
+    return None
 
 
 def _config_file_path():
@@ -64,10 +546,95 @@ def _load_raw_config():
         return yaml.safe_load(f) or {}
 
 
-def _backup_config(config_file_path: str) -> str | None:
+def _get_effective_config(raw_config: dict) -> dict:
+    """Return the actual Fenetre config mapping regardless of wrapper style.
+
+    Some user configs are stored as:
+
+        config:
+          global: ...
+          cameras: ...
+
+    while Fenetre's runtime config is the mapping containing global/cameras/etc.
+    Admin mutations must edit that effective mapping instead of accidentally creating
+    top-level siblings such as `cameras:` next to `config:`.
+    """
+    if isinstance(raw_config, dict) and isinstance(raw_config.get("config"), dict):
+        return raw_config["config"]
+    return raw_config
+
+
+def _merge_effective_config(raw_config: dict, effective_config: dict) -> dict:
+    """Put an edited effective config back into the original file shape."""
+    if isinstance(raw_config, dict) and isinstance(raw_config.get("config"), dict):
+        updated = dict(raw_config)
+        updated["config"] = effective_config
+        return updated
+    return effective_config
+
+
+def _load_effective_config_with_raw() -> tuple[dict, dict]:
+    raw_config = _load_raw_config()
+    return raw_config, _get_effective_config(raw_config)
+
+
+def _config_version(config_file_path: str) -> str | None:
+    """Opaque token that changes whenever config.yaml is written.
+
+    The admin UI's "whole config" editors (raw config form, launch workflow
+    form, etc.) hold their own client-side snapshot of the full config and
+    PUT it back wholesale. If config.yaml was written by something else (a
+    different admin tab doing a scoped save, e.g. a PTZ preset edit) after
+    that snapshot was taken, PUTting the stale snapshot back would silently
+    revert the newer change. Callers compare this token to detect that case
+    instead of clobbering it -- see update_config().
+    """
+    try:
+        return str(os.stat(config_file_path).st_mtime_ns)
+    except FileNotFoundError:
+        return None
+
+
+def _config_backup_dir(config_data: dict) -> str | None:
+    """Where to put config.yaml backups so they actually survive a redeploy.
+
+    The documented docker-compose setup bind-mounts config.yaml as a single
+    file (- /srv/fenetre/config.yaml:/srv/fenetre/config.yaml), not its
+    containing directory. A backup written as a sibling of config.yaml (the
+    old f"{config_file_path}.bak.{ts}" scheme) therefore lands in the
+    container's own writable layer and is silently gone the next time the
+    container is recreated -- these backups have never actually been
+    recoverable under that deployment model. work_dir (typically
+    /srv/fenetre/data) *is* a real directory bind mount, so put them there
+    instead.
+    """
+    effective = (
+        _get_effective_config(config_data) if isinstance(config_data, dict) else {}
+    )
+    global_config = effective.get("global") if isinstance(effective, dict) else None
+    work_dir = (
+        (global_config or {}).get("work_dir")
+        if isinstance(global_config, dict)
+        else None
+    )
+    if not work_dir:
+        return None
+    return os.path.join(str(work_dir), "config_backups")
+
+
+def _backup_config(config_file_path: str, backup_dir: str | None = None) -> str | None:
     if not os.path.exists(config_file_path):
         return None
-    backup_path = f"{config_file_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if backup_dir:
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, f"config.yaml.bak.{timestamp}")
+    else:
+        # Only reached if work_dir isn't configured yet (e.g. very first
+        # boot before any global.work_dir is set) -- not persisted across a
+        # container recreate under the standard single-file bind mount, see
+        # _config_backup_dir above.
+        backup_path = f"{config_file_path}.bak.{timestamp}"
     with open(config_file_path, "rb") as src, open(backup_path, "wb") as dst:
         dst.write(src.read())
     return backup_path
@@ -79,58 +646,914 @@ def _write_yaml_for_bind_mount(config_file_path: str, config_data: dict) -> str 
     os.replace(tmp, config.yaml) can fail with EBUSY on single-file bind mounts, so
     we keep a timestamped backup and then truncate/write/fsync the mounted file.
     """
-    backup_path = _backup_config(config_file_path)
-    rendered = yaml.safe_dump(config_data, sort_keys=False, default_flow_style=False, indent=2)
+    backup_path = _backup_config(config_file_path, _config_backup_dir(config_data))
+    rendered = yaml.safe_dump(
+        config_data, sort_keys=False, default_flow_style=False, indent=2
+    )
     with open(config_file_path, "w") as f:
         f.write(rendered)
         f.flush()
         os.fsync(f.fileno())
+    with open(config_file_path, "r") as f:
+        written_config = yaml.safe_load(f) or {}
+    if written_config != config_data:
+        raise IOError(
+            f"Configuration write verification failed for {config_file_path}."
+        )
     return backup_path
 
 
+def _config_write_metadata(config_file_path: str, backup_path: str | None) -> dict:
+    stat = os.stat(config_file_path)
+    return {
+        "config_path": config_file_path,
+        "backup": os.path.basename(backup_path) if backup_path else None,
+        "size_bytes": stat.st_size,
+        "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+    }
+
+
+def _fenetre_reload_signal_result() -> tuple[dict, int]:
+    fenetre_pid_file_path = app.config.get("FENETRE_PID_FILE_PATH")
+    if not fenetre_pid_file_path:
+        return {"error": "FENETRE_PID_FILE_PATH not set in app config."}, 500
+    if not os.path.exists(fenetre_pid_file_path):
+        return (
+            {
+                "error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."
+            },
+            404,
+        )
+    try:
+        with open(fenetre_pid_file_path, "r") as f:
+            pid_str = f.read().strip()
+        if not pid_str:
+            return {"error": "PID file is empty."}, 500
+        pid = int(pid_str)
+        os.kill(pid, signal.SIGHUP)
+        return {"message": f"Reload signal sent to process {pid}.", "pid": pid}, 200
+    except ProcessLookupError:
+        return (
+            {"error": f"Process with PID read from {fenetre_pid_file_path} not found."},
+            500,
+        )
+    except ValueError:
+        return {"error": f"Invalid PID found in {fenetre_pid_file_path}."}, 500
+    except Exception as e:
+        return {"error": f"Error signaling reload: {str(e)}"}, 500
+
+
+def _reload_after_config_write() -> dict:
+    if app.config.get("FENETRE_RELOAD_ON_CONFIG_WRITE", True) is False:
+        return {
+            "ok": True,
+            "skipped": True,
+            "message": "Runtime reload after config write is disabled.",
+        }
+    result, status = _fenetre_reload_signal_result()
+    payload = dict(result)
+    payload["ok"] = status == 200
+    if status != 200 and "warning" not in payload:
+        payload["warning"] = payload.get("error", "Runtime reload failed.")
+    return payload
+
+
+def _sync_public_ui_files(config: dict) -> dict:
+    work_dir = (config.get("global") or {}).get("work_dir")
+    if not work_dir:
+        return {"ok": False, "warning": "work_dir not set in global config."}
+    copy_public_html_files(work_dir, config.get("global", {}))
+    return {"ok": True, "message": "UI files synchronized successfully."}
+
+
+def _rebuild_cameras_json(config: dict) -> dict:
+    global_config = config.get("global") or {}
+    work_dir = global_config.get("work_dir")
+    if not work_dir:
+        return {"ok": False, "warning": "work_dir not set in global configuration."}
+    cameras_json_path = os.path.join(work_dir, "cameras.json")
+    backup_path = None
+    if os.path.exists(cameras_json_path):
+        backup_path = (
+            f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
+        )
+        os.replace(cameras_json_path, backup_path)
+    write_cameras_metadata(
+        config.get("cameras") or {},
+        global_config,
+        config.get("timelapse") or {},
+        cameras_json_path,
+    )
+    result = {
+        "ok": True,
+        "message": "cameras.json rebuilt successfully.",
+        "path": cameras_json_path,
+    }
+    if backup_path:
+        result["backup"] = os.path.basename(backup_path)
+    return result
+
+
+def _publish_public_artifacts(config: dict) -> dict:
+    result = {}
+    try:
+        result["ui_sync"] = _sync_public_ui_files(config)
+    except Exception as exc:
+        result["ui_sync"] = {"ok": False, "warning": str(exc)}
+    try:
+        result["cameras_json"] = _rebuild_cameras_json(config)
+    except Exception as exc:
+        result["cameras_json"] = {"ok": False, "warning": str(exc)}
+    return result
+
+
+def _local_go2rtc_api_base(runtime_config: dict | None) -> str | None:
+    if not runtime_config:
+        return None
+    listen = str((runtime_config.get("api") or {}).get("listen") or "").strip()
+    if not listen:
+        return None
+    if listen.startswith(":"):
+        return f"http://127.0.0.1{listen}"
+    if listen.startswith("[") and "]:" in listen:
+        port = listen.rsplit(":", 1)[-1]
+        return f"http://127.0.0.1:{port}"
+    if ":" in listen:
+        host, port = listen.rsplit(":", 1)
+        if host in {"", "0.0.0.0", "::", "[::]"}:
+            host = "127.0.0.1"
+        return f"http://{host}:{port}"
+    return f"http://127.0.0.1:{listen}"
+
+
+def _go2rtc_mode_allows_autostart() -> bool:
+    mode = str(os.environ.get("FENETRE_GO2RTC", "auto")).strip().lower()
+    return mode not in {"off", "false", "0", "no"}
+
+
+def _start_go2rtc_if_needed(config_path: str) -> str | None:
+    global go2rtc_spawned_process
+    if not _go2rtc_mode_allows_autostart():
+        return "FENETRE_GO2RTC disables bundled go2rtc autostart."
+    if go2rtc_spawned_process and go2rtc_spawned_process.poll() is None:
+        return None
+    go2rtc_binary = shutil.which("go2rtc")
+    if not go2rtc_binary:
+        return "go2rtc binary was not found in PATH."
+    try:
+        go2rtc_spawned_process = subprocess.Popen(
+            [go2rtc_binary, "-config", config_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.5)
+    except OSError as exc:
+        return f"failed to start go2rtc: {exc}"
+    return None
+
+
+def _sync_go2rtc_api(
+    api_base: str,
+    streams: dict,
+    removed_streams: list[str],
+) -> None:
+    for stream_name, stream_source in streams.items():
+        response = requests.put(
+            f"{api_base}/api/streams",
+            params={"name": stream_name, "src": stream_source},
+            timeout=3,
+        )
+        response.raise_for_status()
+    for stream_name in removed_streams:
+        response = requests.delete(
+            f"{api_base}/api/streams",
+            params={"src": stream_name},
+            timeout=3,
+        )
+        if response.status_code not in {200, 204, 404}:
+            response.raise_for_status()
+
+
+def _set_go2rtc_preload(api_base: str, stream_name: str, preload_query: str) -> None:
+    params = {"src": stream_name}
+    params.update(go2rtc_preload_query_params(preload_query))
+    response = requests.put(f"{api_base}/api/preload", params=params, timeout=3)
+    response.raise_for_status()
+
+
+def _clear_go2rtc_preload(api_base: str, stream_name: str) -> None:
+    response = requests.delete(
+        f"{api_base}/api/preload", params={"src": stream_name}, timeout=3
+    )
+    if response.status_code in {200, 204}:
+        return
+    # go2rtc returns 500 ("preload not found") if nothing was preloaded for
+    # this stream -- that's already the state we want, not a real failure.
+    if response.status_code != 500:
+        response.raise_for_status()
+
+
+def warm_ptz_stream(config: dict, camera_name: str) -> dict:
+    """Best-effort: ask the already-running go2rtc process to open a
+    persistent preload connection for this camera's PTZ/aim stream, so the
+    aiming preview doesn't pay a fresh RTSP handshake the first time someone
+    actually opens it. Called when a user expands a camera's PTZ controls,
+    on the theory that they might use them. Never raises -- a failure here
+    just leaves the stream cold, same as before this existed.
+    """
+    global_config = config.get("global") or {}
+    go2rtc_config = (
+        global_config.get("go2rtc") if isinstance(global_config, dict) else {}
+    )
+    if not isinstance(go2rtc_config, dict) or not go2rtc_config.get("enabled"):
+        return {"ok": False, "reason": "go2rtc_disabled"}
+    camera_config = (config.get("cameras") or {}).get(camera_name)
+    if not isinstance(camera_config, dict):
+        return {"ok": False, "reason": "camera_not_found"}
+    alignment_source = camera_config.get("ptz_rtsp_url") or camera_config.get(
+        "rtsp_url"
+    )
+    if not alignment_source:
+        return {"ok": False, "reason": "no_rtsp_source"}
+
+    with ptz_warm_streams_lock:
+        if camera_name in ptz_warm_streams:
+            return {"ok": True, "already_warm": True}
+        runtime_config = build_go2rtc_runtime_config(config)
+        api_base = _local_go2rtc_api_base(runtime_config)
+        if not api_base:
+            return {"ok": False, "reason": "api_unreachable"}
+        stream_name = go2rtc_stream_name(camera_name, global_config)
+        preload_query = (
+            str(go2rtc_config.get("preload_query") or "video").strip() or "video"
+        )
+        try:
+            _set_go2rtc_preload(api_base, stream_name, preload_query)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Could not warm go2rtc preload for %s: %s",
+                camera_name,
+                sanitize_text_for_logs(str(exc)),
+            )
+            return {"ok": False, "reason": "request_failed"}
+        ptz_warm_streams.add(camera_name)
+    return {"ok": True, "stream": stream_name}
+
+
+def release_ptz_stream(config: dict, camera_name: str) -> dict:
+    """Best-effort counterpart to warm_ptz_stream. Skips the release while a
+    local_rtsp launch recording is in progress for this camera -- Sunba has
+    no recording API, so that recording is a direct ffmpeg RTSP session to
+    the camera, and tearing down/reopening go2rtc's own RTSP connection to
+    the same camera mid-recording risks tripping a low concurrent-session
+    limit right when it matters most.
+    """
+    with ptz_warm_streams_lock:
+        if camera_name not in ptz_warm_streams:
+            return {"ok": True, "already_released": True}
+        if local_rtsp_recording_active(camera_name):
+            return {"ok": True, "skipped": "recording_in_progress"}
+        global_config = config.get("global") or {}
+        runtime_config = build_go2rtc_runtime_config(config)
+        api_base = _local_go2rtc_api_base(runtime_config)
+        stream_name = go2rtc_stream_name(camera_name, global_config)
+        if api_base:
+            try:
+                _clear_go2rtc_preload(api_base, stream_name)
+            except requests.RequestException as exc:
+                logger.warning(
+                    "Could not release go2rtc preload for %s: %s",
+                    camera_name,
+                    sanitize_text_for_logs(str(exc)),
+                )
+        ptz_warm_streams.discard(camera_name)
+    return {"ok": True, "stream": stream_name}
+
+
+def warm_ptz_camera_names() -> set:
+    with ptz_warm_streams_lock:
+        return set(ptz_warm_streams)
+
+
+def _sync_go2rtc_runtime(
+    config: dict,
+    previous_config: dict | None = None,
+) -> dict:
+    runtime_config = build_go2rtc_runtime_config(config)
+    previous_runtime_config = (
+        build_go2rtc_runtime_config(previous_config) if previous_config else None
+    )
+    output_path = os.environ.get("FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml")
+    streams = (runtime_config or {}).get("streams") or {}
+    preload = (runtime_config or {}).get("preload") or {}
+    previous_streams = (previous_runtime_config or {}).get("streams") or {}
+    removed_streams = sorted(set(previous_streams) - set(streams))
+    result = {
+        "enabled": bool(runtime_config),
+        "config_path": output_path,
+        "api_base": _local_go2rtc_api_base(runtime_config or previous_runtime_config),
+        "streams": sorted(streams.keys()),
+        "preload_streams": sorted(preload.keys()),
+        "removed_streams": removed_streams,
+        "api_synced": False,
+        "warning": None,
+    }
+    if not runtime_config and not removed_streams:
+        return result
+
+    if runtime_config:
+        with open(output_path, "w") as output_file:
+            yaml.safe_dump(runtime_config, output_file, sort_keys=False)
+    elif os.path.exists(output_path):
+        os.remove(output_path)
+
+    api_base = _local_go2rtc_api_base(runtime_config or previous_runtime_config)
+    if not api_base:
+        result["warning"] = "go2rtc API listen address is disabled."
+        return result
+
+    try:
+        _sync_go2rtc_api(api_base, streams, removed_streams)
+        result["api_synced"] = True
+    except requests.RequestException as exc:
+        if not runtime_config:
+            result["warning"] = sanitize_text_for_logs(f"go2rtc API sync failed: {exc}")
+            return result
+        start_warning = _start_go2rtc_if_needed(output_path)
+        if start_warning:
+            result["warning"] = sanitize_text_for_logs(
+                f"go2rtc API sync failed: {exc}; {start_warning}"
+            )
+            return result
+        try:
+            _sync_go2rtc_api(api_base, streams, removed_streams)
+            result["api_synced"] = True
+            result["started"] = True
+        except requests.RequestException as retry_exc:
+            result["warning"] = sanitize_text_for_logs(
+                f"go2rtc API sync failed: {retry_exc}"
+            )
+    return result
+
+
+def _go2rtc_runtime_status(config: dict) -> dict:
+    global_config = config.get("global") or {}
+    go2rtc_config = (
+        global_config.get("go2rtc") if isinstance(global_config, dict) else {}
+    ) or {}
+    if not isinstance(go2rtc_config, dict):
+        go2rtc_config = {}
+
+    runtime_config = build_go2rtc_runtime_config(config)
+    api_base = _local_go2rtc_api_base(runtime_config)
+    streams = (runtime_config or {}).get("streams") or {}
+    preload = (runtime_config or {}).get("preload") or {}
+    spawned_running = bool(
+        go2rtc_spawned_process and go2rtc_spawned_process.poll() is None
+    )
+    status = {
+        "configured_enabled": bool(go2rtc_config.get("enabled")),
+        "runtime_enabled": bool(runtime_config),
+        "autostart_enabled": _go2rtc_mode_allows_autostart(),
+        "binary_path": shutil.which("go2rtc"),
+        "config_path": os.environ.get(
+            "FENETRE_GO2RTC_CONFIG", "/tmp/fenetre-go2rtc.yaml"
+        ),
+        "api_base": api_base,
+        "base_url_configured": bool(str(go2rtc_config.get("base_url") or "").strip()),
+        "base_urls_configured": bool(go2rtc_config.get("base_urls") or {}),
+        "base_url_hosts": sorted((go2rtc_config.get("base_urls") or {}).keys()),
+        "same_host_fallback_enabled": not bool(
+            str(go2rtc_config.get("base_url") or "").strip()
+        ),
+        "same_host_port": go2rtc_browser_port(global_config),
+        "streams": sorted(streams.keys()),
+        "stream_count": len(streams),
+        "preload_streams": sorted(preload.keys()),
+        "preload_count": len(preload),
+        "spawned_pid": go2rtc_spawned_process.pid if spawned_running else None,
+        "spawned_running": spawned_running,
+        "api_reachable": False,
+        "api_status_code": None,
+        "api_error": None,
+        "warning": None,
+    }
+    if not go2rtc_config.get("enabled"):
+        status["warning"] = "global.go2rtc.enabled is false."
+        return status
+    if not runtime_config:
+        status["warning"] = (
+            "go2rtc is enabled, but no camera has an enabled rtsp_url or "
+            "ptz_rtsp_url."
+        )
+        return status
+    if not api_base:
+        status["api_error"] = "go2rtc API listen address is disabled."
+        return status
+
+    try:
+        response = requests.get(f"{api_base}/api/streams", timeout=3)
+        status["api_status_code"] = response.status_code
+        response.raise_for_status()
+        status["api_reachable"] = True
+    except requests.RequestException as exc:
+        status["api_error"] = sanitize_text_for_logs(str(exc))
+        status["warning"] = "go2rtc API is not reachable from Fenetre."
+    return status
+
+
+def _ensure_go2rtc_enabled_for_camera(config: dict, camera: dict) -> None:
+    if not (camera.get("rtsp_url") or camera.get("ptz_rtsp_url")):
+        return
+    if camera.get("go2rtc_enabled") is False:
+        return
+    global_config = config.setdefault("global", {})
+    if not isinstance(global_config, dict):
+        return
+    go2rtc_config = global_config.setdefault("go2rtc", {})
+    if not isinstance(go2rtc_config, dict):
+        global_config["go2rtc"] = {"enabled": True}
+        return
+    go2rtc_config["enabled"] = True
+
+
+def _merge_persistent_users(new_config: dict, existing_config: dict) -> list[str]:
+    """Preserve the existing users block across a raw /config PUT.
+
+    A full-config PUT is reachable by any admin-role account (not just
+    superadmin) and its payload never goes through _normalize_user's
+    role/username validation or password hashing. Previously, a username not
+    already present in config.yaml was merged in verbatim, letting an
+    "admin"-role account inject an unvalidated, unhashed-password
+    "superadmin" account straight into config.yaml. To close that off,
+    existing usernames are always preserved unchanged (as before), and any
+    *new* username in the submitted payload is dropped rather than created;
+    new users must be created through /api/users, which validates and hashes
+    properly. Returns the list of usernames that were dropped this way.
+    """
+    existing_users = existing_config.get("users")
+    had_existing_users_key = isinstance(existing_users, dict)
+    if not had_existing_users_key:
+        existing_users = {}
+
+    submitted_users = new_config.get("users")
+    merged_users = yaml.safe_load(yaml.safe_dump(existing_users)) or {}
+    rejected_new_usernames: list[str] = []
+    if isinstance(submitted_users, dict):
+        for username, submitted_user in submitted_users.items():
+            if not isinstance(submitted_user, dict):
+                continue
+            if not isinstance(merged_users.get(username), dict):
+                rejected_new_usernames.append(str(username))
+
+    if had_existing_users_key or merged_users:
+        new_config["users"] = merged_users
+    elif "users" in new_config:
+        # No users were ever configured and nothing survived validation;
+        # don't introduce an empty users block that wasn't there before, so
+        # the first-run admin/admin bootstrap (which triggers on a missing
+        # "users" key) still fires normally.
+        del new_config["users"]
+
+    if rejected_new_usernames:
+        logger.warning(
+            "Ignored new user(s) %s submitted via raw /config PUT; create users "
+            "through Manage Users (/api/users) instead.",
+            rejected_new_usernames,
+        )
+    return rejected_new_usernames
+
+
+def _cleanup_user_camera_access(config: dict) -> dict:
+    valid_cameras = set((config.get("cameras") or {}).keys())
+    removed = {}
+    users = config.get("users") or {}
+    if not isinstance(users, dict):
+        return removed
+    for username, user in users.items():
+        if not isinstance(user, dict):
+            continue
+        camera_names = user.get("ptz_cameras") or []
+        if not isinstance(camera_names, list):
+            camera_names = []
+        cleaned = [camera for camera in camera_names if camera in valid_cameras]
+        dropped = sorted(set(camera_names) - set(cleaned))
+        if dropped:
+            removed[str(username)] = dropped
+            user["ptz_cameras"] = cleaned
+    return removed
+
+
+def _replace_user_camera_access(config: dict, old_camera: str, new_camera: str) -> dict:
+    changed = {}
+    users = config.get("users") or {}
+    if not isinstance(users, dict):
+        return changed
+    for username, user in users.items():
+        if not isinstance(user, dict):
+            continue
+        camera_names = user.get("ptz_cameras") or []
+        if not isinstance(camera_names, list) or old_camera not in camera_names:
+            continue
+        replaced = [
+            new_camera if camera == old_camera else camera for camera in camera_names
+        ]
+        user["ptz_cameras"] = list(dict.fromkeys(replaced))
+        changed[str(username)] = {"from": old_camera, "to": new_camera}
+    return changed
+
+
+def _replace_camera_order_reference(config: dict, old_camera: str, new_camera: str):
+    ui_config = (config.get("global") or {}).get("ui") or {}
+    camera_order = ui_config.get("camera_order")
+    if not isinstance(camera_order, list) or old_camera not in camera_order:
+        return []
+    replaced = [new_camera if item == old_camera else item for item in camera_order]
+    camera_names = set((config.get("cameras") or {}).keys())
+    cleaned = []
+    for item in replaced:
+        if item in camera_names and item not in cleaned:
+            cleaned.append(item)
+    ui_config["camera_order"] = cleaned
+    return cleaned
+
+
+def _replace_launch_workflow_camera_reference(
+    config: dict, old_camera: str, new_camera: str
+) -> list[str]:
+    changed_plans = []
+    global_config = config.get("global") or {}
+    for workflow_key in ("launch_workflow", "rocket_launches"):
+        workflow = global_config.get(workflow_key)
+        if not isinstance(workflow, dict):
+            continue
+        plans = workflow.get("plans")
+        if isinstance(plans, dict):
+            plan_items = plans.items()
+        elif isinstance(plans, list):
+            plan_items = [
+                (str(plan.get("id") or index), plan)
+                for index, plan in enumerate(plans)
+                if isinstance(plan, dict)
+            ]
+        else:
+            continue
+        for plan_id, plan in plan_items:
+            cameras = plan.get("cameras")
+            if not isinstance(cameras, dict) or old_camera not in cameras:
+                continue
+            old_plan = cameras.pop(old_camera)
+            cameras.setdefault(new_camera, old_plan)
+            changed_plans.append(f"{workflow_key}:{plan_id}")
+    return changed_plans
+
+
+def _replace_camera_references(config: dict, old_camera: str, new_camera: str) -> dict:
+    changes = {
+        "user_ptz_access": _replace_user_camera_access(config, old_camera, new_camera),
+        "camera_order": _replace_camera_order_reference(config, old_camera, new_camera),
+        "launch_workflow": _replace_launch_workflow_camera_reference(
+            config, old_camera, new_camera
+        ),
+    }
+    ui_config = (config.get("global") or {}).get("ui") or {}
+    if ui_config.get("fullscreen_camera") == old_camera:
+        ui_config["fullscreen_camera"] = new_camera
+        changes["fullscreen_camera"] = {"from": old_camera, "to": new_camera}
+    return changes
+
+
 def _slugify_camera_name(value: str) -> str:
-    value = (value or "").strip().lower()
-    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = (value or "").strip()
+    value = re.sub(r"[^A-Za-z0-9_-]+", "-", value)
     value = re.sub(r"-+", "-", value).strip("-")
     if not value:
         raise ValueError("Camera name cannot be empty.")
     return value
 
 
-def _fetch_snapshot_bytes(url: str, timeout_s: int = 15, cache_bust: bool = True):
+def _unique_destination_path(path: str) -> str:
+    base, ext = os.path.splitext(path)
+    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    candidate = f"{base}.migrated-{stamp}{ext}"
+    index = 1
+    while os.path.exists(candidate):
+        candidate = f"{base}.migrated-{stamp}-{index}{ext}"
+        index += 1
+    return candidate
+
+
+def _merge_directory_contents(src_dir: str, dst_dir: str) -> None:
+    os.makedirs(dst_dir, exist_ok=True)
+    for entry in os.listdir(src_dir):
+        src_path = os.path.join(src_dir, entry)
+        dst_path = os.path.join(dst_dir, entry)
+        if os.path.isdir(src_path) and not os.path.islink(src_path):
+            if os.path.exists(dst_path) and not os.path.isdir(dst_path):
+                dst_path = _unique_destination_path(dst_path)
+            _merge_directory_contents(src_path, dst_path)
+            continue
+        if os.path.exists(dst_path):
+            dst_path = _unique_destination_path(dst_path)
+        shutil.move(src_path, dst_path)
+    shutil.rmtree(src_dir)
+
+
+def _move_camera_media_dir(config: dict, old_camera: str, new_camera: str) -> dict:
+    if old_camera == new_camera:
+        return {"moved": False}
+    work_dir = _work_dir_from_config(config)
+    if not work_dir:
+        return {"moved": False, "warning": "work_dir not set"}
+    photos_dir = os.path.join(work_dir, "photos")
+    src_dir = os.path.join(photos_dir, old_camera)
+    dst_dir = os.path.join(photos_dir, new_camera)
+    if not os.path.isdir(src_dir):
+        return {"moved": False, "from": src_dir, "to": dst_dir}
+    if os.path.abspath(src_dir) == os.path.abspath(dst_dir):
+        return {"moved": False, "from": src_dir, "to": dst_dir}
+    if os.path.exists(dst_dir):
+        _merge_directory_contents(src_dir, dst_dir)
+        return {"moved": True, "merged": True, "from": src_dir, "to": dst_dir}
+    os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
+    shutil.move(src_dir, dst_dir)
+    return {"moved": True, "merged": False, "from": src_dir, "to": dst_dir}
+
+
+GUIDED_CAMERA_KEYS = {
+    "url",
+    "http_auth",
+    "rtsp_url",
+    "ptz_rtsp_url",
+    "go2rtc_enabled",
+    "go2rtc_rtsp_transport",
+    "go2rtc_video_mode",
+    "go2rtc_preload",
+    "local_command",
+    "timeout_s",
+    "cache_bust",
+    "gather_metrics",
+    "mozjpeg_optimize",
+    "display_name",
+    "template_vendor",
+    "snapshot_template",
+    "rtsp_template",
+    "description",
+    "disabled",
+    "public",
+    "visibility",
+    "hidden",
+    "ptz",
+    "timelapse_enabled",
+    "work_dir_max_size_GB",
+    "snap_interval_s",
+    "activity_interval_s",
+    "ssim_setpoint",
+    "ssim_area",
+    "sky_area",
+    "lat",
+    "lon",
+    "sunrise_sunset",
+    "postprocessing",
+}
+
+
+def _fetch_local_command_bytes(command: str, timeout_s: int = 15):
+    result = subprocess.run(
+        shlex.split(command),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_s,
+    )
+    if result.returncode != 0:
+        stderr_preview = (result.stderr or b"").decode("utf-8", errors="replace")[-500:]
+        raise RuntimeError(
+            f"local_command failed with exit code {result.returncode}. "
+            f"stderr_last_500={stderr_preview!r}"
+        )
+    image_bytes = result.stdout
+    try:
+        image = Image.open(BytesIO(image_bytes))
+    except UnidentifiedImageError as exc:
+        stderr_preview = (result.stderr or b"").decode("utf-8", errors="replace")[-500:]
+        raise RuntimeError(
+            "local_command did not return a valid image. "
+            f"stdout_bytes={len(image_bytes or b'')}, "
+            f"stdout_first_200={(image_bytes or b'')[:200]!r}, "
+            f"stderr_last_500={stderr_preview!r}"
+        ) from exc
+    image.verify()
+    reopened = Image.open(BytesIO(image_bytes))
+    return image_bytes, "image/jpeg", reopened.size
+
+
+def _fetch_snapshot_bytes(
+    url: str,
+    timeout_s: int = 15,
+    cache_bust: bool = True,
+    camera_config: dict | None = None,
+):
     request_url = url
     if cache_bust:
         separator = "&" if "?" in request_url else "?"
-        request_url = f"{request_url}{separator}_fenetre_test={int(datetime.utcnow().timestamp())}"
-    headers = {"Accept": "image/*,*/*;q=0.8", "User-Agent": "Fenetre Admin Snapshot Tester"}
-    response = requests.get(request_url, timeout=timeout_s, headers=headers)
+        request_url = f"{request_url}{separator}_fenetre_test={int(datetime.now(timezone.utc).timestamp())}"
+    headers = {
+        "Accept": "image/*,*/*;q=0.8",
+        "User-Agent": "Fenetre Admin Snapshot Tester",
+    }
+    request_kwargs = {"timeout": timeout_s, "headers": headers}
+    request_auth = auth_from_camera_config(camera_config or {})
+    if request_auth is not None:
+        request_kwargs["auth"] = request_auth
+    response = requests.get(request_url, **request_kwargs)
     response.raise_for_status()
     image_bytes = response.content
     image = Image.open(BytesIO(image_bytes))
     image.verify()
     reopened = Image.open(BytesIO(image_bytes))
-    return image_bytes, response.headers.get("content-type", "image/jpeg"), reopened.size
+    return (
+        image_bytes,
+        response.headers.get("content-type", "image/jpeg"),
+        reopened.size,
+    )
 
 
-def _build_camera_config(payload: dict) -> tuple[str, dict]:
+def _build_camera_config(
+    payload: dict, existing_camera: dict | None = None
+) -> tuple[str, dict]:
+    existing_camera = existing_camera or {}
     name = _slugify_camera_name(payload.get("name"))
     url = (payload.get("url") or "").strip()
-    if not url:
+    source_type = payload.get("capture_source") or ("rtsp" if not url else "snapshot")
+    rtsp_url = (payload.get("rtsp_url") or "").strip()
+    local_command = (payload.get("local_command") or "").strip()
+    if source_type == "snapshot" and not url:
         raise ValueError("Snapshot URL is required.")
+    if source_type == "rtsp" and not (rtsp_url or local_command):
+        raise ValueError("RTSP URL or local_command is required.")
 
     camera = {
-        "url": url,
-        "description": payload.get("description") or name,
         "timeout_s": int(payload.get("timeout_s") or 15),
+        "capture_failure_interval_s": int(
+            payload.get("capture_failure_interval_s") or 60
+        ),
+        "go2rtc_enabled": bool(payload.get("go2rtc_enabled", True)),
         "cache_bust": bool(payload.get("cache_bust", True)),
         "gather_metrics": bool(payload.get("gather_metrics", True)),
         "mozjpeg_optimize": bool(payload.get("mozjpeg_optimize", False)),
     }
+    if source_type == "snapshot" and url:
+        camera["url"] = url
+        auth_username = (payload.get("snapshot_username") or "").strip()
+        auth_password = payload.get("snapshot_password")
+        existing_auth = existing_camera.get("http_auth") or {}
+        if auth_username or auth_password or existing_auth:
+            camera["http_auth"] = {
+                "type": payload.get("snapshot_auth_type")
+                or existing_auth.get("type")
+                or "basic",
+                "username": auth_username or existing_auth.get("username", ""),
+                "password": auth_password or existing_auth.get("password", ""),
+            }
+    if rtsp_url:
+        camera["rtsp_url"] = rtsp_url
+    if payload.get("ptz_rtsp_url"):
+        camera["ptz_rtsp_url"] = str(payload.get("ptz_rtsp_url")).strip()
+    go2rtc_rtsp_transport = (
+        payload.get("go2rtc_rtsp_transport")
+        if "go2rtc_rtsp_transport" in payload
+        else existing_camera.get("go2rtc_rtsp_transport")
+    )
+    go2rtc_rtsp_transport = str(go2rtc_rtsp_transport or "").strip().lower()
+    if go2rtc_rtsp_transport and go2rtc_rtsp_transport not in {"tcp", "udp"}:
+        raise ValueError("go2rtc RTSP transport must be tcp or udp.")
+    if go2rtc_rtsp_transport and go2rtc_rtsp_transport != "tcp":
+        camera["go2rtc_rtsp_transport"] = go2rtc_rtsp_transport
+    go2rtc_video_mode = (
+        payload.get("go2rtc_video_mode")
+        if "go2rtc_video_mode" in payload
+        else existing_camera.get("go2rtc_video_mode")
+    )
+    go2rtc_video_mode = str(go2rtc_video_mode or "").strip().lower()
+    valid_go2rtc_video_modes = {"copy", "h264", "h265", "mjpeg"}
+    if go2rtc_video_mode and go2rtc_video_mode not in valid_go2rtc_video_modes:
+        raise ValueError("go2rtc video mode must be copy, h264, h265, or mjpeg.")
+    if go2rtc_video_mode and go2rtc_video_mode != "copy":
+        camera["go2rtc_video_mode"] = go2rtc_video_mode
+    if "go2rtc_preload" in payload:
+        if (
+            payload.get("ptz_enabled")
+            or existing_camera.get("go2rtc_preload") is not None
+        ):
+            camera["go2rtc_preload"] = bool(payload.get("go2rtc_preload"))
+    elif existing_camera.get("go2rtc_preload") is not None:
+        camera["go2rtc_preload"] = bool(existing_camera.get("go2rtc_preload"))
+    if source_type == "rtsp":
+        command = local_command or rtsp_snapshot_command(rtsp_url)
+        camera["local_command"] = (
+            camera_local_command({"local_command": command, "rtsp_url": rtsp_url})
+            or command
+        )
+    display_name = (payload.get("display_name") or "").strip()
+    if display_name:
+        camera["display_name"] = display_name
+    for payload_key, camera_key in (
+        ("template_vendor", "template_vendor"),
+        ("snapshot_template", "snapshot_template"),
+        ("rtsp_template", "rtsp_template"),
+    ):
+        value = (payload.get(payload_key) or "").strip()
+        if value:
+            camera[camera_key] = value
+    description = (payload.get("description") or "").strip()
+    if description:
+        camera["description"] = description
 
     if payload.get("disabled"):
         camera["disabled"] = True
+    visibility = payload.get("visibility")
+    if visibility not in {"public", "authenticated", "hidden"}:
+        if payload.get("hidden"):
+            visibility = "hidden"
+        elif payload.get("public", True) is False:
+            visibility = "authenticated"
+        else:
+            visibility = "public"
+    camera["visibility"] = visibility
+    camera["public"] = visibility == "public"
+    if visibility == "hidden":
+        camera["hidden"] = True
+    if payload.get("ptz_enabled"):
+        presets = payload.get("ptz_presets") or []
+        if isinstance(presets, str):
+            presets = json.loads(presets) if presets.strip() else []
+        existing_ptz = existing_camera.get("ptz") or {}
+        ptz_config = dict(existing_ptz) if isinstance(existing_ptz, dict) else {}
+        for legacy_key in ("compatibility", "ptz_profile", "vendor"):
+            ptz_config.pop(legacy_key, None)
+        ptz_config.update(
+            {
+                "enabled": True,
+                "public": bool(payload.get("ptz_public", False)),
+                "allow_presets": bool(payload.get("ptz_allow_presets", True)),
+                "allow_manual_control": bool(
+                    payload.get("ptz_allow_manual_control", False)
+                ),
+                "access_level": payload.get("ptz_access_level") or "presets",
+                "host": (payload.get("ptz_host") or "").strip(),
+                "port": int(payload.get("ptz_port") or 80),
+                "username": (payload.get("ptz_username") or "").strip(),
+                "password": payload.get("ptz_password")
+                or ptz_config.get("password", ""),
+                "profile_token": (payload.get("ptz_profile_token") or "").strip(),
+                "presets": presets,
+            }
+        )
+        capabilities = payload.get("ptz_capabilities")
+        if isinstance(capabilities, dict):
+            ptz_config["capabilities"] = {
+                "pan": bool(capabilities.get("pan", True)),
+                "tilt": bool(capabilities.get("tilt", True)),
+                "zoom": bool(capabilities.get("zoom", True)),
+                "focus": bool(capabilities.get("focus", False)),
+            }
+        elif any(
+            key in payload
+            for key in (
+                "ptz_capability_pan",
+                "ptz_capability_tilt",
+                "ptz_capability_zoom",
+                "ptz_capability_focus",
+            )
+        ):
+            ptz_config["capabilities"] = {
+                "pan": bool(payload.get("ptz_capability_pan", True)),
+                "tilt": bool(payload.get("ptz_capability_tilt", True)),
+                "zoom": bool(payload.get("ptz_capability_zoom", True)),
+                "focus": bool(payload.get("ptz_capability_focus", False)),
+            }
+        existing_tour = ptz_config.get("tour") or {}
+        tour_config = dict(existing_tour) if isinstance(existing_tour, dict) else {}
+        if "ptz_tour_enabled" in payload:
+            tour_config["enabled"] = bool(payload.get("ptz_tour_enabled"))
+        if "ptz_tour_auto_resume_s" in payload:
+            value = payload.get("ptz_tour_auto_resume_s")
+            if value is None or value == "":
+                value = 1800
+            tour_config["auto_resume_s"] = max(0, int(value))
+        if payload.get("ptz_tour_backend"):
+            tour_config["backend"] = str(payload.get("ptz_tour_backend")).strip()
+        if tour_config:
+            ptz_config["tour"] = tour_config
+        camera["ptz"] = ptz_config
+    if payload.get("timelapse_enabled") is not None:
+        camera["timelapse_enabled"] = bool(payload.get("timelapse_enabled"))
+    if payload.get("work_dir_max_size_GB"):
+        camera["work_dir_max_size_GB"] = int(payload.get("work_dir_max_size_GB"))
     if payload.get("snap_interval_enabled"):
         camera["snap_interval_s"] = int(payload.get("snap_interval_s") or 60)
+    if payload.get("activity_interval_enabled"):
+        camera["activity_interval_s"] = int(payload.get("activity_interval_s") or 10)
     if payload.get("ssim_enabled"):
         camera["ssim_setpoint"] = float(payload.get("ssim_setpoint") or 0.85)
         if payload.get("ssim_area"):
@@ -144,10 +1567,18 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
         camera["sunrise_sunset"] = {
             "enabled": True,
             "interval_s": int(payload.get("sunrise_sunset_interval_s") or 15),
-            "sunrise_offset_start_minutes": int(payload.get("sunrise_offset_start_minutes") or 45),
-            "sunrise_offset_end_minutes": int(payload.get("sunrise_offset_end_minutes") or 45),
-            "sunset_offset_start_minutes": int(payload.get("sunset_offset_start_minutes") or 45),
-            "sunset_offset_end_minutes": int(payload.get("sunset_offset_end_minutes") or 45),
+            "sunrise_offset_start_minutes": int(
+                payload.get("sunrise_offset_start_minutes") or 45
+            ),
+            "sunrise_offset_end_minutes": int(
+                payload.get("sunrise_offset_end_minutes") or 45
+            ),
+            "sunset_offset_start_minutes": int(
+                payload.get("sunset_offset_start_minutes") or 45
+            ),
+            "sunset_offset_end_minutes": int(
+                payload.get("sunset_offset_end_minutes") or 45
+            ),
         }
 
     postprocessing = []
@@ -156,18 +1587,26 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
             continue
         step_type = step.get("type")
         if step_type == "timestamp":
-            postprocessing.append({
-                "type": "timestamp",
-                "enabled": bool(step.get("enabled", True)),
-                "position": step.get("position") or "bottom_right",
-                "size": int(step.get("size") or 24),
-                "color": step.get("color") or "white",
-                "format": step.get("format") or "%Y-%m-%d %H:%M:%S %Z",
-            })
+            postprocessing.append(
+                {
+                    "type": "timestamp",
+                    "enabled": bool(step.get("enabled", True)),
+                    "position": step.get("position") or "bottom_right",
+                    "size": int(step.get("size") or 24),
+                    "color": step.get("color") or "white",
+                    "format": step.get("format") or "%Y-%m-%d %H:%M:%S %Z",
+                }
+            )
         elif step_type == "crop" and step.get("area"):
             postprocessing.append({"type": "crop", "area": step.get("area")})
         elif step_type == "resize":
-            postprocessing.append({"type": "resize", "width": int(step.get("width") or 1280), "height": int(step.get("height") or 720)})
+            postprocessing.append(
+                {
+                    "type": "resize",
+                    "width": int(step.get("width") or 1280),
+                    "height": int(step.get("height") or 720),
+                }
+            )
         elif step_type == "awb":
             postprocessing.append({"type": "awb"})
     if postprocessing:
@@ -175,43 +1614,742 @@ def _build_camera_config(payload: dict) -> tuple[str, dict]:
     return name, camera
 
 
+def _merge_guided_camera_update(existing_camera: dict, camera: dict) -> dict:
+    merged = {
+        key: value
+        for key, value in (existing_camera or {}).items()
+        if key not in GUIDED_CAMERA_KEYS
+    }
+    merged.update(camera)
+    return merged
+
+
+def _normalize_user(payload: dict, existing: dict | None = None) -> tuple[str, dict]:
+    username = (payload.get("username") or "").strip()
+    if not username:
+        raise ValueError("username is required.")
+    if not re.match(r"^[A-Za-z0-9_.@-]+$", username):
+        raise ValueError("username can only use letters, numbers, _, ., @, and -.")
+
+    existing = dict(existing or {})
+    role = payload.get("role") or existing.get("role") or "viewer"
+    role = effective_user_role({"role": role})
+    if role not in {"viewer", "operator", "admin", "superadmin"}:
+        raise ValueError(
+            "role must be viewer, operator, admin, superadmin, or superuser."
+        )
+    ptz_access = payload.get("ptz_access", existing.get("ptz_access", "presets"))
+    if ptz_access not in {"none", "presets", "manual", "admin"}:
+        raise ValueError("ptz_access must be none, presets, manual, or admin.")
+    user = {
+        "disabled": bool(payload.get("disabled", existing.get("disabled", False))),
+        "role": role,
+        "ptz_cameras": payload.get("ptz_cameras", existing.get("ptz_cameras", []))
+        or [],
+        "ptz_access": ptz_access,
+    }
+    if payload.get("password"):
+        user["password_hash"] = hash_password(str(payload["password"]))
+    elif existing.get("password_hash"):
+        user["password_hash"] = existing["password_hash"]
+    elif existing.get("password"):
+        user["password"] = existing["password"]
+    return username, user
+
+
+def _ptz_capable_camera_names(config: dict) -> list[str]:
+    cameras = config.get("cameras") or {}
+    names = []
+    for camera_name, camera_config in cameras.items():
+        if not isinstance(camera_config, dict):
+            continue
+        ptz_config = camera_config.get("ptz") or {}
+        if isinstance(ptz_config, dict) and ptz_config.get("enabled"):
+            names.append(str(camera_name))
+    return sorted(names)
+
+
+def _work_dir_from_config(config: dict) -> str | None:
+    return (config.get("global") or {}).get("work_dir")
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    if not path or not os.path.exists(path):
+        return 0
+    # followlinks=True so a relocated media_dir (photos/launches symlinked out of
+    # work_dir, see media_storage.py) is still counted in storage totals.
+    for dirpath, _, filenames in os.walk(path, followlinks=True):
+        for filename in filenames:
+            full_path = os.path.join(dirpath, filename)
+            if not os.path.islink(full_path):
+                total += os.path.getsize(full_path)
+    return total
+
+
+def _camera_media_dirs(photos_dir: str | None, camera_name: str) -> list[str]:
+    if not photos_dir:
+        return []
+    exact_dir = os.path.join(photos_dir, camera_name)
+    matches = []
+    if os.path.isdir(exact_dir):
+        matches.append(exact_dir)
+    if not os.path.isdir(photos_dir):
+        return matches
+
+    expected = {
+        camera_name.casefold(),
+        _slugify_camera_name(camera_name).casefold(),
+    }
+    for entry in os.scandir(photos_dir):
+        if not entry.is_dir():
+            continue
+        if entry.path in matches:
+            continue
+        if entry.name.casefold() in expected:
+            matches.append(entry.path)
+    return matches
+
+
+def _format_bytes(value: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(value)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+
+
+def _effective_camera_storage_limit_gb(
+    camera_limit_gb: int | float | None, global_limit_gb: int | float | None
+) -> int | float | None:
+    if camera_limit_gb is None:
+        return None
+    if global_limit_gb is None:
+        return camera_limit_gb
+    return min(camera_limit_gb, global_limit_gb)
+
+
 @app.route("/metrics")
 def metrics():
     return Response(generate_latest(REGISTRY), mimetype="text/plain")
 
 
+@app.route("/api/go2rtc/status", methods=["GET"])
+def go2rtc_status():
+    try:
+        _, config = _load_effective_config_with_raw()
+        return jsonify(_go2rtc_runtime_status(config)), 200
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error reading go2rtc status: {str(e)}"}), 500
+
+
 @app.route("/config", methods=["GET"])
 def get_config():
     try:
-        return jsonify({"config": _load_raw_config()}), 200
+        raw_config, effective_config = _load_effective_config_with_raw()
+        is_superadmin = _current_user_is_superadmin()
+        if not is_superadmin:
+            effective_config = _filter_effective_config_for_user(
+                effective_config, _current_admin_user()
+            )
+        return (
+            jsonify(
+                {
+                    "config": effective_config,
+                    "config_version": _config_version(_config_file_path()),
+                    "can_edit_full_config": is_superadmin,
+                    "fenetre_version": fenetre_version,
+                }
+            ),
+            200,
+        )
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as e:
         return jsonify({"error": f"Error reading configuration: {str(e)}"}), 500
 
 
+@app.route("/api/storage/summary", methods=["GET"])
+def storage_summary():
+    try:
+        _, config = _load_effective_config_with_raw()
+        work_dir = _work_dir_from_config(config)
+        storage_config = (config.get("global") or {}).get(
+            "storage_management", {}
+        ) or {}
+        photos_dir = os.path.join(work_dir, "photos") if work_dir else None
+        total_bytes = _dir_size(work_dir) if work_dir else 0
+        global_limit_gb = storage_config.get("work_dir_max_size_GB")
+
+        cameras = []
+        for name, camera_cfg in (config.get("cameras") or {}).items():
+            media_dirs = _camera_media_dirs(photos_dir, str(name))
+            size_bytes = sum(_dir_size(camera_dir) for camera_dir in media_dirs)
+            limit_gb = camera_cfg.get(
+                "work_dir_max_size_GB", storage_config.get("camera_max_size_GB")
+            )
+            effective_limit_gb = _effective_camera_storage_limit_gb(
+                limit_gb, global_limit_gb
+            )
+            cameras.append(
+                {
+                    "name": name,
+                    "bytes": size_bytes,
+                    "display": _format_bytes(size_bytes),
+                    "limit_GB": limit_gb,
+                    "effective_limit_GB": effective_limit_gb,
+                    "media_dirs": media_dirs,
+                }
+            )
+        cameras.sort(key=lambda item: str(item["name"]).casefold())
+
+        return jsonify(
+            {
+                "work_dir": work_dir,
+                "bytes": total_bytes,
+                "display": _format_bytes(total_bytes),
+                "limit_GB": global_limit_gb,
+                "enabled": bool(storage_config.get("enabled", False)),
+                "dry_run": bool(storage_config.get("dry_run", True)),
+                "cameras": cameras,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to calculate storage summary: {str(e)}"}), 500
+
+
+@app.route("/api/storage/media_location", methods=["GET"])
+def get_media_location():
+    try:
+        _, config = _load_effective_config_with_raw()
+        global_config = config.get("global") or {}
+        status = describe_media_location(global_config)
+        status["can_manage"] = _current_user_can_manage_storage_location()
+        return jsonify(status)
+    except Exception as e:
+        return (
+            jsonify({"error": f"Failed to read media storage location: {str(e)}"}),
+            500,
+        )
+
+
+@app.route("/api/storage/media_location", methods=["POST"])
+def set_media_location():
+    try:
+        if not _current_user_can_manage_storage_location():
+            return (
+                jsonify({"error": "Only superadmins can relocate media storage."}),
+                403,
+            )
+        payload = request.get_json(force=True) or {}
+        media_dir = (payload.get("media_dir") or "").strip()
+        dry_run = bool(payload.get("dry_run", False))
+        if not media_dir:
+            return jsonify({"error": "media_dir is required."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        global_config = config.get("global") or {}
+        if not isinstance(global_config, dict) or not global_config.get("work_dir"):
+            return jsonify({"error": "global.work_dir is not configured."}), 400
+
+        report = relocate_media_storage(global_config, media_dir, dry_run=dry_run)
+        if dry_run or not report.get("ok"):
+            return jsonify(report), 200 if report.get("ok") else 500
+
+        config.setdefault("global", {})
+        config["global"]["media_dir"] = report["media_dir"]
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        runtime_reload = _reload_after_config_write()
+        message = "Media storage relocated and global.media_dir saved."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "relocation": report,
+                    "runtime_reload": runtime_reload,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to relocate media storage: {str(e)}"}), 500
+
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    try:
+        ensure_default_admin_user(_config_file_path())
+        _, config = _load_effective_config_with_raw()
+        users = config.get("users") or {}
+        ptz_cameras = _ptz_capable_camera_names(config)
+        current_user = _current_admin_user()
+        current_role = effective_user_role(current_user)
+        can_set_user_passwords = (not _admin_auth_enabled()) or (
+            current_role == "superadmin"
+        )
+        public_users = []
+        for username, user in users.items():
+            public_users.append(
+                {
+                    "username": username,
+                    "disabled": bool(user.get("disabled", False)),
+                    "role": effective_user_role(user),
+                    "ptz_cameras": user.get("ptz_cameras", []),
+                    "ptz_access": user.get("ptz_access", "presets"),
+                    "has_password": user_has_password(user),
+                }
+            )
+        return jsonify(
+            {
+                "users": public_users,
+                "cameras": ptz_cameras,
+                "can_manage_users": _current_user_can_manage_users(config),
+                "can_set_user_passwords": can_set_user_passwords,
+                "current_user": (
+                    {
+                        "username": current_user.get("username"),
+                        "role": current_role,
+                    }
+                    if current_user
+                    else None
+                ),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to list users: {str(e)}"}), 500
+
+
+@app.route("/api/users", methods=["POST"])
+def upsert_user():
+    try:
+        payload = request.get_json(force=True) or {}
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        if not _current_user_can_manage_users(config):
+            return jsonify({"error": "Only superadmins can manage users."}), 403
+        users = config.setdefault("users", {})
+        username = (payload.get("username") or "").strip()
+        if payload.get("password") and not _current_user_can_set_user_password(
+            username
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Only superadmins can change another user's password. "
+                            "Use Change Password to update your own password."
+                        )
+                    }
+                ),
+                403,
+            )
+        ptz_cameras = set(_ptz_capable_camera_names(config))
+        if isinstance(payload.get("ptz_cameras"), list):
+            payload = dict(payload)
+            payload["ptz_cameras"] = [
+                camera_name
+                for camera_name in payload.get("ptz_cameras", [])
+                if camera_name in ptz_cameras
+            ]
+        username, user = _normalize_user(payload, users.get(payload.get("username")))
+        if _would_remove_last_superadmin(users, username, user):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "This would leave no enabled superadmin account. "
+                            "Promote another user to superadmin first."
+                        )
+                    }
+                ),
+                400,
+            )
+        users[username] = user
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        return jsonify(
+            {
+                "message": f"User '{username}' saved.",
+                **metadata,
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to save user: {str(e)}"}), 500
+
+
+@app.route("/api/users/password", methods=["POST"])
+def change_current_user_password():
+    try:
+        payload = request.get_json(force=True) or {}
+        current_password = str(payload.get("current_password") or "")
+        new_password = str(payload.get("new_password") or "")
+        if not current_password or not new_password:
+            return (
+                jsonify({"error": "current_password and new_password are required."}),
+                400,
+            )
+        if len(new_password) < 8:
+            return (
+                jsonify({"error": "New password must be at least 8 characters."}),
+                400,
+            )
+
+        current_user = _current_admin_user()
+        if not current_user:
+            return jsonify({"error": "Authentication is required."}), 401
+        username = (current_user.get("username") or "").strip()
+        if not username:
+            return jsonify({"error": "Current user is unknown."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        users = config.setdefault("users", {})
+        user = users.get(username)
+        if not isinstance(user, dict):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "The current admin user is not managed in config.yaml. "
+                            "Set a config-backed user before changing passwords here."
+                        )
+                    }
+                ),
+                400,
+            )
+        if user.get("disabled", False) or not verify_password(user, current_password):
+            return jsonify({"error": "Current password is incorrect."}), 401
+
+        updated_user = dict(user)
+        updated_user["password_hash"] = hash_password(new_password)
+        updated_user.pop("password", None)
+        updated_user["password_changed_at"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        users[username] = updated_user
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        return jsonify(
+            {
+                "message": "Password changed. Sign in again with the new password.",
+                **metadata,
+            }
+        )
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to change password: {str(e)}"}), 500
+
+
+@app.route("/api/users/<path:username>", methods=["DELETE"])
+def delete_user(username):
+    try:
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        if not _current_user_can_manage_users(config):
+            return jsonify({"error": "Only superadmins can manage users."}), 403
+        users = config.setdefault("users", {})
+        if username not in users:
+            return jsonify({"error": f"User '{username}' was not found."}), 404
+        if _would_remove_last_superadmin(users, username, None):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Cannot remove the last enabled superadmin account. "
+                            "Promote another user to superadmin first."
+                        )
+                    }
+                ),
+                400,
+            )
+        users.pop(username)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        return jsonify(
+            {
+                "message": f"User '{username}' removed.",
+                **metadata,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to remove user: {str(e)}"}), 500
+
+
+@app.route("/api/ptz/lock", methods=["POST"])
+def update_ptz_lock():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = (payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"error": "camera is required."}), 400
+        _, config = _load_effective_config_with_raw()
+        if camera_name not in (config.get("cameras") or {}):
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
+        status = set_lock(
+            camera_name,
+            bool(payload.get("locked", False)),
+            payload.get("reason") or "",
+        )
+        return jsonify({"camera": camera_name, "lock": status})
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to update PTZ lock: {str(e)}"}), 500
+
+
 @app.route("/config", methods=["PUT"])
 def update_config():
     try:
+        if not _current_user_is_superadmin():
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can save the full site "
+                        "configuration or launch workflow settings. Edit your "
+                        "assigned cameras from the camera list instead."
+                    }
+                ),
+                403,
+            )
         config_file_path = _config_file_path()
         if not request.is_json:
             return jsonify({"error": "Request body must be JSON."}), 415
         new_config_json = request.get_json()
         if not new_config_json:
             return jsonify({"error": "Request body is empty or not valid JSON."}), 400
+        submitted_version = None
+        if isinstance(new_config_json, dict) and "config_version" in new_config_json:
+            submitted_version = new_config_json.get("config_version")
+            new_config_json = {
+                k: v for k, v in new_config_json.items() if k != "config_version"
+            }
         if "config" in new_config_json and len(new_config_json.keys()) == 1:
             new_config_json = new_config_json["config"]
         if not isinstance(new_config_json, dict):
-            return jsonify({"error": "Root element of the configuration must be a dictionary."}), 400
-        backup_path = _write_yaml_for_bind_mount(config_file_path, new_config_json)
-        message = "Configuration updated successfully. Reload is required to apply changes."
+            return (
+                jsonify(
+                    {"error": "Root element of the configuration must be a dictionary."}
+                ),
+                400,
+            )
+        current_version = _config_version(config_file_path)
+        if submitted_version is not None and submitted_version != current_version:
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Configuration changed on the server since this page was "
+                            "loaded (e.g. a preset or setting was saved elsewhere). "
+                            "Reload the configuration and reapply your change before "
+                            "saving again, or you will overwrite that other change."
+                        ),
+                        "conflict": True,
+                        "current_config_version": current_version,
+                    }
+                ),
+                409,
+            )
+        raw_config = _load_raw_config()
+        existing_config = _get_effective_config(raw_config)
+        previous_config = yaml.safe_load(yaml.safe_dump(existing_config)) or {}
+        changed_command_cameras = _cameras_with_changed_command_fields(
+            existing_config.get("cameras"), new_config_json.get("cameras")
+        )
+        if (
+            changed_command_cameras
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Only superadmins can change local_command or "
+                            "unavailable_command; they run as an OS command on the "
+                            "server. Affected camera(s): "
+                            + ", ".join(changed_command_cameras)
+                        )
+                    }
+                ),
+                403,
+            )
+        rejected_new_users = _merge_persistent_users(new_config_json, existing_config)
+        user_access_removed = _cleanup_user_camera_access(new_config_json)
+        config_to_write = _merge_effective_config(raw_config, new_config_json)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        go2rtc_result = _sync_go2rtc_runtime(new_config_json, previous_config)
+        publish_result = _publish_public_artifacts(new_config_json)
+        runtime_reload = _reload_after_config_write()
+        message = "Configuration updated successfully (saved as YAML). Public UI files and cameras.json were updated."
         if backup_path:
             message += f" Backup: {os.path.basename(backup_path)}"
-        return jsonify({"message": message}), 200
+        if rejected_new_users:
+            message += (
+                f" New user(s) {', '.join(rejected_new_users)} were NOT created; "
+                "use Manage Users to add users."
+            )
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "go2rtc": go2rtc_result,
+                    **publish_result,
+                    "runtime_reload": runtime_reload,
+                    "user_camera_access_removed": user_access_removed,
+                    "rejected_new_users": rejected_new_users,
+                    "config_version": _config_version(config_file_path),
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
     except BadRequest:
-        return jsonify({"error": "Invalid JSON format in request body or empty body."}), 400
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
     except Exception as e:
         return jsonify({"error": f"Error processing configuration: {str(e)}"}), 500
+
+
+@app.route("/api/global/deployment_name", methods=["PUT"])
+def update_deployment_name():
+    try:
+        payload = request.get_json(force=True) or {}
+        deployment_name = (payload.get("deployment_name") or "").strip()
+        if not deployment_name:
+            return jsonify({"error": "deployment_name is required."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        config.setdefault("global", {})
+        if not isinstance(config["global"], dict):
+            return jsonify({"error": "Config key 'global' must be a mapping."}), 400
+        config["global"]["deployment_name"] = deployment_name
+        if "public_site" in payload:
+            ui_config = config["global"].setdefault("ui", {})
+            if not isinstance(ui_config, dict):
+                return (
+                    jsonify({"error": "Config key 'global.ui' must be a mapping."}),
+                    400,
+                )
+            ui_config["public_site"] = bool(payload.get("public_site"))
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
+        message = (
+            "Site settings updated. Public UI files and cameras.json were updated."
+        )
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    **publish_result,
+                    "runtime_reload": runtime_reload,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to update GUI name: {str(e)}"}), 500
+
+
+@app.route("/api/global/camera_order", methods=["PUT"])
+def update_camera_order():
+    try:
+        payload = request.get_json(force=True) or {}
+        order = payload.get("camera_order") or []
+        if not isinstance(order, list):
+            return jsonify({"error": "camera_order must be a list."}), 400
+
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        cameras = config.get("cameras") or {}
+        if not isinstance(cameras, dict):
+            return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
+        camera_names = set(cameras.keys())
+        cleaned_order = []
+        for item in order:
+            camera_name = str(item)
+            if camera_name in camera_names and camera_name not in cleaned_order:
+                cleaned_order.append(camera_name)
+
+        global_config = config.setdefault("global", {})
+        if not isinstance(global_config, dict):
+            return jsonify({"error": "Config key 'global' must be a mapping."}), 400
+        ui_config = global_config.setdefault("ui", {})
+        if not isinstance(ui_config, dict):
+            return jsonify({"error": "Config key 'global.ui' must be a mapping."}), 400
+        ui_config["camera_order"] = cleaned_order
+
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
+        message = "Camera order updated. Public UI files and cameras.json were updated."
+        if backup_path:
+            message += f" Backup: {os.path.basename(backup_path)}"
+        return (
+            jsonify(
+                {
+                    "message": message,
+                    "camera_order": cleaned_order,
+                    **publish_result,
+                    "runtime_reload": runtime_reload,
+                    **_config_write_metadata(config_file_path, backup_path),
+                }
+            ),
+            200,
+        )
+    except BadRequest:
+        return (
+            jsonify({"error": "Invalid JSON format in request body or empty body."}),
+            400,
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to update camera order: {str(e)}"}), 500
 
 
 @app.route("/")
@@ -219,48 +2357,543 @@ def serve_ui_page():
     return send_from_directory("static/admin", "index.html")
 
 
+@app.route("/logout")
+def admin_logout():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fenetre Admin Logout</title>
+</head>
+<body>
+    <p>Logged out of Fenetre admin. Redirecting to the login prompt...</p>
+    <script>
+        window.setTimeout(() => window.location.replace('/'), 500);
+    </script>
+</body>
+</html>
+"""
+    return Response(
+        html,
+        200,
+        {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Clear-Site-Data": '"cache", "cookies", "storage"',
+        },
+    )
+
+
 @app.route("/api/camera/test_snapshot", methods=["POST"])
 def test_snapshot_url():
     try:
         payload = request.get_json(force=True) or {}
         url = (payload.get("url") or "").strip()
+        rtsp_url = (payload.get("rtsp_url") or "").strip()
+        ptz_rtsp_url = (payload.get("ptz_rtsp_url") or "").strip()
+        local_command = (payload.get("local_command") or "").strip()
+        if (
+            _is_custom_local_command(local_command)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can run a local_command test; it "
+                        "runs as an OS command on the server."
+                    }
+                ),
+                403,
+            )
+        capture_source = payload.get("capture_source") or (
+            "rtsp" if local_command and not url else "snapshot"
+        )
         timeout_s = int(payload.get("timeout_s") or 15)
-        if not url:
+        cache_bust = bool(payload.get("cache_bust", True))
+        camera_config = {}
+        if payload.get("snapshot_username") or payload.get("snapshot_password"):
+            camera_config["http_auth"] = {
+                "type": payload.get("snapshot_auth_type") or "basic",
+                "username": payload.get("snapshot_username") or "",
+                "password": payload.get("snapshot_password") or "",
+            }
+        if capture_source == "rtsp" and (local_command or rtsp_url):
+            image_bytes, content_type, size = _fetch_local_command_bytes(
+                local_command or rtsp_snapshot_command(rtsp_url),
+                timeout_s=timeout_s,
+            )
+        elif url:
+            image_bytes, content_type, size = _fetch_snapshot_bytes(
+                url,
+                timeout_s=timeout_s,
+                cache_bust=cache_bust,
+                camera_config=camera_config,
+            )
+        else:
             return jsonify({"error": "Snapshot URL is required."}), 400
-        image_bytes, content_type, size = _fetch_snapshot_bytes(url, timeout_s=timeout_s)
-        return jsonify({
-            "ok": True,
-            "content_type": content_type,
-            "width": size[0],
-            "height": size[1],
-            "bytes": len(image_bytes),
-            "preview_data_url": "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii"),
-        })
+        stream_tests = []
+        live_stream_tests = []
+        if capture_source != "rtsp" and rtsp_url:
+            live_stream_tests.append(("RTSP live view", rtsp_url))
+        if ptz_rtsp_url and ptz_rtsp_url != rtsp_url:
+            live_stream_tests.append(("PTZ live RTSP", ptz_rtsp_url))
+        for stream_name, stream_url in live_stream_tests:
+            stream_bytes, _, stream_size = _fetch_local_command_bytes(
+                rtsp_snapshot_command(stream_url), timeout_s=timeout_s
+            )
+            stream_tests.append(
+                {
+                    "name": stream_name,
+                    "width": stream_size[0],
+                    "height": stream_size[1],
+                    "bytes": len(stream_bytes),
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "content_type": content_type,
+                "width": size[0],
+                "height": size[1],
+                "bytes": len(image_bytes),
+                "stream_tests": stream_tests,
+                "preview_data_url": "data:image/jpeg;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }
+        )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/camera/ptz_presets", methods=["POST"])
+def load_ptz_presets():
+    try:
+        payload = request.get_json(force=True) or {}
+        existing_camera_name = str(payload.get("camera_name") or "").strip()
+        if existing_camera_name and not _current_user_can_act_on_camera(
+            existing_camera_name
+        ):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Not authorized to control camera '{existing_camera_name}'.",
+                    }
+                ),
+                403,
+            )
+        camera_name = str(payload.get("camera_name") or payload.get("name") or "camera")
+        ptz_config = {
+            "enabled": True,
+            "host": (payload.get("ptz_host") or "").strip(),
+            "port": int(payload.get("ptz_port") or 80),
+            "username": (payload.get("ptz_username") or "").strip(),
+            "password": payload.get("ptz_password") or "",
+            "profile_token": (payload.get("ptz_profile_token") or "").strip(),
+        }
+        if not ptz_config["password"] and payload.get("camera_name"):
+            _, config = _load_effective_config_with_raw()
+            existing_ptz = (
+                (config.get("cameras") or {})
+                .get(str(payload.get("camera_name")), {})
+                .get("ptz", {})
+            )
+            if isinstance(existing_ptz, dict):
+                ptz_config["password"] = existing_ptz.get("password") or ""
+        missing = [
+            label
+            for label in ("host", "username", "password")
+            if not ptz_config.get(label)
+        ]
+        if missing:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Missing ONVIF " + ", ".join(missing),
+                    }
+                ),
+                400,
+            )
+        result = discover_presets(
+            camera_name,
+            {"ptz": ptz_config},
+            owner="admin",
+            duration_s=15,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "presets": result.get("presets", []),
+                "count": len(result.get("presets", [])),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/camera/image_profile", methods=["POST"])
+def apply_camera_image_profile():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = (payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"error": "camera is required."}), 400
+        _, config = _load_effective_config_with_raw()
+        camera_config = (config.get("cameras") or {}).get(camera_name)
+        if not isinstance(camera_config, dict):
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        dry_run = payload.get("dry_run", True) is not False
+        # A dry run never contacts the camera (see apply_image_profile), so
+        # it's harmless for any admin to preview; only a real action -- which
+        # makes an outbound HTTP request to the camera and can change its
+        # settings -- is scoped to cameras assigned to this admin.
+        if not dry_run and not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
+        result = apply_image_profile(
+            camera_name,
+            camera_config,
+            profile_name=(payload.get("profile") or "").strip() or None,
+            mode=(payload.get("mode") or "").strip() or None,
+            dry_run=dry_run,
+        )
+        return jsonify(result)
+    except ImageProfileError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/preview", methods=["GET", "POST"])
+def preview_launches():
+    try:
+        payload = request.get_json(silent=True) or {}
+        config = (
+            payload.get("config") if isinstance(payload.get("config"), dict) else None
+        )
+        if config is None:
+            _, config = _load_effective_config_with_raw()
+        return jsonify(preview_launch_workflow(config))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/run_due", methods=["POST"])
+def run_due_launches():
+    try:
+        payload = request.get_json(silent=True) or {}
+        _, config = _load_effective_config_with_raw()
+        dry_run = payload.get("dry_run")
+        result = run_due_launch_actions(
+            config,
+            dry_run=None if dry_run is None else dry_run is not False,
+        )
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/reolink_test", methods=["POST"])
+def test_reolink_launch_recording():
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = str(payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"ok": False, "error": "camera is required."}), 400
+        action = str(payload.get("action") or "").strip()
+        if action not in {"record_start", "record_stop", "download_recording"}:
+            return (
+                jsonify({"ok": False, "error": "unsupported Reolink test action."}),
+                400,
+            )
+        record = payload.get("record") or {}
+        if not isinstance(record, dict):
+            return jsonify({"ok": False, "error": "record must be an object."}), 400
+        dry_run = payload.get("dry_run", True) is not False
+        # A dry run never contacts the camera, same exemption as the image
+        # profile endpoint; only a real action is scoped to assigned cameras.
+        if not dry_run and not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Not authorized to control camera '{camera_name}'.",
+                    }
+                ),
+                403,
+            )
+        _, config = _load_effective_config_with_raw()
+        result = test_reolink_recording_action(
+            config,
+            camera_name,
+            record,
+            action,
+            dry_run=dry_run,
+            window_seconds=int(payload.get("window_seconds") or 900),
+        )
+        return jsonify(result), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/launches/local_rtsp_test", methods=["POST"])
+def start_local_rtsp_test_recording():
+    """Manually trigger a short local_rtsp test recording for a camera.
+
+    Reolink cameras that reject SetManualRec and Sunba cameras (no known
+    on-camera recording API) have no working way to test launch recording
+    from the camera side -- this records a short clip straight from the
+    camera's rtsp_url instead, outside the public launches/ tree, so it can
+    be reviewed via /api/launches/local_rtsp_test (GET) before trusting an
+    unattended launch capture.
+    """
+    try:
+        payload = request.get_json(force=True) or {}
+        camera_name = str(payload.get("camera") or "").strip()
+        if not camera_name:
+            return jsonify({"ok": False, "error": "camera is required."}), 400
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
+        _, config = _load_effective_config_with_raw()
+        result = run_manual_recording_test(
+            config,
+            camera_name,
+            duration_s=int(
+                payload.get("duration_s") or MANUAL_RECORDING_TEST_DEFAULT_DURATION_S
+            ),
+        )
+        return jsonify(result), (200 if result.get("ok") else 502)
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/local_rtsp_test", methods=["GET"])
+def list_local_rtsp_test_recordings():
+    try:
+        _, config = _load_effective_config_with_raw()
+        result = list_manual_recording_tests(config)
+        result["recordings"] = [
+            recording
+            for recording in result.get("recordings", [])
+            if _current_user_can_act_on_camera(recording.get("camera"))
+        ]
+        return jsonify(result), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+def _require_can_act_on_recording_camera(config: dict, filename: str):
+    camera_name = camera_name_for_manual_recording_filename(config, filename)
+    if not _current_user_can_act_on_camera(camera_name):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Not authorized to control camera '{camera_name}'.",
+                }
+            ),
+            403,
+        )
+    return None
+
+
+@app.route("/api/launches/local_rtsp_test/file/<path:filename>", methods=["GET"])
+def get_local_rtsp_test_recording(filename):
+    try:
+        _, config = _load_effective_config_with_raw()
+        denied = _require_can_act_on_recording_camera(config, filename)
+        if denied:
+            return denied
+        path = manual_recording_test_file_path(config, filename)
+        return send_file(path, mimetype="video/mp4", conditional=True)
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/launches/local_rtsp_test/file/<path:filename>", methods=["DELETE"])
+def delete_local_rtsp_test_recording(filename):
+    try:
+        _, config = _load_effective_config_with_raw()
+        denied = _require_can_act_on_recording_camera(config, filename)
+        if denied:
+            return denied
+        return jsonify(delete_manual_recording_test(config, filename)), 200
+    except LaunchWorkflowError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.route("/api/camera/add", methods=["POST"])
 def add_camera():
     try:
+        # Adding a plain camera is an established admin-role capability (see
+        # test_admin_role_can_add_plain_rtsp_camera_without_command_approval)
+        # -- there's no existing camera to scope against yet, and the actual
+        # privilege-escalation risk (local_command/unavailable_command) is
+        # already gated below via _current_user_can_set_camera_command_fields.
         payload = request.get_json(force=True) or {}
         config_file_path = _config_file_path()
-        config = _load_raw_config()
+        raw_config, config = _load_effective_config_with_raw()
         config.setdefault("cameras", {})
         if not isinstance(config["cameras"], dict):
             return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
         name, camera = _build_camera_config(payload)
         if name in config["cameras"]:
             return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        if (
+            _camera_command_fields_changed(None, camera)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can set local_command or "
+                        "unavailable_command; they run as an OS command on the server."
+                    }
+                ),
+                403,
+            )
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         if payload.get("require_test", True):
-            _fetch_snapshot_bytes(camera["url"], timeout_s=camera.get("timeout_s", 15))
+            if camera.get("local_command"):
+                _fetch_local_command_bytes(
+                    camera["local_command"], timeout_s=camera.get("timeout_s", 15)
+                )
+            else:
+                _fetch_snapshot_bytes(
+                    camera["url"],
+                    timeout_s=camera.get("timeout_s", 15),
+                    cache_bust=camera.get("cache_bust", True),
+                    camera_config=camera,
+                )
+        _ensure_go2rtc_enabled_for_camera(config, camera)
         config["cameras"][name] = camera
-        backup_path = _write_yaml_for_bind_mount(config_file_path, config)
-        return jsonify({"message": f"Camera '{name}' added. Reload the app to make it live.", "camera_name": name, "backup": os.path.basename(backup_path) if backup_path else None}), 200
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
+        return (
+            jsonify(
+                {
+                    "message": f"Camera '{name}' added. Public UI files and cameras.json were updated.",
+                    "camera_name": name,
+                    "go2rtc": go2rtc_result,
+                    **publish_result,
+                    "runtime_reload": runtime_reload,
+                    **metadata,
+                }
+            ),
+            200,
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Failed to add camera: {str(exc)}"}), 500
+
+
+@app.route("/api/camera/<path:camera_name>", methods=["PUT"])
+def update_camera(camera_name):
+    try:
+        payload = request.get_json(force=True) or {}
+        config_file_path = _config_file_path()
+        raw_config, config = _load_effective_config_with_raw()
+        cameras = config.setdefault("cameras", {})
+        if not isinstance(cameras, dict):
+            return jsonify({"error": "Config key 'cameras' must be a mapping."}), 400
+        if camera_name not in cameras:
+            return jsonify({"error": f"Camera '{camera_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(camera_name):
+            return (
+                jsonify(
+                    {"error": f"Not authorized to control camera '{camera_name}'."}
+                ),
+                403,
+            )
+
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
+        old_camera = dict(cameras.get(camera_name) or {})
+        name, camera = _build_camera_config(payload, existing_camera=old_camera)
+        if name != camera_name and name in cameras:
+            return jsonify({"error": f"Camera '{name}' already exists."}), 409
+        updated_camera = _merge_guided_camera_update(old_camera, camera)
+        if (
+            _camera_command_fields_changed(old_camera, updated_camera)
+            and not _current_user_can_set_camera_command_fields()
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": "Only superadmins can set local_command or "
+                        "unavailable_command; they run as an OS command on the server."
+                    }
+                ),
+                403,
+            )
+        if payload.get("require_test", False):
+            if camera.get("local_command"):
+                _fetch_local_command_bytes(
+                    camera["local_command"], timeout_s=camera.get("timeout_s", 15)
+                )
+            else:
+                _fetch_snapshot_bytes(
+                    camera["url"],
+                    timeout_s=camera.get("timeout_s", 15),
+                    cache_bust=camera.get("cache_bust", True),
+                    camera_config=camera,
+                )
+
+        rename_changes = {}
+        media_move_result = {"moved": False}
+        if name != camera_name:
+            cameras.pop(camera_name)
+        _ensure_go2rtc_enabled_for_camera(config, updated_camera)
+        cameras[name] = updated_camera
+        if name != camera_name:
+            rename_changes = _replace_camera_references(config, camera_name, name)
+        user_access_removed = _cleanup_user_camera_access(config)
+        if name != camera_name:
+            media_move_result = _move_camera_media_dir(config, camera_name, name)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
+        return jsonify(
+            {
+                "message": f"Camera '{name}' updated. Public UI files and cameras.json were updated.",
+                "camera_name": name,
+                "go2rtc": go2rtc_result,
+                **publish_result,
+                "runtime_reload": runtime_reload,
+                "camera_rename": rename_changes,
+                "media_move": media_move_result,
+                "user_camera_access_removed": user_access_removed,
+                **metadata,
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update camera: {str(exc)}"}), 500
 
 
 @app.route("/api/camera/rename", methods=["POST"])
@@ -270,17 +2903,46 @@ def rename_camera():
         old_name = _slugify_camera_name(payload.get("old_name"))
         new_name = _slugify_camera_name(payload.get("new_name"))
         config_file_path = _config_file_path()
-        config = _load_raw_config()
+        raw_config, config = _load_effective_config_with_raw()
         cameras = config.setdefault("cameras", {})
         if old_name not in cameras:
             return jsonify({"error": f"Camera '{old_name}' was not found."}), 404
+        if not _current_user_can_act_on_camera(old_name):
+            return (
+                jsonify({"error": f"Not authorized to control camera '{old_name}'."}),
+                403,
+            )
         if new_name in cameras and new_name != old_name:
             return jsonify({"error": f"Camera '{new_name}' already exists."}), 409
+        previous_config = yaml.safe_load(yaml.safe_dump(config)) or {}
         cameras[new_name] = cameras.pop(old_name)
+        rename_changes = _replace_camera_references(config, old_name, new_name)
+        user_access_removed = _cleanup_user_camera_access(config)
         if payload.get("description"):
             cameras[new_name]["description"] = payload.get("description")
-        backup_path = _write_yaml_for_bind_mount(config_file_path, config)
-        return jsonify({"message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folders were not moved.", "backup": os.path.basename(backup_path) if backup_path else None}), 200
+        media_move_result = _move_camera_media_dir(config, old_name, new_name)
+        config_to_write = _merge_effective_config(raw_config, config)
+        backup_path = _write_yaml_for_bind_mount(config_file_path, config_to_write)
+        metadata = _config_write_metadata(config_file_path, backup_path)
+        go2rtc_result = _sync_go2rtc_runtime(config, previous_config)
+        publish_result = _publish_public_artifacts(config)
+        runtime_reload = _reload_after_config_write()
+        return (
+            jsonify(
+                {
+                    "message": f"Camera renamed from '{old_name}' to '{new_name}'. Existing media folder was moved when present.",
+                    "camera_name": new_name,
+                    "camera_rename": rename_changes,
+                    "media_move": media_move_result,
+                    "go2rtc": go2rtc_result,
+                    **publish_result,
+                    "runtime_reload": runtime_reload,
+                    "user_camera_access_removed": user_access_removed,
+                    **metadata,
+                }
+            ),
+            200,
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -290,12 +2952,11 @@ def rename_camera():
 @app.route("/api/sync_ui", methods=["POST"])
 def sync_ui():
     try:
-        config = _load_raw_config()
-        work_dir = config.get("global", {}).get("work_dir")
-        if not work_dir:
-            return jsonify({"error": "work_dir not set in global config."}), 500
-        copy_public_html_files(work_dir, config.get("global", {}))
-        return jsonify({"message": "UI files synchronized successfully."}), 200
+        _, config = _load_effective_config_with_raw()
+        result = _sync_public_ui_files(config)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("warning")}), 500
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": f"Error synchronizing UI files: {str(e)}"}), 500
 
@@ -303,16 +2964,40 @@ def sync_ui():
 @app.route("/api/camera/<string:camera_name>/capture_for_ui", methods=["POST"])
 def capture_for_ui(camera_name):
     try:
-        config = _load_raw_config()
+        _, config = _load_effective_config_with_raw()
         if "cameras" not in config or camera_name not in config["cameras"]:
-            return jsonify({"error": f"Camera '{camera_name}' not found in configuration."}), 404
+            return (
+                jsonify(
+                    {"error": f"Camera '{camera_name}' not found in configuration."}
+                ),
+                404,
+            )
         camera_config = config["cameras"][camera_name]
         url = camera_config.get("url")
+        local_command = camera_local_command(camera_config)
         gopro_ip = camera_config.get("gopro_ip")
-        if not url and not gopro_ip:
-            return jsonify({"error": f"Camera '{camera_name}' does not have a URL or gopro_ip configured."}), 400
+        if not url and not local_command and not gopro_ip:
+            return (
+                jsonify(
+                    {
+                        "error": f"Camera '{camera_name}' does not have a URL, local_command, or gopro_ip configured."
+                    }
+                ),
+                400,
+            )
+        if local_command:
+            image_bytes, content_type, _ = _fetch_local_command_bytes(
+                local_command,
+                camera_config.get("timeout_s", 20),
+            )
+            return send_file(BytesIO(image_bytes), mimetype=content_type)
         if url:
-            image_bytes, content_type, _ = _fetch_snapshot_bytes(url, camera_config.get("timeout_s", 20), camera_config.get("cache_bust", False))
+            image_bytes, content_type, _ = _fetch_snapshot_bytes(
+                url,
+                camera_config.get("timeout_s", 20),
+                camera_config.get("cache_bust", False),
+                camera_config=camera_config,
+            )
             return send_file(BytesIO(image_bytes), mimetype=content_type)
         gopro_model = camera_config.get("gopro_model") or "hero11"
         if gopro_model == "open_gopro":
@@ -323,9 +3008,21 @@ def capture_for_ui(camera_name):
             return jsonify({"error": "Failed to capture photo from GoPro."}), 500
         return send_file(BytesIO(jpeg_bytes), mimetype="image/jpeg")
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Error fetching image for camera '{camera_name}': {str(e)}"}), 500
+        return (
+            jsonify(
+                {"error": f"Error fetching image for camera '{camera_name}': {str(e)}"}
+            ),
+            500,
+        )
     except Exception as e:
-        return jsonify({"error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"}), 500
+        return (
+            jsonify(
+                {
+                    "error": f"Unexpected error capturing image for '{camera_name}': {str(e)}"
+                }
+            ),
+            500,
+        )
 
 
 @app.route("/api/camera/preview_crop", methods=["POST"])
@@ -337,13 +3034,21 @@ def preview_crop():
         return jsonify({"error": "No crop_data provided in the request form."}), 400
     try:
         crop_data = json.loads(crop_data_str)
-        x = int(crop_data.get("x")); y = int(crop_data.get("y")); width = int(crop_data.get("width")); height = int(crop_data.get("height"))
+        x = int(crop_data.get("x"))
+        y = int(crop_data.get("y"))
+        width = int(crop_data.get("width"))
+        height = int(crop_data.get("height"))
         if width <= 0 or height <= 0:
             return jsonify({"error": "Crop width and height must be positive."}), 400
         img = Image.open(request.files["image"].stream)
         img = ImageOps.exif_transpose(img)
         img_width, img_height = img.size
-        crop_box = (max(0, x), max(0, y), min(img_width, x + width), min(img_height, y + height))
+        crop_box = (
+            max(0, x),
+            max(0, y),
+            min(img_width, x + width),
+            min(img_height, y + height),
+        )
         if crop_box[0] >= crop_box[2] or crop_box[1] >= crop_box[3]:
             return jsonify({"error": "Crop area is outside image bounds."}), 400
         cropped_img = img.crop(crop_box)
@@ -353,52 +3058,34 @@ def preview_crop():
             img_format = "JPEG"
         cropped_img.save(img_io, format=img_format)
         img_io.seek(0)
-        return send_file(img_io, mimetype="image/jpeg" if img_format == "JPEG" else f"image/{img_format.lower()}")
+        return send_file(
+            img_io,
+            mimetype=(
+                "image/jpeg" if img_format == "JPEG" else f"image/{img_format.lower()}"
+            ),
+        )
     except Exception as e:
         return jsonify({"error": f"Error during image processing: {str(e)}"}), 500
 
 
 @app.route("/config/reload", methods=["POST"])
 def reload_config():
-    fenetre_pid_file_path = app.config.get("FENETRE_PID_FILE_PATH")
-    if not fenetre_pid_file_path:
-        return jsonify({"error": "FENETRE_PID_FILE_PATH not set in app config."}), 500
-    try:
-        if not os.path.exists(fenetre_pid_file_path):
-            return jsonify({"error": f"PID file not found: {fenetre_pid_file_path}. Cannot signal reload."}), 404
-        with open(fenetre_pid_file_path, "r") as f:
-            pid_str = f.read().strip()
-        if not pid_str:
-            return jsonify({"error": "PID file is empty."}), 500
-        pid = int(pid_str)
-        os.kill(pid, signal.SIGHUP)
-        return jsonify({"message": f"Reload signal sent to process {pid}."}), 200
-    except ProcessLookupError:
-        return jsonify({"error": f"Process with PID read from {fenetre_pid_file_path} not found."}), 500
-    except ValueError:
-        return jsonify({"error": f"Invalid PID found in {fenetre_pid_file_path}."}), 500
-    except Exception as e:
-        return jsonify({"error": f"Error signaling reload: {str(e)}"}), 500
+    result, status = _fenetre_reload_signal_result()
+    return jsonify(result), status
 
 
 @app.route("/api/cameras_json/rebuild", methods=["POST"])
 def rebuild_cameras_json():
     try:
-        config_file_path = _config_file_path()
-        (_, cameras_config, global_config, _, timelapse_config) = config_load(config_file_path)
-        work_dir = global_config.get("work_dir")
-        if not work_dir:
-            return jsonify({"error": "work_dir not set in global configuration."}), 500
-        cameras_json_path = os.path.join(work_dir, "cameras.json")
-        backup_path = None
-        if os.path.exists(cameras_json_path):
-            backup_path = f"{cameras_json_path}.bak.{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
-            os.replace(cameras_json_path, backup_path)
-        write_cameras_metadata(cameras_config, global_config, timelapse_config, cameras_json_path)
-        message = "cameras.json rebuilt successfully."
-        if backup_path:
-            message += f" Previous file saved as {os.path.basename(backup_path)}."
-        return jsonify({"message": message}), 200
+        _, config = _load_effective_config_with_raw()
+        result = _rebuild_cameras_json(config)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("warning")}), 500
+        message = result["message"]
+        if result.get("backup"):
+            message += f" Previous file saved as {result['backup']}."
+        result["message"] = message
+        return jsonify(result), 200
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:

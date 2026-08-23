@@ -95,6 +95,12 @@ def keep_only_a_subset_of_jpeg_files(
 
 
 def list_unarchived_dirs(camera_dir, archived_marker_file="archived"):
+    if not os.path.isdir(camera_dir):
+        logger.debug(
+            "Skipping archive scan for missing camera directory: %s", camera_dir
+        )
+        return []
+
     res = []
     # Iterate over all the subdirectories.
     for entry in os.scandir(camera_dir):

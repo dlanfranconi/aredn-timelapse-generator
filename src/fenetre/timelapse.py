@@ -51,7 +51,12 @@ def _filter_image_files(image_files, destructive: bool = False):
             continue
         filtered.append(image_path)
         previous_image_size_bytes = image_size_bytes
-    logger.warning("Kept %s out of %s in %s", len(filtered), images_count_before, image_files[0] if image_files else "")
+    logger.warning(
+        "Kept %s out of %s in %s",
+        len(filtered),
+        images_count_before,
+        image_files[0] if image_files else "",
+    )
     return filtered, images_count_before
 
 
@@ -72,7 +77,9 @@ def _compute_scale_vf(width: int, height: int, max_width: int, max_height: int) 
     return "scale=-2:720"
 
 
-def _setup_ffmpeg_log_stream(log_dir: Optional[str], log_max_bytes: int, log_backup_count: int):
+def _setup_ffmpeg_log_stream(
+    log_dir: Optional[str], log_max_bytes: int, log_backup_count: int
+):
     ffmpeg_log_stream = subprocess.DEVNULL
     if log_dir and logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
         ffmpeg_logger = logging.getLogger("ffmpeg")
@@ -100,7 +107,9 @@ def _setup_ffmpeg_log_stream(log_dir: Optional[str], log_max_bytes: int, log_bac
 
 def _update_latest_timelapse_reference(dir: str, timelapse_filepath: str):
     camera_name = os.path.basename(os.path.dirname(dir))
-    cameras_json_path = os.path.join(os.path.dirname(os.path.dirname(dir)), "cameras.json")
+    cameras_json_path = os.path.join(
+        os.path.dirname(os.path.dirname(dir)), "cameras.json"
+    )
     if not os.path.exists(cameras_json_path):
         return
     with open(cameras_json_path, "r+") as f:
@@ -131,7 +140,9 @@ def _write_hls_manifest(manifest_path: str, manifest: dict):
 def _write_hls_playlist(playlist_path: str, segments: list):
     target_duration = 1
     if segments:
-        target_duration = max(1, math.ceil(max(segment["duration"] for segment in segments)))
+        target_duration = max(
+            1, math.ceil(max(segment["duration"] for segment in segments))
+        )
     with open(playlist_path, "w") as f:
         f.write("#EXTM3U\n")
         f.write("#EXT-X-VERSION:3\n")
@@ -143,6 +154,51 @@ def _write_hls_playlist(playlist_path: str, segments: list):
             f.write(f"{segment['path']}\n")
 
 
+def _hls_settings_signature(
+    framerate: int,
+    max_width: int,
+    max_height: int,
+    ffmpeg_options: Optional[str],
+    hls_segment_type: str,
+    hls_segment_extension: Optional[str],
+) -> str:
+    return json.dumps(
+        {
+            "framerate": framerate,
+            "max_width": max_width,
+            "max_height": max_height,
+            "ffmpeg_options": ffmpeg_options or "",
+            "hls_segment_type": hls_segment_type,
+            "hls_segment_extension": hls_segment_extension or "",
+        },
+        sort_keys=True,
+    )
+
+
+def _reset_hls_outputs(
+    dir: str,
+    legacy_segment_dir: str,
+    playlist_path: str,
+    hls_segment_extension: Optional[str] = None,
+):
+    shutil.rmtree(legacy_segment_dir, ignore_errors=True)
+    segment_patterns = [os.path.join(dir, "segment-*.*")]
+    if hls_segment_extension:
+        segment_patterns.insert(
+            0, os.path.join(dir, f"segment-*.{hls_segment_extension}")
+        )
+    segment_paths = set()
+    for pattern in segment_patterns:
+        segment_paths.update(glob.glob(pattern))
+    for segment_path in segment_paths:
+        os.remove(segment_path)
+    init_path = os.path.join(dir, "init.mp4")
+    if os.path.exists(init_path):
+        os.remove(init_path)
+    if os.path.exists(playlist_path):
+        os.remove(playlist_path)
+
+
 def create_incremental_hls_timelapse(
     dir: str,
     log_dir: Optional[str] = None,
@@ -150,6 +206,8 @@ def create_incremental_hls_timelapse(
     dry_run: bool = False,
     ffmpeg_options: str = None,
     framerate: Optional[int] = None,
+    max_width: Optional[int] = None,
+    max_height: Optional[int] = None,
     hls_segment_type: str = "mpegts",
     hls_segment_extension: Optional[str] = None,
     log_max_bytes: int = 10000000,
@@ -170,14 +228,14 @@ def create_incremental_hls_timelapse(
 
     if is_raspberry_pi():
         default_encoder_options = "-c:v h264_v4l2m2m -b:v 5M"
-        max_width = 1920
-        max_height = 1080
+        max_width = max_width or 1280
+        max_height = max_height or 720
         if framerate is None:
             framerate = 30
     else:
-        default_encoder_options = "-c:v libx264 -preset veryfast -crf 23"
-        max_width = 3840
-        max_height = 2160
+        default_encoder_options = "-c:v libx264 -preset veryfast -crf 26"
+        max_width = max_width or 1280
+        max_height = max_height or 720
         if framerate is None:
             framerate = 30
 
@@ -214,7 +272,10 @@ def create_incremental_hls_timelapse(
     # playlist URIs flat, so storing the segments next to the playlist avoids broken
     # relative paths like `segment-000000.ts` pointing at a missing file.
     if os.path.isdir(legacy_segment_dir):
-        logger.info("Removing legacy HLS segment directory %s before rebuild", legacy_segment_dir)
+        logger.info(
+            "Removing legacy HLS segment directory %s before rebuild",
+            legacy_segment_dir,
+        )
         shutil.rmtree(legacy_segment_dir, ignore_errors=True)
         for segment_path in glob.glob(os.path.join(dir, "segment-*.*")):
             os.remove(segment_path)
@@ -226,21 +287,41 @@ def create_incremental_hls_timelapse(
         manifest = {"last_image": None, "segment_index": 0}
         new_images = image_files
 
+    if not hls_segment_extension:
+        hls_segment_extension = "m4s" if hls_segment_type == "fmp4" else "ts"
+    segment_pattern = f"segment-%06d.{hls_segment_extension}"
+    if not ffmpeg_options:
+        ffmpeg_options = default_encoder_options
+    settings_signature = _hls_settings_signature(
+        framerate,
+        max_width,
+        max_height,
+        ffmpeg_options,
+        hls_segment_type,
+        hls_segment_extension,
+    )
+
+    if manifest and manifest.get("settings_signature") != settings_signature:
+        logger.info("HLS settings changed for %s. Rebuilding playlist.", dir)
+        _reset_hls_outputs(
+            dir, legacy_segment_dir, playlist_path, hls_segment_extension
+        )
+        manifest = {"last_image": None, "segment_index": 0}
+        new_images = image_files
+
     if not new_images:
         if os.path.exists(playlist_path):
             _update_latest_timelapse_reference(dir, playlist_path)
             return True
         return False
 
-    ffmpeg_log_stream = _setup_ffmpeg_log_stream(log_dir, log_max_bytes, log_backup_count)
+    ffmpeg_log_stream = _setup_ffmpeg_log_stream(
+        log_dir, log_max_bytes, log_backup_count
+    )
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir, exist_ok=True)
 
     segment_index = int(manifest.get("segment_index", 0))
-    if not hls_segment_extension:
-        hls_segment_extension = "m4s" if hls_segment_type == "fmp4" else "ts"
-    segment_pattern = f"segment-%06d.{hls_segment_extension}"
-
     duration_per_image = 1.0 / float(framerate)
     concat_file = tempfile.NamedTemporaryFile(
         mode="w",
@@ -256,8 +337,6 @@ def create_incremental_hls_timelapse(
         concat_file.write(f"file '{new_images[-1]}'\n")
         concat_file.close()
 
-        if not ffmpeg_options:
-            ffmpeg_options = default_encoder_options
         final_cmd = [
             "nice",
             "-n10",
@@ -329,6 +408,7 @@ def create_incremental_hls_timelapse(
     )
     manifest["last_image"] = new_images[-1]
     manifest["segment_index"] = segment_count
+    manifest["settings_signature"] = settings_signature
     _write_hls_manifest(manifest_path, manifest)
     _update_latest_timelapse_reference(dir, playlist_path)
     return True
@@ -344,6 +424,8 @@ def create_timelapse(
     ffmpeg_options: str = None,
     file_extension: Optional[str] = None,
     framerate: Optional[int] = None,
+    max_width: Optional[int] = None,
+    max_height: Optional[int] = None,
     log_max_bytes: int = 10000000,
     log_backup_count: int = 5,
 ) -> bool:
@@ -367,21 +449,22 @@ def create_timelapse(
 
     if is_raspberry_pi():
         default_encoder_options = "-c:v h264_v4l2m2m -b:v 5M"
-        max_width = 1920
-        max_height = 1080
+        max_width = max_width or 1920
+        max_height = max_height or 1080
         if framerate is None:
             framerate = 30
         two_pass = False  # multi pass encoding not supported with hardware encoder
     else:
         default_encoder_options = "-c:v libvpx-vp9 -b:v 5M"
-        max_width = 3840
-        max_height = 2160
+        max_width = max_width or 1920
+        max_height = max_height or 1080
         if two_pass is None:
             two_pass = True  # VP9 can take advantage of multiple pass
-        if len(image_files) > 1200:
-            framerate = 60
-        else:
-            framerate = 30
+        if framerate is None:
+            if len(image_files) > 1200:
+                framerate = 60
+            else:
+                framerate = 30
 
     scale_vf = _compute_scale_vf(width, height, max_width, max_height)
 

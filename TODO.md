@@ -1,72 +1,38 @@
-### TODO for the project
+# Fenetre Backlog
 
-### fenetre.cam main website
-- The main site should load a map by default with all the links to public deployments
-- There should be a link to the github
+This file tracks current follow-up work for the AREDN/IP camera server fork. Old original-fork notes for static nginx hosting, GoPro-first deployments, Raspberry Pi Zero installers, and Android prototype config were removed because they no longer describe the current deployment model.
 
-### Github README.md
-- Installation steps
-  - via pip
-  - via docker
-- Tested hardware
-- Tested picture sources
+## Camera Server
 
+- Add more vendor-specific guided templates as real cameras are validated.
+- Keep hardening fragile-camera behavior around failed RTSP sessions and failed ONVIF sessions without adding vendor-specific hacks to the default path.
+- Improve user-facing camera health diagnostics on the admin dashboard.
 
-### Main module
-- Check if an instance is already running with the exact same config and prevent starting again
-  - Use deterministic pid file name with the config file in it.
+## PTZ
 
-### Known bugs
- - During Daylight saving fall back, pictures between 1 and 2 AM get interleaved
+- Add vendor HTTP tour backends where ONVIF preset tours are not supported.
+- Add richer PTZ capability discovery where cameras report pan/tilt/zoom support reliably.
+- Continue improving the preset editor around imported ONVIF preset names and tokens.
 
-### GoPro specifics
- - Add a signal for when the state of the sd card (state 33) is bad.
- - See if it's possible to run without SD card
- - Use official OpenGoPro API and goprowifihack libraries
+## Rocket Launch Workflow
 
-### Daylight
-- On the daylight.html, there should be a top banner saying: average color of the sky for {camera_name}. Also a link to come back to the camera view
+- Add a richer recorded-stream browser for downloaded launch clips.
+- Add per-camera launch recording health/status once more camera vendor APIs are wired in.
+- Add launch workflow integration tests for schedule-file parsing and hook template rendering edge cases.
 
-### Config checker
-- config.example.yaml isn't enough. The config.py should document and sanity check the entire config.
-- Re-evaluate using pedantic
+## Image Profiles
 
-### Views
-- Refine UX. List of view:
-  - fullscreen
-    - window title should be deployment name. From config file, otherwise take hostname
-  - map
-  - list
-    - On the list view, there should be a details button that unfold information about the camera:
-      - Polling frequency
-      - The status button should be based on the polling interval for that camera instead o fbeing hardcoded to N minutes.
-  - camera details
-  - Uniformize the behaviour of the camera details page wheter we come from the map view, the list view and the fullscreen view.
-  - Add a about page with links to Github, the main fenetre.cam and the code version
-- Add a hall of fame
+- Build tested Reolink image-profile templates for day, sunrise, sunset, night, and launch modes.
+- Add vendor-specific validation for profile settings when a vendor API is selected.
 
-### Admin interface.
-- [BUG] Crop preview is broken (not to scale)
-- ssim and sky area should be defined on the crop preview since they happen after crop
-- Add the ability to pin a picture to a hall of fame
+## Operations
 
-### Postprocessing
-- Add an option for alternative data display on that overlay (solar power, EXIF infos, temperature, humidity). Based on the output of any command, orany URL? or a custom Python function ?
+- Add an admin maintenance mode indicator for hidden cameras.
+- Add documented reverse-proxy examples that preserve Fenetre auth and do not expose `/srv/fenetre/data` directly.
 
-### Random ideas
-- Rainbow detector with distance calculation based
+## Security
 
-### Raspberry Pi specific:
-- Implement native libcamera python functions instead of relying on libcamera-still
-- Make an install script specifically for Raspberry pi zero
-- RAW mode with stacking. Skyline with different level of exposure for astro + city.
-
-### Performance/Optimization
-- Try to reduce the write on disk to the absolute strict minimum (like on thr original isitfoggy.com implementation)
-
-### Reliability
-- Working Dockerfile and docker-compose with nginx or Caddy
-- Add integration test simulating a few days worth of pictures
-
-### Metrics
-- Cleanup: remove optional gather_metrics postprocessing step; metrics collection is now systematic.
+- Public-site session tokens live in both `localStorage` and a non-`HttpOnly` cookie (needed today so client JS can read them for `Authorization: Bearer` headers). Redesigning this to an `HttpOnly` cookie would need CSRF tokens added to the public-facing state-changing endpoints as a tradeoff; worth doing as a dedicated pass rather than a quick patch.
+- `admin`-role camera scoping (PTZ lock, image-profile actions) currently reuses a user's `ptz_cameras` list, since there's no dedicated per-camera assignment field in the data model. A proper `assigned_cameras` list would be cleaner and let PTZ access and general camera-management access vary independently.
+- Admin login brute-force throttling is in-process/in-memory only; resets on restart and doesn't share state across multiple worker processes. Fine for this app's single-instance deployment model, but worth revisiting if that ever changes.
+- CI workflow pins third-party GitHub Actions to major-version tags (`@v4`) rather than commit SHAs; consider pinning to SHAs for stronger supply-chain guarantees if the maintenance overhead is worth it.
