@@ -50,9 +50,6 @@ security and reliability fixes.
   value when unset -- a deployment that already had storage management
   enabled would otherwise start pruning cameras against a limit it never
   configured.
-- HTTP snapshot fetches now verify TLS certificates by default; cameras
-  behind a self-signed certificate can opt out per-camera with
-  `verify_ssl: false`.
 
 ### Fixed
 

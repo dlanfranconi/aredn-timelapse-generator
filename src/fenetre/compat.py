@@ -69,9 +69,13 @@ def patched_get_pic_from_url(
         "Connection": "close",
     }
 
-    # TLS certificate verification is on by default; cameras behind a
-    # self-signed cert need to explicitly opt out with verify_ssl: false.
-    verify_ssl = _bool_config(camera_config.get("verify_ssl"), default=True)
+    # Defaults off: this project targets AREDN mesh deployments, where
+    # HTTPS cameras on .local.mesh hostnames are self-signed as a matter of
+    # course (there's no real CA for a private radio mesh). Defaulting to
+    # verify=True broke every such camera in practice -- see the 1.1.0
+    # rollout. A camera with a real, verifiable certificate can opt in with
+    # verify_ssl: true.
+    verify_ssl = _bool_config(camera_config.get("verify_ssl"), default=False)
     allow_redirects = _bool_config(camera_config.get("allow_redirects"), default=True)
 
     request_kwargs = {

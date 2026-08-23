@@ -221,7 +221,7 @@ cameras:
 
 Use `type: basic` or `type: digest`. Some cameras reject unknown cache-busting query parameters; if a browser URL works but the admin test fails with `_fenetre_test=...`, set `cache_bust: false`.
 
-HTTPS snapshot URLs verify the camera's TLS certificate by default. A camera behind a self-signed certificate needs `verify_ssl: false` set explicitly, or its snapshot fetches will fail.
+HTTPS snapshot URLs do not verify the camera's TLS certificate by default -- AREDN mesh cameras on `.local.mesh` hostnames are self-signed as a matter of course, since there's no real CA for a private radio mesh. Set `verify_ssl: true` if a camera has a certificate actually worth verifying.
 
 Sunba snapshot cameras commonly use:
 

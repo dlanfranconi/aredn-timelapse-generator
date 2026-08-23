@@ -64,7 +64,12 @@ class HttpAuthTest(unittest.TestCase):
         self.assertEqual(kwargs["auth"].password, "pw")
 
     @patch("fenetre.compat.requests.get")
-    def test_patched_get_pic_from_url_verifies_tls_by_default(self, mock_requests_get):
+    def test_patched_get_pic_from_url_does_not_verify_tls_by_default(
+        self, mock_requests_get
+    ):
+        # AREDN mesh cameras on .local.mesh hostnames are self-signed as a
+        # matter of course -- there's no real CA for a private radio mesh --
+        # so this must stay opt-in, not opt-out.
         image = Image.new("RGB", (10, 10), color="red")
         image_bytes = BytesIO()
         image.save(image_bytes, format="JPEG")
@@ -74,19 +79,19 @@ class HttpAuthTest(unittest.TestCase):
         response.headers = {"content-type": "image/jpeg"}
         response.content = image_bytes.getvalue()
         response.request = SimpleNamespace(
-            url="https://example.local/snapshot.jpg", headers={}
+            url="https://camera.local.mesh/snapshot.jpg", headers={}
         )
         mock_requests_get.return_value = response
 
         patched_get_pic_from_url(
-            "https://example.local/snapshot.jpg", 10, camera_config={}
+            "https://camera.local.mesh/snapshot.jpg", 10, camera_config={}
         )
 
         _, kwargs = mock_requests_get.call_args
-        self.assertTrue(kwargs["verify"])
+        self.assertFalse(kwargs["verify"])
 
     @patch("fenetre.compat.requests.get")
-    def test_patched_get_pic_from_url_honors_verify_ssl_false(self, mock_requests_get):
+    def test_patched_get_pic_from_url_honors_verify_ssl_true(self, mock_requests_get):
         image = Image.new("RGB", (10, 10), color="red")
         image_bytes = BytesIO()
         image.save(image_bytes, format="JPEG")
@@ -103,11 +108,11 @@ class HttpAuthTest(unittest.TestCase):
         patched_get_pic_from_url(
             "https://example.local/snapshot.jpg",
             10,
-            camera_config={"verify_ssl": False},
+            camera_config={"verify_ssl": True},
         )
 
         _, kwargs = mock_requests_get.call_args
-        self.assertFalse(kwargs["verify"])
+        self.assertTrue(kwargs["verify"])
 
 
 if __name__ == "__main__":
