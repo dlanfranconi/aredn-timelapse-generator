@@ -2,6 +2,40 @@
 
 All notable changes to aredn-timelapse-server are documented in this file.
 
+## [2.1.0] - 2026-08-24
+
+### Added
+
+- Per-camera map privacy control in the guided admin camera editor: a
+  "Show approximate location only (privacy circle)" toggle and radius
+  field, so this no longer requires hand-editing `config.yaml`.
+- README credit to [matfra/fenetre.cam](https://github.com/matfra/fenetre.cam),
+  the project this one was originally forked from.
+
+### Changed
+
+- The default map privacy radius is now 1200m (was 1000m).
+- The public map's cluster/marker behavior was reworked twice this
+  release based on testing: cameras with a privacy circle first lost
+  their pin entirely (to stop it from looking like an exact-location
+  marker), then got a pin back -- pins are genuinely useful for
+  spotting multiple cameras at a glance, especially on mobile -- but
+  now placed at a per-camera-stable, pseudo-random point inside the
+  circle instead of at its exact (already server-jittered) center.
+- The public map no longer does a full rebuild of every marker/circle
+  on every ~60s auto-refresh when camera positions haven't changed,
+  which was likely responsible for it feeling laggy at times.
+- Fenetre's own `cameras.json`/`api/cameras` responses can now be
+  fetched cross-origin (CORS) from configured allowed origins, needed
+  for a deployment to be linked from another site's camera map (e.g.
+  fenetre.cam's `linked_deployments`).
+
+### Fixed
+
+- The GHCR container build workflow never actually triggered on
+  `Main` due to a branch-name case mismatch (`main` vs `Main`); the
+  `latest` image tag was not being built from it.
+
 ## [2.0.0] - 2026-08-23
 
 This is the first release since 1.0.0 and folds in everything developed on

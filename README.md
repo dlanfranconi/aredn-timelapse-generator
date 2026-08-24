@@ -4,6 +4,8 @@ Fenetre is a self-hosted camera server for AREDN and other IP-camera networks. I
 
 The current deployment path is Docker or Portainer with persistent host-mounted config, data, and logs. The legacy GoPro and Raspberry Pi capture backends are still available as optional extras, but they are no longer the primary documented setup.
 
+This project started as a fork of [matfra/fenetre.cam](https://github.com/matfra/fenetre.cam) and still shares its core architecture; thanks to Mathieu and the fenetre.cam community for the original project.
+
 ## What It Does
 
 - Captures still images from HTTP/HTTPS snapshot URLs, local commands, or RTSP streams through ffmpeg one-frame commands.
