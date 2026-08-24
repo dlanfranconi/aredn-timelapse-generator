@@ -321,6 +321,15 @@
                 </fieldset>
 
                 <fieldset class="option-group">
+                    <legend><label><input class="option-toggle" id="newCameraPrivacyEnabled" type="checkbox" checked> Show approximate location only (privacy circle)</label></legend>
+                    <div class="option-content">
+                        <label for="newCameraPrivacyRadius">Privacy radius (meters)</label>
+                        <input id="newCameraPrivacyRadius" type="number" min="0" step="50" value="1200">
+                        <p class="field-hint">When enabled, the public map shows a blurred circle instead of this camera's exact location. Uncheck to show the exact pin instead.</p>
+                    </div>
+                </fieldset>
+
+                <fieldset class="option-group">
                     <legend><label><input class="option-toggle" id="newCameraSkyEnabled" type="checkbox" checked> Sky/daylight crop box</label></legend>
                     <div class="option-content">
                         <label for="newCameraSkyArea">Sky crop box</label>
@@ -490,6 +499,6 @@
         <footer id="appFooter" class="app-footer"></footer>
     </div>
 
-    <script src="/static/admin/app.js?v=20260823-login-modal"></script>
+    <script src="/static/admin/app.js?v=20260824-privacy-radius"></script>
 </body>
 </html>

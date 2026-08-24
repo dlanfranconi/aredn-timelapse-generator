@@ -200,6 +200,20 @@ cameras:
 
 Older configs with `public: false` are treated as `visibility: authenticated`.
 
+### Map Location Privacy
+
+By default, a camera's exact coordinates are never shown on the public map. Instead it draws a 1200m-radius circle around a randomly jittered center point, so the camera's real location stays inside the circle without being pinpointed. This is controlled per-camera from the guided camera editor's "Show approximate location only" toggle, or directly in config:
+
+```yaml
+cameras:
+  Ridge-PTZ:
+    lat: 35.2828
+    lon: -120.6596
+    map_privacy_radius_m: 1200   # 0 disables the circle and shows the exact pin
+```
+
+The global defaults (`global.ui.map_privacy_radius_m: 1200`, `global.ui.map_privacy_jitter_m: 500`) apply to any camera that doesn't set its own `map_privacy_radius_m`. Cameras that land at the same jittered location (or are just genuinely close together) still each get their own marker pin, which the map clusters into a numbered bubble -- the privacy circle is a separate, non-interactive backdrop layer underneath.
+
 ## Camera Capture
 
 Use the admin dashboard at `http://HOST:8889/` for normal camera add/edit work. The guided camera form has separate fields for snapshot URL, snapshot credentials, RTSP URLs, PTZ settings, presets, tours, and launch-camera settings. Saving a camera writes `config.yaml`, syncs public UI assets, rebuilds camera metadata, syncs go2rtc streams, and asks the running app to reload.

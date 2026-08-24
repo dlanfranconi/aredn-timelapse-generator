@@ -703,32 +703,34 @@ function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
 
     const coords = L.latLng(lat, lon);
     const radius = Number.isFinite(radiusMeters) ? radiusMeters : 0;
-    let layer;
 
+    // A privacy circle is drawn underneath as a non-interactive backdrop,
+    // but every camera -- exact-location or approximate -- gets a real
+    // marker so it always participates in markerCluster's own clustering.
+    // That's what gives two cameras that land on the same jittered center
+    // (or are just genuinely close together) a numbered cluster bubble
+    // instead of silently overlapping circles with no indication there's
+    // more than one camera there.
     if (radius > 0) {
-        layer = L.circle(coords, {
+        const circle = L.circle(coords, {
             radius,
             color: '#3388ff',
             fillColor: '#3388ff',
             fillOpacity: 0.15,
             weight: 1,
+            interactive: false,
         });
-    } else {
-        layer = L.marker(coords);
+        circleLayerGroup.addLayer(circle);
+        extendBoundsWithLayer(circle);
     }
 
+    const marker = L.marker(coords);
     if (popupHtml) {
-        layer.bindPopup(popupHtml);
+        marker.bindPopup(popupHtml);
     }
-
-    if (layer instanceof L.Marker) {
-        markerCluster.addLayer(layer);
-    } else {
-        circleLayerGroup.addLayer(layer);
-    }
-
-    extendBoundsWithLayer(layer);
-    return layer;
+    markerCluster.addLayer(marker);
+    extendBoundsWithLayer(marker);
+    return marker;
 }
 
 function createPopupContent(camera) {
@@ -744,7 +746,28 @@ function cameraDisplayName(camera) {
     return camera.title || camera.id || '';
 }
 
+let lastCameraMapSignature = '';
+
+function cameraMapSignature(cameras) {
+    return cameras
+        .map(camera => [cameraId(camera), camera.lat, camera.lon, camera.map_radius_m, camera.description].join(':'))
+        .sort()
+        .join('|');
+}
+
 function updateCameraMap(cameras) {
+    // Runs on every ~60s auto-refresh (see updateAllCameras); camera
+    // positions/radii essentially never change between polls, so skip the
+    // full clear-and-rebuild (and the marker-cluster re-index it triggers)
+    // when nothing map-relevant actually did -- that periodic rebuild was
+    // the main source of the map feeling laggy/janky if it landed while
+    // someone was mid-pan or mid-zoom.
+    const signature = cameraMapSignature(cameras);
+    if (signature === lastCameraMapSignature && Object.keys(cameraMarkers).length > 0) {
+        return;
+    }
+    lastCameraMapSignature = signature;
+
     clearCameraLayers();
     cameras.forEach(camera => {
         const lat = camera.lat == null ? NaN : Number(camera.lat);

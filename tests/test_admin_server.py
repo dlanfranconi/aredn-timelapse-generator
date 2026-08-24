@@ -1255,6 +1255,75 @@ class ConfigServerTestCase(unittest.TestCase):
             updated_data_yaml = yaml.safe_load(f)
         self.assertNotIn("description", updated_data_yaml["cameras"]["blank-desc"])
 
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_defaults_to_1200m_privacy_radius(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "privacy-default",
+                    "url": "http://camera/snapshot.jpg",
+                    "require_test": False,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["cameras"]["privacy-default"]["map_privacy_radius_m"],
+            1200,
+        )
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_honors_custom_privacy_radius(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "privacy-custom",
+                    "url": "http://camera/snapshot.jpg",
+                    "require_test": False,
+                    "map_privacy_enabled": True,
+                    "map_privacy_radius_m": 2500,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["cameras"]["privacy-custom"]["map_privacy_radius_m"],
+            2500,
+        )
+
+    @patch("fenetre.admin_server._fetch_snapshot_bytes")
+    def test_add_camera_can_disable_privacy_circle(self, mock_fetch):
+        mock_fetch.return_value = (b"jpeg", "image/jpeg", (1920, 1080))
+        response = self.app.post(
+            "/api/camera/add",
+            data=json.dumps(
+                {
+                    "name": "privacy-disabled",
+                    "url": "http://camera/snapshot.jpg",
+                    "require_test": False,
+                    "map_privacy_enabled": False,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        with open(self.temp_config_file.name, "r") as f:
+            updated_data_yaml = yaml.safe_load(f)
+        self.assertEqual(
+            updated_data_yaml["cameras"]["privacy-disabled"]["map_privacy_radius_m"],
+            0,
+        )
+
     def test_update_camera_reuses_guided_form_and_preserves_ptz_password(self):
         self.test_config_data["cameras"] = {
             "cam1": {

@@ -1314,6 +1314,7 @@ GUIDED_CAMERA_KEYS = {
     "lat",
     "lon",
     "sunrise_sunset",
+    "map_privacy_radius_m",
     "postprocessing",
 }
 
@@ -1580,6 +1581,17 @@ def _build_camera_config(
                 payload.get("sunset_offset_end_minutes") or 45
             ),
         }
+
+    # map_privacy_radius_m of 0 is how cameras_metadata.py already signals
+    # "no privacy circle, show the exact pin" (see build_cameras_metadata);
+    # the enabled/disabled toggle in the guided form is just a friendlier
+    # way to set that than typing 0.
+    if bool(payload.get("map_privacy_enabled", True)):
+        camera["map_privacy_radius_m"] = float(
+            payload.get("map_privacy_radius_m") or 1200
+        )
+    else:
+        camera["map_privacy_radius_m"] = 0
 
     postprocessing = []
     for step in payload.get("postprocessing", []) or []:
