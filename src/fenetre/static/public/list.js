@@ -696,6 +696,16 @@ function focusCameraLayer(layer) {
     }
 }
 
+// Used only for the invisible cluster-counting marker on privacy-circle
+// cameras (see addCameraLayer) -- overrides Leaflet's default div-icon
+// styling (a small white box with a border), which would otherwise show
+// up as a precise-looking dot at the circle's center, exactly what the
+// circle is supposed to avoid.
+const privacyClusterIcon = L.divIcon({
+    className: 'privacy-cluster-marker',
+    iconSize: [0, 0],
+});
+
 function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         return null;
@@ -704,24 +714,37 @@ function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
     const coords = L.latLng(lat, lon);
     const radius = Number.isFinite(radiusMeters) ? radiusMeters : 0;
 
-    // A privacy circle is drawn underneath as a non-interactive backdrop,
-    // but every camera -- exact-location or approximate -- gets a real
-    // marker so it always participates in markerCluster's own clustering.
-    // That's what gives two cameras that land on the same jittered center
-    // (or are just genuinely close together) a numbered cluster bubble
-    // instead of silently overlapping circles with no indication there's
-    // more than one camera there.
     if (radius > 0) {
+        // Privacy camera: the circle itself is the only visible, clickable
+        // element -- no pin at its center, which would otherwise point at
+        // one precise spot and defeat the entire purpose of showing "the
+        // camera is somewhere in this area" instead of an exact location.
+        // A zero-size, non-interactive marker is still added to the
+        // regular marker-cluster group purely so two privacy cameras that
+        // land on the same jittered center (or are just genuinely close
+        // together) still get Leaflet's own numbered cluster bubble --
+        // that bubble is itself a fuzzy "N things here" indicator, not a
+        // precise pin, so it doesn't reintroduce the problem.
         const circle = L.circle(coords, {
             radius,
             color: '#3388ff',
             fillColor: '#3388ff',
             fillOpacity: 0.15,
             weight: 1,
-            interactive: false,
         });
+        if (popupHtml) {
+            circle.bindPopup(popupHtml);
+        }
         circleLayerGroup.addLayer(circle);
         extendBoundsWithLayer(circle);
+
+        markerCluster.addLayer(L.marker(coords, {
+            icon: privacyClusterIcon,
+            interactive: false,
+            keyboard: false,
+        }));
+
+        return circle;
     }
 
     const marker = L.marker(coords);
