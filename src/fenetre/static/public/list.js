@@ -696,58 +696,72 @@ function focusCameraLayer(layer) {
     }
 }
 
-// Used only for the invisible cluster-counting marker on privacy-circle
-// cameras (see addCameraLayer) -- overrides Leaflet's default div-icon
-// styling (a small white box with a border), which would otherwise show
-// up as a precise-looking dot at the circle's center, exactly what the
-// circle is supposed to avoid.
-const privacyClusterIcon = L.divIcon({
-    className: 'privacy-cluster-marker',
-    iconSize: [0, 0],
-});
+// Deterministic string hash -> [0, 1) (FNV-1a plus a final avalanche mix).
+// Not cryptographic, just needs to turn a camera's id into a stable
+// "random" pick so its pin offset (see jitteredPinPosition) doesn't jump
+// around on every reload or refresh -- only the map data actually
+// changing should move anything. A plain multiply-add hash isn't enough
+// here: two similar seeds like "cam-a:dist"/"cam-b:dist" came out barely
+// different, clumping every pin into the same narrow ring around its
+// circle's center instead of scattering them.
+function hashStringToUnitInterval(value) {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x45d9f3b);
+    hash ^= hash >>> 16;
+    return (hash >>> 0) / 4294967296;
+}
 
-function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
+// Picks a point inside the privacy circle, offset from its center by a
+// per-camera-stable pseudo-random angle/distance, so the pin sits
+// somewhere plausible within the circle instead of dead center. The
+// circle's own center is already a server-side jittered stand-in for the
+// camera's true location (see cameras_metadata.py); this is a second,
+// independent, purely-visual offset so the pin itself doesn't read as
+// "here's the precise spot" while still staying inside the circle.
+function jitteredPinPosition(coords, radiusMeters, seed) {
+    const angle = hashStringToUnitInterval(`${seed}:angle`) * 2 * Math.PI;
+    // sqrt() so points are distributed uniformly over the circle's area,
+    // not bunched toward the center.
+    const distanceFraction = Math.sqrt(hashStringToUnitInterval(`${seed}:dist`));
+    // Keep a margin so the pin never lands right on the circle's edge.
+    const distanceMeters = distanceFraction * radiusMeters * 0.8;
+
+    const metersPerDegLat = 111320;
+    const metersPerDegLon = 111320 * Math.cos(coords.lat * Math.PI / 180) || 111320;
+    const dLat = (distanceMeters * Math.sin(angle)) / metersPerDegLat;
+    const dLon = (distanceMeters * Math.cos(angle)) / metersPerDegLon;
+    return L.latLng(coords.lat + dLat, coords.lng + dLon);
+}
+
+function addCameraLayer(lat, lon, radiusMeters, popupHtml, seed) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         return null;
     }
 
     const coords = L.latLng(lat, lon);
     const radius = Number.isFinite(radiusMeters) ? radiusMeters : 0;
+    let markerCoords = coords;
 
     if (radius > 0) {
-        // Privacy camera: the circle itself is the only visible, clickable
-        // element -- no pin at its center, which would otherwise point at
-        // one precise spot and defeat the entire purpose of showing "the
-        // camera is somewhere in this area" instead of an exact location.
-        // A zero-size, non-interactive marker is still added to the
-        // regular marker-cluster group purely so two privacy cameras that
-        // land on the same jittered center (or are just genuinely close
-        // together) still get Leaflet's own numbered cluster bubble --
-        // that bubble is itself a fuzzy "N things here" indicator, not a
-        // precise pin, so it doesn't reintroduce the problem.
         const circle = L.circle(coords, {
             radius,
             color: '#3388ff',
             fillColor: '#3388ff',
             fillOpacity: 0.15,
             weight: 1,
+            interactive: false,
         });
-        if (popupHtml) {
-            circle.bindPopup(popupHtml);
-        }
         circleLayerGroup.addLayer(circle);
         extendBoundsWithLayer(circle);
-
-        markerCluster.addLayer(L.marker(coords, {
-            icon: privacyClusterIcon,
-            interactive: false,
-            keyboard: false,
-        }));
-
-        return circle;
+        markerCoords = jitteredPinPosition(coords, radius, seed || `${lat},${lon}`);
     }
 
-    const marker = L.marker(coords);
+    const marker = L.marker(markerCoords);
     if (popupHtml) {
         marker.bindPopup(popupHtml);
     }
@@ -799,7 +813,8 @@ function updateCameraMap(cameras) {
             lat,
             lon,
             Number(camera.map_radius_m || 0),
-            createPopupContent(camera)
+            createPopupContent(camera),
+            cameraId(camera)
         );
         if (layer) {
             cameraMarkers[cameraId(camera)] = layer;

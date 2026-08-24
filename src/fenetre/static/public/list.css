@@ -1187,11 +1187,3 @@ body.dark-mode .camera-item.remote-camera .remote-open-link:hover {
     font-size: 0.75em;
     opacity: 0.6;
 }
-
-/* Overrides Leaflet's default div-icon look (a small white box with a
-   border) for the invisible cluster-counting marker on privacy-circle
-   cameras -- see addCameraLayer in list.js. It must render as nothing. */
-.privacy-cluster-marker {
-    background: transparent;
-    border: none;
-}
