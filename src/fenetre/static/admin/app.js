@@ -1875,6 +1875,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraLat', 35.2828);
         setInputValue('newCameraLon', -120.6596);
         setInputValue('newCameraSunWindow', 45);
+        setCheckboxValue('newCameraPrivacyEnabled', true);
+        setInputValue('newCameraPrivacyRadius', 1200);
         setCheckboxValue('newCameraSkyEnabled', true);
         setInputValue('newCameraSkyArea', '0,0,1,0.35');
         setCheckboxValue('newCameraStorageEnabled', true);
@@ -1989,6 +1991,9 @@ document.addEventListener('DOMContentLoaded', () => {
         setInputValue('newCameraLat', camera.lat ?? 35.2828);
         setInputValue('newCameraLon', camera.lon ?? -120.6596);
         setInputValue('newCameraSunWindow', inferSunWindow(sunConfig));
+
+        setCheckboxValue('newCameraPrivacyEnabled', (camera.map_privacy_radius_m ?? 1200) > 0);
+        setInputValue('newCameraPrivacyRadius', camera.map_privacy_radius_m || 1200);
 
         setCheckboxValue('newCameraSkyEnabled', camera.sky_area !== undefined);
         setInputValue('newCameraSkyArea', camera.sky_area || '0,0,1,0.35');
@@ -2567,6 +2572,8 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.sunset_offset_start_minutes = windowMinutes;
             payload.sunset_offset_end_minutes = windowMinutes;
         }
+        payload.map_privacy_enabled = checked('newCameraPrivacyEnabled');
+        payload.map_privacy_radius_m = numberValue('newCameraPrivacyRadius', 1200);
         if (checked('newCameraSkyEnabled')) {
             payload.sky_area_enabled = true;
             payload.sky_area = document.getElementById('newCameraSkyArea').value.trim() || '0,0,1,0.35';

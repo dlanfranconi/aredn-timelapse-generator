@@ -425,7 +425,7 @@ def _validate_global(cfg: Dict, errors) -> Dict:
         ui_cfg.get("map_privacy_radius_m"),
         "global.ui.map_privacy_radius_m",
         errors,
-        default=1000.0,
+        default=1200.0,
         min_value=0.0,
     )
     ui_out["map_privacy_jitter_m"] = _float(

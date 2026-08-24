@@ -4,6 +4,8 @@ Fenetre is a self-hosted camera server for AREDN and other IP-camera networks. I
 
 The current deployment path is Docker or Portainer with persistent host-mounted config, data, and logs. The legacy GoPro and Raspberry Pi capture backends are still available as optional extras, but they are no longer the primary documented setup.
 
+This project started as a fork of [matfra/fenetre.cam](https://github.com/matfra/fenetre.cam) and still shares its core architecture; thanks to Mathieu and the fenetre.cam community for the original project.
+
 ## What It Does
 
 - Captures still images from HTTP/HTTPS snapshot URLs, local commands, or RTSP streams through ffmpeg one-frame commands.
@@ -199,6 +201,20 @@ cameras:
 - `hidden`: kept in config/admin but removed from the main camera page.
 
 Older configs with `public: false` are treated as `visibility: authenticated`.
+
+### Map Location Privacy
+
+By default, a camera's exact coordinates are never shown on the public map. Instead it draws a 1200m-radius circle around a randomly jittered center point, so the camera's real location stays inside the circle without being pinpointed. This is controlled per-camera from the guided camera editor's "Show approximate location only" toggle, or directly in config:
+
+```yaml
+cameras:
+  Ridge-PTZ:
+    lat: 35.2828
+    lon: -120.6596
+    map_privacy_radius_m: 1200   # 0 disables the circle and shows the exact pin
+```
+
+The global defaults (`global.ui.map_privacy_radius_m: 1200`, `global.ui.map_privacy_jitter_m: 500`) apply to any camera that doesn't set its own `map_privacy_radius_m`. Cameras that land at the same jittered location (or are just genuinely close together) still each get their own marker pin, which the map clusters into a numbered bubble -- the privacy circle is a separate, non-interactive backdrop layer underneath.
 
 ## Camera Capture
 

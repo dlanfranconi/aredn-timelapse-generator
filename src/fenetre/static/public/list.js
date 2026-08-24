@@ -696,39 +696,78 @@ function focusCameraLayer(layer) {
     }
 }
 
-function addCameraLayer(lat, lon, radiusMeters, popupHtml) {
+// Deterministic string hash -> [0, 1) (FNV-1a plus a final avalanche mix).
+// Not cryptographic, just needs to turn a camera's id into a stable
+// "random" pick so its pin offset (see jitteredPinPosition) doesn't jump
+// around on every reload or refresh -- only the map data actually
+// changing should move anything. A plain multiply-add hash isn't enough
+// here: two similar seeds like "cam-a:dist"/"cam-b:dist" came out barely
+// different, clumping every pin into the same narrow ring around its
+// circle's center instead of scattering them.
+function hashStringToUnitInterval(value) {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    hash ^= hash >>> 16;
+    hash = Math.imul(hash, 0x45d9f3b);
+    hash ^= hash >>> 16;
+    return (hash >>> 0) / 4294967296;
+}
+
+// Picks a point inside the privacy circle, offset from its center by a
+// per-camera-stable pseudo-random angle/distance, so the pin sits
+// somewhere plausible within the circle instead of dead center. The
+// circle's own center is already a server-side jittered stand-in for the
+// camera's true location (see cameras_metadata.py); this is a second,
+// independent, purely-visual offset so the pin itself doesn't read as
+// "here's the precise spot" while still staying inside the circle.
+function jitteredPinPosition(coords, radiusMeters, seed) {
+    const angle = hashStringToUnitInterval(`${seed}:angle`) * 2 * Math.PI;
+    // sqrt() so points are distributed uniformly over the circle's area,
+    // not bunched toward the center.
+    const distanceFraction = Math.sqrt(hashStringToUnitInterval(`${seed}:dist`));
+    // Keep a margin so the pin never lands right on the circle's edge.
+    const distanceMeters = distanceFraction * radiusMeters * 0.8;
+
+    const metersPerDegLat = 111320;
+    const metersPerDegLon = 111320 * Math.cos(coords.lat * Math.PI / 180) || 111320;
+    const dLat = (distanceMeters * Math.sin(angle)) / metersPerDegLat;
+    const dLon = (distanceMeters * Math.cos(angle)) / metersPerDegLon;
+    return L.latLng(coords.lat + dLat, coords.lng + dLon);
+}
+
+function addCameraLayer(lat, lon, radiusMeters, popupHtml, seed) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         return null;
     }
 
     const coords = L.latLng(lat, lon);
     const radius = Number.isFinite(radiusMeters) ? radiusMeters : 0;
-    let layer;
+    let markerCoords = coords;
 
     if (radius > 0) {
-        layer = L.circle(coords, {
+        const circle = L.circle(coords, {
             radius,
             color: '#3388ff',
             fillColor: '#3388ff',
             fillOpacity: 0.15,
             weight: 1,
+            interactive: false,
         });
-    } else {
-        layer = L.marker(coords);
+        circleLayerGroup.addLayer(circle);
+        extendBoundsWithLayer(circle);
+        markerCoords = jitteredPinPosition(coords, radius, seed || `${lat},${lon}`);
     }
 
+    const marker = L.marker(markerCoords);
     if (popupHtml) {
-        layer.bindPopup(popupHtml);
+        marker.bindPopup(popupHtml);
     }
-
-    if (layer instanceof L.Marker) {
-        markerCluster.addLayer(layer);
-    } else {
-        circleLayerGroup.addLayer(layer);
-    }
-
-    extendBoundsWithLayer(layer);
-    return layer;
+    markerCluster.addLayer(marker);
+    extendBoundsWithLayer(marker);
+    return marker;
 }
 
 function createPopupContent(camera) {
@@ -744,7 +783,28 @@ function cameraDisplayName(camera) {
     return camera.title || camera.id || '';
 }
 
+let lastCameraMapSignature = '';
+
+function cameraMapSignature(cameras) {
+    return cameras
+        .map(camera => [cameraId(camera), camera.lat, camera.lon, camera.map_radius_m, camera.description].join(':'))
+        .sort()
+        .join('|');
+}
+
 function updateCameraMap(cameras) {
+    // Runs on every ~60s auto-refresh (see updateAllCameras); camera
+    // positions/radii essentially never change between polls, so skip the
+    // full clear-and-rebuild (and the marker-cluster re-index it triggers)
+    // when nothing map-relevant actually did -- that periodic rebuild was
+    // the main source of the map feeling laggy/janky if it landed while
+    // someone was mid-pan or mid-zoom.
+    const signature = cameraMapSignature(cameras);
+    if (signature === lastCameraMapSignature && Object.keys(cameraMarkers).length > 0) {
+        return;
+    }
+    lastCameraMapSignature = signature;
+
     clearCameraLayers();
     cameras.forEach(camera => {
         const lat = camera.lat == null ? NaN : Number(camera.lat);
@@ -753,7 +813,8 @@ function updateCameraMap(cameras) {
             lat,
             lon,
             Number(camera.map_radius_m || 0),
-            createPopupContent(camera)
+            createPopupContent(camera),
+            cameraId(camera)
         );
         if (layer) {
             cameraMarkers[cameraId(camera)] = layer;
