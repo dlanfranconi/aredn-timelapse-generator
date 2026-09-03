@@ -146,18 +146,26 @@
                 return;
             }
 
+            // Browsers with native HLS support (Safari, and any WebKit-based
+            // browser on iOS, including Firefox) play the original HTTPS
+            // playlist URL directly. They do not reliably accept an
+            // in-memory blob: playlist, which is what caused native playback
+            // to silently fail with a crossed-out play icon.
+            if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                videoElement.src = new URL(src, window.location.href).href;
+                videoElement.addEventListener('loadedmetadata', seekToStartAndPlay, { once: true });
+                videoElement.addEventListener('canplay', () => {
+                    setStatus('Playing with native HLS support.');
+                }, { once: true });
+                setStatus('Loading…');
+                return;
+            }
+
             let snapshotUrl;
             try {
                 snapshotUrl = await buildSnapshotPlaylistUrl(src);
             } catch (error) {
                 setStatus(`Could not build playback snapshot: ${error.message || error}`, true);
-                return;
-            }
-
-            if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-                videoElement.src = snapshotUrl;
-                videoElement.addEventListener('loadedmetadata', seekToStartAndPlay, { once: true });
-                setStatus('Playing playlist snapshot with native HLS support.');
                 return;
             }
 
@@ -176,6 +184,7 @@
                         setStatus(`Playback error: ${data.details || 'unknown error'}`, true);
                     }
                 });
+                setStatus('Loading…');
                 return;
             }
 

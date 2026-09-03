@@ -1681,8 +1681,11 @@ function updateCamera(camera, cameraData) {
         const destination = selectedOption.dataset.format === 'm3u8'
             ? buildTimelapsePlayerUrl(selectedOption.value, title)
             : selectedOption.value;
-        window.open(destination, '_blank');
         timelapseArchiveSelect.value = '';
+        // Use same-tab navigation instead of window.open(): iOS Safari/Firefox
+        // treat a new-tab request from a <select> change event as a popup and
+        // silently block it.
+        window.location.assign(destination);
     };
 
     if (!timelapseEnabled) {
