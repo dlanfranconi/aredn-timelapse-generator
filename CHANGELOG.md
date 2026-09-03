@@ -14,9 +14,11 @@ All notable changes to aredn-timelapse-server are documented in this file.
   reads "Loading…" until playback actually starts (`canplay`/`loadedmetadata`)
   instead of claiming "Playing…" prematurely. (#3)
 - iOS Safari/Firefox: selecting a date from a camera's "Previous Timelapses"
-  dropdown now navigates in the same tab (`window.location.assign`) instead
-  of calling `window.open(..., '_blank')`, which iOS blocks as a popup when
-  triggered from a `<select>` change event. (#4)
+  dropdown now reveals a real "Open timelapse" link (`<a target="_blank">`)
+  instead of navigating via script. iOS ignores both `window.open()` and
+  `window.location.assign()` when triggered from a `<select>` change event,
+  so navigation now happens on the link's own tap, which iOS recognizes as
+  user-initiated. (#4)
 
 ## [2.1.0] - 2026-08-24
 
