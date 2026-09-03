@@ -2,6 +2,24 @@
 
 All notable changes to aredn-timelapse-server are documented in this file.
 
+## [2.1.1] - 2026-09-03
+
+### Fixed
+
+- iOS Safari/Firefox: the timelapse player's native-HLS branch now sets the
+  video source to the original `.m3u8` playlist URL instead of an in-memory
+  `blob:` snapshot, which iOS's native HLS player silently refused to play
+  (showed a crossed-out play icon with no error). The blob-snapshot approach
+  is kept for the hls.js (desktop) branch. The player's status text now
+  reads "Loading…" until playback actually starts (`canplay`/`loadedmetadata`)
+  instead of claiming "Playing…" prematurely. (#3)
+- iOS Safari/Firefox: selecting a date from a camera's "Previous Timelapses"
+  dropdown now reveals a real "Open timelapse" link (`<a target="_blank">`)
+  instead of navigating via script. iOS ignores both `window.open()` and
+  `window.location.assign()` when triggered from a `<select>` change event,
+  so navigation now happens on the link's own tap, which iOS recognizes as
+  user-initiated. (#4)
+
 ## [2.1.0] - 2026-08-24
 
 ### Added
