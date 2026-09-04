@@ -2,6 +2,25 @@
 
 All notable changes to aredn-timelapse-server are documented in this file.
 
+## [2.1.2] - 2026-09-03
+
+### Changed
+
+- The "Previous Timelapses" dropdown once again opens the selected date
+  with a single tap/selection, on every device -- no separate "Open
+  timelapse" link to tap afterward. It now navigates in the same tab
+  (`window.location.assign()`) instead of a new one: iOS (Safari, and
+  every other iOS browser, since Apple requires them all to use WebKit)
+  does not treat a `<select>` change event as a strong enough user
+  gesture to authorize `window.open()`, so a new-tab request from there
+  is silently blocked no matter what triggers it. Same-tab navigation
+  from that event has no such restriction and is the classic
+  cross-browser "jump menu" pattern, so a single tap now works
+  reliably everywhere, iOS included. (The 2.1.1 changelog entry below
+  blamed this on `location.assign()` itself being ignored on iOS; that
+  was actually a stale-cache artifact -- see 2.1.1's third fix -- not a
+  real restriction, hence this revert to the simpler one-tap flow.)
+
 ## [2.1.1] - 2026-09-03
 
 ### Fixed

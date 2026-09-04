@@ -930,15 +930,12 @@ function configureTodayTimelapseLink(link, camera, dateString, cameraData) {
     link.style.display = 'inline-block';
 }
 
-function populateTimelapseArchive(select, timelapses, todayStr, openLink) {
+function populateTimelapseArchive(select, timelapses, todayStr) {
     const archiveItems = timelapses
         .filter(item => item.date !== todayStr)
         .filter(item => item.type === 'daily')
         .filter(item => item.format !== 'm3u8' && item.url);
     select.innerHTML = '';
-    if (openLink) {
-        openLink.style.display = 'none';
-    }
 
     if (archiveItems.length === 0) {
         select.style.display = 'none';
@@ -963,17 +960,14 @@ function populateTimelapseArchive(select, timelapses, todayStr, openLink) {
     select.style.display = 'inline-block';
 }
 
-async function updateTimelapseArchiveSelect(camera, select, todayStr, openLink) {
+async function updateTimelapseArchiveSelect(camera, select, todayStr) {
     const id = cameraId(camera);
     try {
         const timelapseData = await fetchCameraTimelapses(id);
         const timelapses = timelapseData.timelapses || [];
-        populateTimelapseArchive(select, timelapses, todayStr, openLink);
+        populateTimelapseArchive(select, timelapses, todayStr);
     } catch (error) {
         select.style.display = 'none';
-        if (openLink) {
-            openLink.style.display = 'none';
-        }
         console.error(`Failed to load timelapse archive for ${id}:`, error);
     }
 }
@@ -1143,7 +1137,6 @@ function createCameraListItem(camera) {
                 <a class="link-today" href="#" target="_blank" rel="noopener noreferrer">Today's Pictures</a>
                 <a class="link-timelapse-today" href="#" target="_blank" rel="noopener noreferrer">Today's Timelapse</a>
                 <select class="select-timelapse-archive" aria-label="Timelapse archive"></select>
-                <a class="link-timelapse-archive-open" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open timelapse</a>
                 <a class="link-history" href="#" target="_blank" rel="noopener noreferrer">History</a>
             </div>
             <div class="ptz-presets" hidden>
@@ -1663,7 +1656,6 @@ function updateCamera(camera, cameraData) {
     const detailsImg = listItem.querySelector('.camera-details img');
     const linkTimelapseToday = listItem.querySelector('.link-timelapse-today');
     const timelapseArchiveSelect = listItem.querySelector('.select-timelapse-archive');
-    const timelapseArchiveOpenLink = listItem.querySelector('.link-timelapse-archive-open');
     const today = new Date();
     const todayStr = formatDate(today);
     const timelapseEnabled = camera.timelapse_enabled !== false;
@@ -1680,38 +1672,32 @@ function updateCamera(camera, cameraData) {
         cameraDescription.style.display = 'none';
     }
     configurePtzPresets(camera, listItem);
-    // Selecting a date only points a real <a target="_blank"> link at the
-    // video and reveals it; the user then taps that link to open it. iOS
-    // Safari/Firefox block window.open() (and largely ignore
-    // location.assign()) when it's invoked from a <select> change handler
-    // rather than a direct tap, so navigation has to happen from the link's
-    // own click, which iOS recognizes as user-initiated.
+    // Navigate in the same tab as soon as a date is picked, rather than
+    // opening a new tab: iOS Safari (and every other iOS browser -- Apple
+    // requires them all to use WebKit) does not treat a <select> change
+    // event as a strong enough user gesture to authorize window.open(), so
+    // a new-tab request from here is silently blocked there. Same-tab
+    // navigation via location.assign() has no such restriction and is the
+    // classic cross-browser "jump menu" pattern, so this works everywhere,
+    // iOS included, with a single tap and no extra button.
     timelapseArchiveSelect.onchange = () => {
         const selectedOption = timelapseArchiveSelect.selectedOptions[0];
         if (!selectedOption || !selectedOption.value) {
-            timelapseArchiveOpenLink.style.display = 'none';
             return;
         }
         const title = `${displayName} ${selectedOption.dataset.date} Timelapse`;
         const destination = selectedOption.dataset.format === 'm3u8'
             ? buildTimelapsePlayerUrl(selectedOption.value, title)
             : selectedOption.value;
-        timelapseArchiveOpenLink.href = destination;
-        timelapseArchiveOpenLink.textContent = `Open ${selectedOption.dataset.date} timelapse`;
-        timelapseArchiveOpenLink.style.display = 'inline-block';
-    };
-    timelapseArchiveOpenLink.onclick = () => {
-        timelapseArchiveSelect.value = '';
-        timelapseArchiveOpenLink.style.display = 'none';
+        window.location.assign(destination);
     };
 
     if (!timelapseEnabled) {
         linkTimelapseToday.style.display = 'none';
         timelapseArchiveSelect.style.display = 'none';
-        timelapseArchiveOpenLink.style.display = 'none';
     } else {
         configureTodayTimelapseLink(linkTimelapseToday, camera, todayStr, cameraData);
-        updateTimelapseArchiveSelect(camera, timelapseArchiveSelect, todayStr, timelapseArchiveOpenLink);
+        updateTimelapseArchiveSelect(camera, timelapseArchiveSelect, todayStr);
     }
 
     refreshCameraMetadata(camera, listItem)
